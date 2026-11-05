@@ -5,7 +5,7 @@ import SweatKitAnalysis
 import SweatKitRouteMatching
 import SweatKitTrackCleanup
 
-public struct RouteEffort: Sendable, Identifiable {
+public struct RouteEffort: Codable, Sendable, Identifiable {
     public let activity: ActivityRecord
     public let alignment: Alignment
     public let metrics: ActivityMetrics?
@@ -13,9 +13,10 @@ public struct RouteEffort: Sendable, Identifiable {
     public var movingTime: Double? { alignment.sectionTimes(clock: .moving).value?.duration }
     public var elapsedTime: Double? { alignment.sectionTimes(clock: .elapsed).value?.duration }
 }
-public struct LibraryRoute: Sendable, Identifiable {
+public struct LibraryRoute: Codable, Sendable, Identifiable {
     public let id: SourceIdentity
     public var name: String
+    public var region: String = "Nearby"
     public var referenceID: SourceIdentity
     public var reference: RouteReference
     public var efforts: [RouteEffort]
@@ -52,17 +53,22 @@ public struct LibraryRoute: Sendable, Identifiable {
         return 1 + ranked.filter { $0.movingTime! < time }.count
     }
 }
-public struct RouteReview: Sendable, Identifiable {
+public struct RouteReview: Codable, Sendable, Identifiable {
     public let routeID: SourceIdentity
+    public var region: String = "Nearby"
     public let routeName: String
     public let activity: ActivityRecord
     public let measures: AlignmentMeasures
     public var id: String { "\(routeID)-\(activity.id!)" }
     public var explanation: String {
-        "Matches \(routeName), but needs review: a stretch runs \(Int(abs(measures.worstSideOffset))) m to the side; \(Int(measures.proximity * 100))% within 30 m; \(Int(measures.coverage * 100))% coverage. Check for parallel roads, detours or another matching route."
+        let failed = measures.failedMeasures()
+        if failed.contains(.sideOffset) { return "Part of this outing follows a nearby parallel line. Compare the tracks before including it." }
+        if failed.contains(.lengthRatio) { return "The distance differs from the usual course. Check for a detour." }
+        if failed.contains(.proximity) { return "Some of this outing follows a different path." }
+        return "This outing matches more than one route. Choose where it belongs."
     }
 }
-public struct RouteCatalog: Sendable {
+public struct RouteCatalog: Codable, Sendable {
     public var routes: [LibraryRoute]
     public var reviews: [RouteReview]
     public init(routes: [LibraryRoute], reviews: [RouteReview]) { self.routes = routes; self.reviews = reviews }
@@ -75,7 +81,26 @@ struct RouteInput: Sendable {
     let row: ActivityRecord
     let track: CleanedTrack
     let metrics: ActivityMetrics?
+    var locality: String? = nil
 }
+/// Disposable derived data, kept beside local metadata and excluded from backup.
+struct RouteCatalogCache: Codable, Sendable {
+    let key: ContentHash
+    let catalog: RouteCatalog
+}
+
+private struct RouteCacheInputs: Encodable {
+    let format: Int
+    let sources: [SourceRecord]
+    let rows: [ActivityRecord]
+    let decisions: [RouteDecision]
+    let decoder: Int
+    let streamRules: Int
+    let algorithms: Int
+    let matching: Int
+    let localities: [String: String]
+}
+
 struct RouteSeed: Codable {
     var id: SourceIdentity
     var members: [SourceIdentity]
@@ -84,6 +109,8 @@ struct RouteSeed: Codable {
 extension ActivityLibrary {
     private var routeDecisionURL: URL { store.root.appending(path: "route-decisions-v1.json") }
     private var routeSeedURL: URL { store.root.appending(path: "LocalMetadata/route-groups-v1.json") }
+
+    private var routeCacheURL: URL { store.root.appending(path: "LocalMetadata/route-catalog-v1.json") }
 
     static let routeCloudNamespace = "sweatkit.route-decisions.v1"
 
@@ -128,9 +155,9 @@ extension ActivityLibrary {
         let sorted = records.values.sorted { $0.date == $1.date ? $0.id.uuidString < $1.id.uuidString : $0.date < $1.date }
         try JSONEncoder().encode(RouteDecisionExport(decisions: sorted)).write(to: routeDecisionURL, options: .atomic)
     }
-    public func decideRoute(_ route: SourceIdentity, value: RouteDecision.Value) async throws {
+    public func decideRoute(_ route: SourceIdentity, value: RouteDecision.Value, includeOlderHistory: Bool = false) async throws {
         var additional: [RouteDecision] = []
-        let current = try await routes()
+        let current = try await routes(includeOlderHistory: includeOlderHistory)
         let anchors = current.routes.first(where: { $0.id == route })?.efforts.map(\.id)
         if case .merge(let source) = value {
             let catalog = current
@@ -156,40 +183,84 @@ extension ActivityLibrary {
     }
 
     /// Complete library query, independent of feed pagination. Geometry is rebuilt from current
-    /// primary revisions, never exported. Hidden/deleted activities cannot participate.
-    public func routes() async throws -> RouteCatalog {
+    /// primary revisions on cache misses, never exported. Hidden/deleted activities cannot participate.
+    public func routes(includeOlderHistory: Bool = false, now: Date = Date()) async throws -> RouteCatalog {
+        let cutoff = Calendar(identifier: .gregorian).date(byAdding: .year, value: -2, to: now)!
         try Task.checkCancellation()
         let sourceSnapshot = try await store.sourceRecords()
         var rows: [ActivityRecord] = []
         var cursor: FeedCursor?
         repeat {
             let page = try await feed(limit: 256, after: cursor)
-            rows += page.activities.filter { !$0.isHidden && $0.sport.hasFullSupport && (!$0.isIndoor || $0.isVirtual) }
+            rows += page.activities.filter { !$0.isHidden && (includeOlderHistory || $0.start >= cutoff) && $0.start <= now && $0.sport.hasFullSupport && (!$0.isIndoor || $0.isVirtual) }
             cursor = page.next
         } while cursor != nil
+        rows.sort { $0.start == $1.start ? $0.id! < $1.id! : $0.start < $1.start }
+        let decisions = try routeDecisions().decisions
+        let sourcesByID = Dictionary(uniqueKeysWithValues: sourceSnapshot.map { ($0.identity, $0) })
+        var localities: [String: String] = [:]
+        for row in rows {
+            guard let source = sourcesByID[row.primary] else { continue }
+            if let name = ActivityLocalityCache.entry(root: store.root, revision: source.currentRevision)?.name {
+                localities[source.currentRevision.hex] = name
+            }
+        }
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        let key = ContentHash(of: try encoder.encode(RouteCacheInputs(
+            format: 2, sources: sourceSnapshot.sorted { $0.identity < $1.identity },
+            rows: rows, decisions: decisions, decoder: versions.decoder,
+            streamRules: versions.streamRules, algorithms: versions.combinedAlgorithmVersion,
+            matching: SweatKitRouteMatching.algorithmVersion, localities: localities)))
+        if routeCatalogCache == nil,
+           let data = try? Data(contentsOf: routeCacheURL),
+           let saved = try? JSONDecoder().decode(RouteCatalogCache.self, from: data) {
+            routeCatalogCache = saved
+        }
+        if let cached = routeCatalogCache, cached.key == key {
+            // Metrics can change after a profile correction without changing geometry.
+            var catalog = cached.catalog
+            for r in catalog.routes.indices {
+                for e in catalog.routes[r].efforts.indices {
+                    let effort = catalog.routes[r].efforts[e]
+                    catalog.routes[r].efforts[e] = RouteEffort(activity: effort.activity,
+                        alignment: effort.alignment, metrics: try await metrics(for: effort.id))
+                }
+            }
+            try Task.checkCancellation()
+            guard try await store.sourceRecords() == sourceSnapshot,
+                  try routeDecisions().decisions == decisions else { return try await routes(includeOlderHistory: includeOlderHistory, now: now) }
+            for row in rows {
+                guard try await activity(row.id!) == row else { return try await routes(includeOlderHistory: includeOlderHistory, now: now) }
+            }
+            return catalog
+        }
         var inputs: [RouteInput] = []
-        for row in rows.sorted(by: { $0.start == $1.start ? $0.id! < $1.id! : $0.start < $1.start }) {
+        for row in rows {
             try Task.checkCancellation()
             let stream = try await analysisStream(for: row.id!)
             let track = await Self.routeTrack(stream, row: row)
             guard RouteReference(track: track) != nil else { continue }
-            inputs.append(RouteInput(row: row, track: track, metrics: try await metrics(for: row.id!)))
+            inputs.append(RouteInput(row: row, track: track, metrics: try await metrics(for: row.id!), locality: sourcesByID[row.primary].flatMap { localities[$0.currentRevision.hex] }))
         }
-        let decisions = try routeDecisions().decisions
         let seeds = FileManager.default.fileExists(atPath: routeSeedURL.path)
             ? try JSONDecoder().decode([RouteSeed].self, from: Data(contentsOf: routeSeedURL)) : []
         let result = await Self.assembleRoutes(inputs, seeds: seeds, decisions: decisions)
         try Task.checkCancellation()
-        guard try await store.sourceRecords() == sourceSnapshot else { return try await routes() }
+        guard try await store.sourceRecords() == sourceSnapshot else { return try await routes(includeOlderHistory: includeOlderHistory, now: now) }
         for input in inputs {
-            guard try await activity(input.row.id!) == input.row else { return try await routes() }
+            guard try await activity(input.row.id!) == input.row else { return try await routes(includeOlderHistory: includeOlderHistory, now: now) }
         }
-        guard try routeDecisions().decisions == decisions else { return try await routes() }
+        guard try routeDecisions().decisions == decisions else { return try await routes(includeOlderHistory: includeOlderHistory, now: now) }
         // Membership hints preserve route IDs when the first effort is hidden. They carry no geometry.
         // Retain dormant groups too, so restoring an effort restores its route's name and decisions.
         var saved = Dictionary(uniqueKeysWithValues: seeds.map { ($0.id, $0) })
         for route in result.routes { saved[route.id] = RouteSeed(id: route.id, members: route.efforts.map(\.id)) }
         try JSONEncoder().encode(saved.values.sorted { $0.id < $1.id }).write(to: routeSeedURL, options: .atomic)
+        let cached = RouteCatalogCache(key: key, catalog: result)
+        routeCatalogCache = cached
+        // Cache failures must not prevent browsing; missing/corrupt data is rebuilt.
+        if let data = try? encoder.encode(cached) { try? data.write(to: routeCacheURL, options: .atomic) }
         return result
     }
 
@@ -211,7 +282,7 @@ extension ActivityLibrary {
         }, sportFamily: row.sport.family, pausePositionsAreReliable: clean.pausePositionsAreReliable)
     }
 
-    nonisolated static func assembleRoutes(_ inputs: [RouteInput], seeds: [RouteSeed], decisions: [RouteDecision]) async -> RouteCatalog {
+    nonisolated static func assembleRoutes(_ inputs: [RouteInput], seeds: [RouteSeed], decisions: [RouteDecision], minimumOutings: Int = 5) async -> RouteCatalog {
         // A paged feed may overlap while an import changes ordering. Never count an effort twice.
         var uniqueInputs: [SourceIdentity: RouteInput] = [:]
         for input in inputs { uniqueInputs[input.row.id!] = input }
@@ -240,8 +311,8 @@ extension ActivityLibrary {
             let reference = RouteReference(track: referenceInput.track)!
             let name = decisions.compactMap { d -> String? in
                 if d.route == id, case .name(let name) = d.value { return name }; return nil
-            }.last ?? referenceInput.row.title
-            return LibraryRoute(id: id, name: name, referenceID: referenceInput.row.id!, reference: reference, efforts: [])
+            }.last ?? routeDescription(referenceInput)
+            return LibraryRoute(id: id, name: name, region: routeRegion(referenceInput), referenceID: referenceInput.row.id!, reference: reference, efforts: [])
         }
         var anchoredSeeds = Dictionary(uniqueKeysWithValues: seeds.map { ($0.id, $0) })
         for decision in decisions {
@@ -274,9 +345,10 @@ extension ActivityLibrary {
             if let selected {
                 let alignment = RouteAlignment.align(input.track, to: groups[selected].reference.line)
                 groups[selected].efforts.append(RouteEffort(activity: input.row, alignment: alignment, metrics: input.metrics))
-            } else if !allowed.isEmpty {
-                reviews += allowed.map { RouteReview(routeID: groups[$0.routeIndex].id, routeName: groups[$0.routeIndex].name, activity: input.row, measures: $0.measures) }
             } else if !groups.contains(where: { $0.id == id }) {
+                // A borderline match must not prevent subsequent consistent outings
+                // from establishing their own reference. An early noisy recording
+                // otherwise sends every later outing to review forever.
                 var group = makeGroup(input, id: id)
                 let alignment = RouteAlignment.align(input.track, to: group.reference.line)
                 group.efforts = [RouteEffort(activity: input.row, alignment: alignment, metrics: input.metrics)]
@@ -302,7 +374,32 @@ extension ActivityLibrary {
                 groups[sourceIndex].efforts = []
             }
         }
-        return RouteCatalog(routes: groups.filter { $0.efforts.count >= 2 }.sorted {
+        // Older reference recordings may not have a cached place name yet.
+        // Reuse a known locality from another confirmed outing on the same route.
+        for index in groups.indices {
+            guard var reference = byID[groups[index].referenceID], reference.locality == nil else { continue }
+            reference.locality = groups[index].efforts.compactMap { byID[$0.id]?.locality }.first
+            groups[index].region = routeRegion(reference)
+            let explicitlyNamed = decisions.contains { decision in
+                guard decision.route == groups[index].id else { return false }
+                if case .name = decision.value { return true }
+                return false
+            }
+            if !explicitlyNamed { groups[index].name = routeDescription(reference) }
+        }
+        let visible = groups.filter { $0.efforts.count >= minimumOutings }
+        let confirmedIDs = Set(visible.flatMap { $0.efforts.map(\.id) })
+        for input in orderedInputs where !confirmedIDs.contains(input.row.id!) {
+            let matches = RouteMatcher.match(input.track, against: visible.map(\.reference))
+            reviews += matches.filter {
+                $0.outcome != .reject && !excluded(input.row.id!, visible[$0.routeIndex].id)
+            }.map {
+                let route = visible[$0.routeIndex]
+                return RouteReview(routeID: route.id, region: route.region, routeName: route.name,
+                    activity: input.row, measures: $0.measures)
+            }
+        }
+        return RouteCatalog(routes: visible.sorted {
             ($0.efforts.map(\.activity.start).max() ?? .distantPast) > ($1.efforts.map(\.activity.start).max() ?? .distantPast)
         }, reviews: reviews)
     }

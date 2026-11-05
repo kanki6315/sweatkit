@@ -56,8 +56,11 @@ targets:
         ITSAppUsesNonExemptEncryption: false
         BGTaskSchedulerPermittedIdentifiers:
           - com.arjunakankipati.sweatkit.refresh
+          - com.arjunakankipati.sweatkit.processing
+          - com.arjunakankipati.sweatkit.workout.*
         UIBackgroundModes:
           - fetch
+          - processing
           - remote-notification
     settings:
       base:

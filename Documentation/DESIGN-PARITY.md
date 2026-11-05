@@ -57,3 +57,19 @@ Both workstreams are merged on main. Release source `7a2955c` includes the spec 
 - The elapsed-versus-moving source comparison, live Health/Garmin/iCloud behavior, phone performance, full accessibility acceptance and daily-use checkpoint remain deferred for the user’s next acceptance session.
 
 TestFlight upload succeeded on 5 November at 16:20 EST. Apple reported that the uploaded package is processing; processing completion and tester availability are not yet verified. Release tag `ios/v0.1.0-309.21.15` identifies `7a2955c`. Final artifacts and upload evidence are retained in `build/release/0.1.0-309.21.15/`.
+
+## Feed header refinement — 5 November 2026
+
+Follow-up to the TestFlight screenshot: Activities uses the native inline-large title so the title and trailing controls share a row. Filter precedes the neutral profile button; search sits separately beside the bottom tabs. Background work is grouped, with inline, Dynamic-Type-scaled spinners and expandable Health/sync controls. Status/error text stays visible.
+
+Feed rows now use full-width 2:1 featured thumbnails with actual date/time badges, square compact thumbnails, larger week summaries, and a separate trailing metric column. Metadata no longer sits below the entire metric block. Activity rows retain navigation through explicit selection without a disclosure chevron consuming map width. Record/route badges sit with the corresponding text, and accessibility sizes stack the metric below that text. The Activities tab uses the cycling symbol from the board.
+
+Verification: production views in the disposable IntegrationValidation harness, iPhone 17 / iOS 27.2, light, dark, and accessibility-medium text. The focused XCTest run passed header alignment and control order at standard sizes, filter/date-sheet access, Settings open/dismiss, and featured activity detail/back navigation in all three variants. Result: `/tmp/sweatkit-feed-parity/verified.xcresult`. Fresh captures: `Evidence/FEED-HEADER/{light,dark,large}.png`. Build and diff whitespace checks passed. Two earlier test runs were superseded after correcting menu dismissal and selecting a visible activity at large text sizes.
+
+Remaining reference differences: native tab-bar dimensions/materials are retained. The app shows actual provider status rather than inventing the board's combined relative sync timestamp. Fixture dates, source badges, terrain, metrics and records differ from illustrative board content. This pass covers Activities, not a new acceptance pass for every screen or physical-device sync behavior.
+
+### Bottom search follow-up
+
+The search button now sits separately to the right of the three tabs, with no search field or button in the Activities header. iOS 27 uses the explicit prominent tab role; iOS 26 retains the search role. Search owns its search field, and both activity surfaces share query/sport/date/setting filters. Tab changes dismiss active search. The existing native Close control exits text entry before switching tabs.
+
+Focused `testBottomSearch` passed in light, dark, and accessibility-medium on iPhone 17 / iOS 27.2: bottom control exists, header search is absent, typing produces no-match results, clearing restores activities, and Close → Activities restores the header controls. Result: `/tmp/sweatkit-feed-parity/search-verified.xcresult`. The test is retained in `Scripts/IntegrationValidation/UITests.swift`. `Evidence/FEED-HEADER/{light,dark,large}.png` now contains the passing bottom-search layout. iOS 26 fallback compiles but was not exercised on its runtime in this follow-up.

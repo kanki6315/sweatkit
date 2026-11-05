@@ -46,6 +46,7 @@ public actor ActivityLibrary {
 
     var cachedTrendsHistory: (revision: UInt64, history: TrendsHistory)?
     var trendsHistoryTask: (revision: UInt64, token: UUID, task: Task<TrendsHistory, Error>)?
+    var routeCatalogCache: RouteCatalogCache?
 
     /// The kind of the derived result that holds an activity's
     /// `ActivityMetrics`.

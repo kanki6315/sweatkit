@@ -47,6 +47,9 @@ public struct MatchingRules: Hashable, Sendable {
     public var sideOffsetStretch: Double = 200
     /// No stretch may average more than this to one side.
     public var maximumSideOffset: Double = 10
+    /// Modest, localized drift is tolerated only with near-complete agreement.
+    public var maximumDriftOffset: Double = 18
+    public var maximumDriftFraction: Double = 0.15
 
     // MARK: Comparison
 

@@ -19,5 +19,5 @@ import SweatKitModel
 public enum SweatKitRouteMatching {
     /// The version of the matching rules, for `Provenance.algorithmVersion`.
     /// It changes whenever a rule or a starting value in `MatchingRules` does.
-    public static let algorithmVersion = 2
+    public static let algorithmVersion = 3
 }

@@ -13,6 +13,7 @@ import SweatKitPalette
     var error: String?
     var library: ActivityLibrary?
     var didDecide: (@MainActor () async -> Void)?
+    var includeOlderHistory = false
     private var generation = 0
     func reload(_ library: ActivityLibrary?) async {
         guard let library else { return }
@@ -22,7 +23,7 @@ import SweatKitPalette
         loading = true
         defer { if request == generation { loading = false } }
         do {
-            let result = try await library.routes()
+            let result = try await library.routes(includeOlderHistory: includeOlderHistory)
             let resolvedUnits = try await library.profile().units
             guard request == generation else { return }
             units = resolvedUnits
@@ -33,7 +34,7 @@ import SweatKitPalette
     }
     func decide(_ id: SourceIdentity, _ value: RouteDecision.Value) async {
         guard let library else { return }
-        do { try await library.decideRoute(id, value: value); await didDecide?(); await reload(library) }
+        do { try await library.decideRoute(id, value: value, includeOlderHistory: includeOlderHistory); await didDecide?(); await reload(library) }
         catch { self.error = error.localizedDescription }
     }
 }
@@ -43,15 +44,31 @@ struct RoutesView: View {
     @State private var model = RoutesModel()
     @State private var search = ""
     @State private var byName = false
+    @AppStorage("routes.includeOlderHistory") private var includeOlderHistory = false
     private var routes: [LibraryRoute] {
-        let filtered = model.catalog.routes.filter { search.isEmpty || $0.name.localizedCaseInsensitiveContains(search) }
+        let filtered = model.catalog.routes.filter { search.isEmpty || ($0.name.localizedCaseInsensitiveContains(search) || $0.region.localizedCaseInsensitiveContains(search)) }
         return byName ? filtered.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending } : filtered
     }
+    private var historyPicker: some View {
+        Picker("History", selection: $includeOlderHistory) {
+            Text("Past two years").tag(false)
+            Text("All history").tag(true)
+        }
+    }
+    private var regions: [String] { Array(Set(routes.map(\.region))).sorted() }
     var body: some View {
         List {
             Section {
-                Text("\(model.catalog.routes.count) \(model.catalog.routes.count == 1 ? "route" : "routes") · \(model.catalog.routes.reduce(0) { $0 + $1.efforts.count }) efforts · by \(byName ? "name" : "most recent")")
-                    .font(.subheadline).foregroundStyle(Color.secondary).listRowBackground(Color.clear)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("\(model.catalog.routes.count) \(model.catalog.routes.count == 1 ? "route" : "routes") · \(model.catalog.routes.reduce(0) { $0 + $1.efforts.count }) efforts · by \(byName ? "name" : "most recent")")
+                        .font(.subheadline).foregroundStyle(Color.secondary)
+                    Text(includeOlderHistory ? "All history" : "Past two years")
+                        .font(.caption).foregroundStyle(.secondary)
+                    if model.loading && !model.catalog.routes.isEmpty { ProgressView("Updating routes…") }
+                    Text("Routes with five or more outings. Possible matches are optional to review.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                .padding(.vertical, 4)
             }
             if let error = model.error {
                 Section("Routes couldn’t refresh") {
@@ -59,22 +76,14 @@ struct RoutesView: View {
                     Button("Try again") { Task { await model.reload(libraryModel.library) } }
                 }
             }
-            if !model.catalog.reviews.isEmpty {
-                Section("Needs a decision") {
-                    ForEach(model.catalog.reviews) { review in
-                        VStack(alignment: .leading, spacing: 12) {
-                            Label(review.activity.title, systemImage: "questionmark.circle").font(.headline)
-                            Text(review.explanation).foregroundStyle(Color.secondary)
-                            ViewThatFits(in: .horizontal) {
-                                HStack { reviewButtons(review) }
-                                VStack(alignment: .leading) { reviewButtons(review) }
-                            }
-                        }.padding(.vertical, 8)
-                    }
-                }
+            if !model.loading && model.catalog.routes.isEmpty && model.error == nil {
+                ContentUnavailableView("No frequent routes yet", systemImage: "point.topleft.down.to.point.bottomright.curvepath", description: Text("Routes appear after five confirmed outings in the selected history. Try All history to include older activities."))
+            } else if !search.isEmpty && routes.isEmpty {
+                ContentUnavailableView.search(text: search)
             }
-            Section("Your routes") {
-                ForEach(routes) { route in
+            ForEach(regions, id: \.self) { region in
+              Section(region) {
+                ForEach(routes.filter { $0.region == region }) { route in
                     NavigationLink {
                         RoutePageView(routeID: route.id, model: model)
                     } label: {
@@ -90,29 +99,112 @@ struct RoutesView: View {
                         }.padding(.vertical, 4)
                     }.accessibilityIdentifier("route-row")
                 }
+                let regionalReviews = model.catalog.reviews.filter { review in
+                    routes.contains { $0.id == review.routeID && $0.region == region }
+                }
+                if !regionalReviews.isEmpty {
+                    DisclosureGroup("Optional review · \(Set(regionalReviews.map { $0.activity.id }).count)") {
+                        ForEach(routes.filter { $0.region == region }) { route in
+                            let pending = regionalReviews.filter { $0.routeID == route.id }
+                            if !pending.isEmpty {
+                                DisclosureGroup("\(route.name) · \(pending.count) possible match\(pending.count == 1 ? "" : "es")") {
+                                    ForEach(pending) { review in
+                                        NavigationLink {
+                                            RouteReviewPage(review: review, route: route, model: model)
+                                        } label: {
+                                            VStack(alignment: .leading, spacing: 4) {
+                                                Text(review.activity.start, format: .dateTime.month().day().year().hour().minute())
+                                                Text(review.explanation).font(.caption).foregroundStyle(.secondary)
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+              }
             }
         }
+        .listStyle(.plain)
+        .navigationTitle("Routes")
+        .toolbarTitleDisplayMode(.inlineLarge)
         .overlay {
             if model.loading && model.catalog.routes.isEmpty { ProgressView("Finding repeated routes…") }
-            else if model.catalog.routes.isEmpty && model.catalog.reviews.isEmpty && model.error == nil {
-                ContentUnavailableView("No routes yet", systemImage: "point.topleft.down.to.point.bottomright.curvepath", description: Text("A course becomes a route the second time you do it. Full efforts in the same direction are matched automatically."))
-            }
         }
-        .searchable(text: $search, prompt: "Find a route")
+        .searchable(text: $search, placement: .toolbar, prompt: "Find a route")
         .toolbar { ToolbarItem(placement: .topBarTrailing) {
-            Menu("Sort routes", systemImage: "arrow.up.arrow.down") {
-                Button("Most recent") { byName = false }; Button("Name") { byName = true }
+            Menu("Route options", systemImage: "line.3.horizontal.decrease") {
+                historyPicker
+                Picker("Sort routes", selection: $byName) {
+                    Text("Most recent").tag(false)
+                    Text("Name").tag(true)
+                }
             }
         } }
+        .onChange(of: includeOlderHistory) {
+            model.includeOlderHistory = includeOlderHistory
+            Task { await model.reload(libraryModel.library) }
+        }
         .refreshable { await model.reload(libraryModel.library) }
         .task(id: libraryModel.trendsRevision) {
+            model.includeOlderHistory = includeOlderHistory
             model.didDecide = { await libraryModel.reload() }
             await model.reload(libraryModel.library)
         }
     }
-    @ViewBuilder private func reviewButtons(_ review: RouteReview) -> some View {
-        Button("Same route") { Task { await model.decide(review.routeID, .membership(activity: review.activity.id!, included: true)) } }.buttonStyle(.borderedProminent)
-        Button("Keep separate") { Task { await model.decide(review.routeID, .membership(activity: review.activity.id!, included: false)) } }.buttonStyle(.bordered)
+}
+
+private struct RouteReviewPage: View {
+    let review: RouteReview
+    let route: LibraryRoute
+    let model: RoutesModel
+    @Environment(\.dismiss) private var dismiss
+    @State private var coordinates: [CLLocationCoordinate2D] = []
+    @State private var mapError: String?
+    @State private var saving = false
+    var body: some View {
+        List {
+            Section {
+                Map {
+                    MapPolyline(coordinates: route.reference.line.points.map {
+                        CLLocationCoordinate2D(latitude: $0.latitude, longitude: $0.longitude)
+                    }).stroke(.primary, lineWidth: 5)
+                    MapPolyline(coordinates: coordinates).stroke(.orange, style: StrokeStyle(lineWidth: 3, dash: [6, 4]))
+                }.frame(height: 300).listRowInsets(EdgeInsets())
+                Text("Solid: usual route · Orange dashed: possible outing").font(.caption)
+                if let mapError { Text(mapError).foregroundStyle(.secondary) }
+                Text(review.activity.start, format: .dateTime.month().day().year().hour().minute())
+                Text(review.explanation)
+            }
+            Section {
+                Button("Include in this route") { decide(true) }.disabled(saving || coordinates.isEmpty)
+                Button("Keep separate") { decide(false) }.disabled(saving)
+                Text("You can leave this undecided. It won’t change your confirmed routes.")
+                    .font(.caption).foregroundStyle(.secondary)
+                if let error = model.error { Text(error).foregroundStyle(.secondary) }
+            }
+        }
+        .navigationTitle(route.name)
+        .navigationBarTitleDisplayMode(.inline)
+        .task {
+            do {
+                guard let library = model.library else { return }
+                let stream = try await library.analysisStream(for: review.activity.id!)
+                coordinates = (0..<stream.count).compactMap { stream.coordinate(at: $0) }.map {
+                    CLLocationCoordinate2D(latitude: $0.latitude, longitude: $0.longitude)
+                }
+                if coordinates.isEmpty { mapError = "This outing’s GPS track is unavailable." }
+            } catch { mapError = "The outing’s track couldn’t load. Reopen this review to try again." }
+        }
+    }
+    private func decide(_ included: Bool) {
+        saving = true
+        Task {
+            await model.decide(review.routeID, .membership(activity: review.activity.id!, included: included))
+            saving = false
+            if model.error == nil { dismiss() }
+        }
     }
 }
 
@@ -305,7 +397,7 @@ struct RoutePageView: View {
                         }
                     }
                 } }
-            } else { ContentUnavailableView("Route no longer available", systemImage: "point.topleft.down.to.point.bottomright.curvepath", description: Text("At least two visible full efforts are needed.")) }
+            } else { ContentUnavailableView("Route no longer available", systemImage: "point.topleft.down.to.point.bottomright.curvepath", description: Text("At least five visible outings in the selected history are needed.")) }
         }
         .navigationBarTitleDisplayMode(.inline)
         .alert("Rename route", isPresented: $editing) {
