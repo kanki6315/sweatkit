@@ -159,6 +159,30 @@ private func ids(_ fixtures: [Fixtures.FIT]) throws -> [SourceIdentity] {
 @Suite struct VersionStalenessTests {
     let temporary = TemporaryLibrary()
 
+    @Test func previousAveragePowerRowsMigrateFromStoredStreams() async throws {
+        var oldVersions = PipelineVersions.current
+        oldVersions.algorithms[PipelineVersions.AlgorithmName.feedRow] = 1
+        let old = try temporary.open(versions: oldVersions)
+        let fixture = Fixtures.FIT.outdoorRide
+        _ = try await old.importFile(try fixture.data())
+        let id = try fileIdentity(fixture)
+        var row = try #require(try await old.activity(id))
+        let metrics = try #require(try await old.metrics(for: id))
+        row.headline = .init(kind: "averagePower", value: metrics.power.average)
+        try await old.store.saveActivity(row)
+
+        let current = try temporary.open()
+        #expect(try await current.staleActivities().map(\.id) == [id])
+        let report = try await current.recompute(at: later)
+        #expect(report.failures.isEmpty)
+        #expect(report.rebuilt.count == 1)
+        #expect(report.rebuilt.first?.source == .analysisStream)
+        #expect(report.rebuilt.first?.feedRowChanged == true)
+        let migrated = try #require(try await current.activity(id))
+        #expect(migrated.headline == .init(kind: "weightedPower", value: metrics.power.weighted))
+        #expect(try await current.staleActivities().isEmpty)
+    }
+
     /// "An algorithm version changes: everything that algorithm produces."
     /// Only the metrics are computed again, from the stored streams.
     @Test func aChangedAlgorithmVersionRecomputesFromTheStoredStreams() async throws {
