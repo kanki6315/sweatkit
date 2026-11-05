@@ -1,0 +1,38 @@
+// swift-tools-version: 6.2
+import PackageDescription
+
+let package = Package(
+    name: "SweatKitLibrary",
+    platforms: [.iOS(.v26), .macOS(.v26)],
+    products: [
+        .library(name: "SweatKitLibrary", targets: ["SweatKitLibrary"]),
+    ],
+    dependencies: [
+        .package(path: "../SweatKitModel"),
+        .package(path: "../SweatKitStore"),
+        .package(path: "../SweatKitIngest"),
+        .package(path: "../SweatKitAnalysis"),
+    ],
+    targets: [
+        .target(
+            name: "SweatKitLibrary",
+            dependencies: [
+                .product(name: "SweatKitModel", package: "SweatKitModel"),
+                .product(name: "SweatKitStore", package: "SweatKitStore"),
+                .product(name: "SweatKitIngest", package: "SweatKitIngest"),
+                .product(name: "SweatKitAnalysis", package: "SweatKitAnalysis"),
+            ]
+        ),
+        .testTarget(
+            name: "SweatKitLibraryTests",
+            dependencies: [
+                "SweatKitLibrary",
+                .product(name: "SweatKitModel", package: "SweatKitModel"),
+                .product(name: "SweatKitStore", package: "SweatKitStore"),
+                .product(name: "SweatKitIngest", package: "SweatKitIngest"),
+                .product(name: "SweatKitAnalysis", package: "SweatKitAnalysis"),
+                .product(name: "SweatKitTestSupport", package: "SweatKitModel"),
+            ]
+        ),
+    ]
+)
