@@ -1,4 +1,5 @@
 import Foundation
+import SweatKitIdentity
 import SweatKitAnalysis
 import SweatKitModel
 import SweatKitStore
@@ -28,14 +29,14 @@ import SweatKitStore
 /// form that is still good.
 ///
 /// **Calls that overlap.** The actor does its heavy work elsewhere, so two
-/// calls can be in progress at once. Imports and rebuilds of the same source
-/// take turns. Beyond that, every write is a whole replacement derived from
+/// calls can be in progress at once. Mutations take turns across the library
+/// so grouping and revisions cannot overwrite one another. Beyond that, every write is a whole replacement derived from
 /// stored inputs, and a result records what it was computed from. A result
 /// written from a profile that was replaced meanwhile is therefore found
 /// stale by the next recompute, not left wrong.
 ///
-/// Each imported file is its own activity for now. De-duplication across
-/// sources belongs to Identity and is not joined here yet.
+/// Identity resolves matching source records into activities, keeping user
+/// decisions in an add-only journal and replacing the affected feed rows atomically.
 public actor ActivityLibrary {
     /// The store underneath. Reading from it is safe. Write through the
     /// library, which keeps streams, rows and results in step.
@@ -141,7 +142,7 @@ public actor ActivityLibrary {
     /// Imports several files. Each succeeds or fails on its own, and the
     /// outcomes come back in the order the files were given.
     ///
-    /// Up to `maximumConcurrentWork` files are worked on at once. `progress`
+    /// Up to `maximumConcurrentWork` files are read at once; mutations serialize. `progress`
     /// is called as each file finishes, in the order they finish, from this
     /// actor and not from the main actor. If the calling task is cancelled,
     /// files not yet started fail with `.cancelled`.
@@ -189,15 +190,20 @@ public actor ActivityLibrary {
         await begin(identity)
         defer { end(identity) }
 
+        if identityNeedsRecovery && FileManager.default.fileExists(atPath: identityURL.path) { try await reconcileIdentity() }
+
         // Already imported: nothing to decode, store or compute.
         if let activity = try await finishedActivity(of: identity, holding: hash) {
-            return ImportResult(change: .alreadyInLibrary, source: identity, activity: activity)
+            if !FileManager.default.fileExists(atPath: identityURL.path) { try await reconcileIdentity() }
+            let resolved = try await activityContaining(identity)
+            return ImportResult(change: .alreadyInLibrary, source: identity, activity: resolved ?? activity)
         }
 
         // Decode before anything is stored, so a rejected file leaves no trace.
         let profile = try await currentProfile()
         var decoded = try await Pipeline.decode(bytes, versions: versions)
 
+        identityNeedsRecovery = true
         let record = try await store.importOriginal(bytes, as: identity, at: date).record
         if record.identity != identity {
             // A file whose bytes are already another source's original, such
@@ -213,10 +219,20 @@ public actor ActivityLibrary {
         }
 
         let row = try await write(decoded, for: record, fallbackUTCOffset: fallbackUTCOffset, profile: profile, at: date)
+        var journal = try readIdentityJournal()
+        journal.candidates[record.identity.description] = MatchCandidate(identity: record.identity,
+            sport: decoded.recorded.sport, start: decoded.stream.start,
+            elapsed: Double(decoded.stream.count), distance: (0..<decoded.stream.count).reversed().lazy.compactMap { decoded.stream.distance[$0] }.first,
+            isIndoor: decoded.recorded.isIndoor || decoded.recorded.isVirtual)
+        try writeIdentityJournal(journal)
+        try await reconcileIdentity()
+        let resolvedID = try await store.sourceRecord(record.identity)?.activityID
+        let resolvedRow: ActivityRecord?
+        if let resolvedID { resolvedRow = try await store.activity(resolvedID) } else { resolvedRow = nil }
         return ImportResult(
             change: record.activityID == nil ? .added : .updated,
             source: record.identity,
-            activity: row
+            activity: resolvedRow ?? row
         )
     }
 
@@ -286,6 +302,12 @@ public actor ActivityLibrary {
         after cursor: FeedCursor? = nil
     ) async throws(LibraryError) -> FeedPage {
         do {
+            if identityNeedsRecovery && FileManager.default.fileExists(atPath: identityURL.path) {
+                let token = SourceIdentity(source: .file, externalID: "recovery")
+                await begin(token)
+                do { try await reconcileIdentity(); end(token) }
+                catch { end(token); throw error }
+            }
             return try await store.feed(filter, limit: limit, after: cursor)
         } catch {
             throw LibraryError(error)
@@ -589,15 +611,17 @@ public actor ActivityLibrary {
         return (decoded.stream, decoded.recorded, .original)
     }
 
-    // MARK: One writer per source
+    // MARK: Serialized library mutations
 
-    /// The sources being imported or rebuilt now, and the calls waiting for
-    /// one of them to finish.
+    /// Imports, rebuilds and identity decisions share one writer so a merge
+    /// cannot race a revision or a split across actor suspension points.
+    private var identityNeedsRecovery = true
     private var busy: Set<SourceIdentity> = []
     private var waiting: [SourceIdentity: [CheckedContinuation<Void, Never>]] = [:]
 
-    /// Waits until no other call is writing for `identity`, then claims it.
-    private func begin(_ identity: SourceIdentity) async {
+    /// Waits for the library mutation slot. Reads can continue during derivation.
+    private func begin(_ source: SourceIdentity) async {
+        let identity = SourceIdentity(source: .file, externalID: "library-writer")
         while busy.contains(identity) {
             await withCheckedContinuation { continuation in
                 waiting[identity, default: []].append(continuation)
@@ -606,7 +630,8 @@ public actor ActivityLibrary {
         busy.insert(identity)
     }
 
-    private func end(_ identity: SourceIdentity) {
+    private func end(_ source: SourceIdentity) {
+        let identity = SourceIdentity(source: .file, externalID: "library-writer")
         busy.remove(identity)
         for continuation in waiting.removeValue(forKey: identity) ?? [] {
             continuation.resume()
@@ -640,4 +665,191 @@ public actor ActivityLibrary {
             }
         }
     }
+
+    // MARK: Durable identity decisions and resolved feed
+
+    private struct IdentityJournal: Codable {
+        var version = 1
+        var device = DeviceID(UUID().uuidString)
+        var candidates: [String: MatchCandidate] = [:]
+        var links: [LinkRecord] = []
+        var decisions: [DecisionRecord] = []
+        var tombstones: [Tombstone] = []
+    }
+
+    private var identityURL: URL { store.root.appendingPathComponent("identity.json") }
+
+    private func readIdentityJournal() throws -> IdentityJournal {
+        guard FileManager.default.fileExists(atPath: identityURL.path) else { return IdentityJournal() }
+        let journal = try JSONDecoder().decode(IdentityJournal.self, from: Data(contentsOf: identityURL))
+        guard journal.version == 1 else { throw LibraryError.storage("Unsupported identity journal version") }
+        return journal
+    }
+
+    private func writeIdentityJournal(_ journal: IdentityJournal) throws {
+        try JSONEncoder().encode(journal).write(to: identityURL, options: .atomic)
+        identityNeedsRecovery = true
+    }
+
+    /// Rebuilds the resolved feed from source facts and add-only decisions.
+    /// The journal is the durable intent; a failed cache replacement is retried
+    /// on the next feed read or import, including after relaunch.
+    private func reconcileIdentity() async throws {
+        var journal = try readIdentityJournal()
+        let records = try await store.sourceRecords()
+        var old: [SourceIdentity: ActivityRecord] = [:]
+        for id in Set(records.compactMap(\.activityID)) {
+            old[id] = try await store.activity(id)
+        }
+        for record in records where journal.candidates[record.identity.description] == nil {
+            guard let id = record.activityID, let row = old[id] else { continue }
+            let found = try await materials(for: record.currentRevision, renormalise: false, needsRecorded: true)
+            guard let recorded = found.recorded else { continue }
+            journal.candidates[record.identity.description] = MatchCandidate(identity: record.identity,
+                sport: recorded.sport, start: found.stream.start, elapsed: Double(found.stream.count),
+                distance: (0..<found.stream.count).reversed().lazy.compactMap { found.stream.distance[$0] }.first,
+                isIndoor: recorded.isIndoor || recorded.isVirtual)
+            // Migrate pre-journal user edits without guessing again on future imports.
+            if row.title != FeedRules.generatedTitle(for: row) {
+                journal.decisions.append(DecisionRecord(name: RecordName("legacy-title-\(id)"), value: .title(row.title),
+                    time: record.importedAt, device: journal.device, members: Set(row.members)))
+            }
+            if row.isHidden {
+                journal.decisions.append(DecisionRecord(name: RecordName("legacy-hide-\(id)"), value: .hidden(true),
+                    time: record.importedAt, device: journal.device, members: Set(row.members)))
+                journal.tombstones += Tombstone.written(.hidden, for: Set(row.members), at: record.importedAt)
+            }
+        }
+        let scan = MatchScan.scan(Array(journal.candidates.values), at: Date(timeIntervalSince1970: 0), device: DeviceID("automatic"))
+        let names = Set(journal.links.map(\.name))
+        journal.links += scan.links.filter { !names.contains($0.name) }
+        try writeIdentityJournal(journal)
+        let resolved = ResolvedLibrary.resolve(records: Set(journal.candidates.values.map(\.identity)).intersection(records.map(\.identity)), links: journal.links,
+            decisions: journal.decisions, tombstones: journal.tombstones)
+        let byIdentity = Dictionary(uniqueKeysWithValues: records.map { ($0.identity, $0) })
+        let profile = try await currentProfile()
+        var replacements: [ActivityRecord] = []
+        var results: [DerivedResult] = []
+        var removing = Set(old.keys).subtracting(resolved.activities.map(\.id))
+        for group in resolved.activities {
+            guard let primary = byIdentity[group.primary] else { continue }
+            let existing = old[group.id]
+            let members = group.members.sorted()
+            if let existing, existing.members.sorted() == members, existing.primary == group.primary,
+               existing.isHidden == group.isHidden,
+               group.title == nil || existing.title == group.title,
+               try await store.derivedResult(owner: .activity(group.id), kind: Self.metricsKind) != nil {
+                continue
+            }
+            let found = try await materials(for: primary.currentRevision, renormalise: false, needsRecorded: true)
+            guard let recorded = found.recorded else { throw LibraryError.originalMissing(primary.currentRevision) }
+            var derived = try await Pipeline.derive(facts: ActivityFacts(recorded, fallbackUTCOffset: existing?.utcOffset),
+                stream: found.stream, profile: profile, versions: versions,
+                target: Pipeline.Target(members: members, primary: group.primary,
+                    revision: primary.currentRevision, existing: nil), at: Date())
+            if let title = group.title { derived.row.title = title }
+            derived.row.isHidden = group.isHidden
+            replacements.append(derived.row)
+            results.append(derived.result)
+            for member in members { if let id = byIdentity[member]?.activityID { removing.insert(id) } }
+        }
+        if !removing.isEmpty || !replacements.isEmpty {
+            try await store.replaceActivities(removing: removing, with: replacements, results: results)
+        }
+        for record in records {
+            let standing = Tombstone.standing(of: record.identity, tombstones: journal.tombstones, decisions: journal.decisions)
+            let next: SourceRecordState
+            switch standing {
+            case .deleted: next = .deleted
+            case .hidden: next = .hidden
+            case .live: next = record.state == .hidden ? .active : record.state
+            }
+            if next != record.state { try await store.setState(next, for: record.identity) }
+        }
+        identityNeedsRecovery = false
+    }
+
+    public func possibleDuplicates() async throws -> [IdentityPair] {
+        let journal = try readIdentityJournal()
+        let scan = MatchScan.scan(Array(journal.candidates.values), at: Date(), device: journal.device)
+        let resolved = ResolvedLibrary.resolve(records: Set(journal.candidates.values.map(\.identity)),
+            links: journal.links, decisions: journal.decisions, tombstones: journal.tombstones)
+        return Array(Set(scan.awaitingReview(given: journal.links) + resolved.possibleDuplicates.map(\.pair))).sorted()
+    }
+
+    public func identityChanges() throws -> IdentityChanges {
+        let journal = try readIdentityJournal()
+        return IdentityChanges(links: journal.links, decisions: journal.decisions, tombstones: journal.tombstones)
+    }
+
+    public func applyIdentityChanges(_ changes: IdentityChanges) async throws {
+        let token = SourceIdentity(source: .file, externalID: "decisions")
+        await begin(token)
+        defer { end(token) }
+        var journal = try readIdentityJournal()
+        journal.links = Array(Set(journal.links + changes.links))
+        journal.decisions = Array(Set(journal.decisions + changes.decisions))
+        journal.tombstones = Array(Set(journal.tombstones + changes.tombstones))
+        try writeIdentityJournal(journal)
+        try await reconcileIdentity()
+    }
+
+    public func activityContaining(_ source: SourceIdentity) async throws -> ActivityRecord? {
+        guard let id = try await store.sourceRecord(source)?.activityID else { return nil }
+        return try await store.activity(id)
+    }
+
+    public func hiddenActivities() async throws -> [ActivityRecord] {
+        let ids = Set(try await store.sourceRecords().compactMap(\.activityID))
+        var rows: [ActivityRecord] = []
+        for id in ids {
+            if let row = try await store.activity(id), row.isHidden { rows.append(row) }
+        }
+        return rows.sorted { $0.start > $1.start }
+    }
+
+    /// User decisions apply to every current member, independent of primary.
+    public func decide(_ value: DecisionValue, for id: SourceIdentity, at date: Date = Date()) async throws {
+        await begin(id)
+        defer { end(id) }
+        if identityNeedsRecovery && FileManager.default.fileExists(atPath: identityURL.path) { try await reconcileIdentity() }
+        guard let row = try await store.activity(id) else { throw LibraryError.unknownActivity(id) }
+        var journal = try readIdentityJournal()
+        let members = Set(row.members)
+        if case .primary(let primary) = value, !members.contains(primary) { throw LibraryError.unknownActivity(primary) }
+        journal.decisions.append(DecisionRecord(name: RecordName(UUID().uuidString), value: value,
+            time: date, device: journal.device, members: members))
+        if value == .hidden(true) { journal.tombstones += Tombstone.written(.hidden, for: members, at: date) }
+        try writeIdentityJournal(journal)
+        try await reconcileIdentity()
+    }
+
+    public func link(_ pair: IdentityPair, kind: LinkKind, at date: Date = Date()) async throws {
+        await begin(pair.lower)
+        defer { end(pair.lower) }
+        var journal = try readIdentityJournal()
+        journal.links.append(LinkRecord(name: RecordName(UUID().uuidString), pair: pair, kind: kind,
+            maker: .user, time: date, device: journal.device))
+        try writeIdentityJournal(journal)
+        try await reconcileIdentity()
+    }
+
+    /// Separates every member, inheriting the decisions that were in effect.
+    public func split(_ id: SourceIdentity, at date: Date = Date()) async throws {
+        await begin(id)
+        defer { end(id) }
+        guard let row = try await store.activity(id) else { throw LibraryError.unknownActivity(id) }
+        var journal = try readIdentityJournal()
+        journal.decisions += Split.inheritedCopies(splitting: Set(row.members),
+            into: row.members.map { Set([$0]) }, decisions: journal.decisions, device: journal.device)
+        for (index, first) in row.members.enumerated() {
+            for second in row.members.dropFirst(index + 1) {
+                journal.links.append(LinkRecord(name: RecordName(UUID().uuidString), pair: IdentityPair(first, second),
+                    kind: .keepSeparate, maker: .user, time: date, device: journal.device))
+            }
+        }
+        try writeIdentityJournal(journal)
+        try await reconcileIdentity()
+    }
+
 }

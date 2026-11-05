@@ -171,6 +171,10 @@ public actor LibraryStore: ModelActor {
     /// source records. Returns the ID.
     @discardableResult
     public func saveActivity(_ activity: ActivityRecord) throws -> SourceIdentity {
+        try writeActivity(activity, save: true)
+    }
+
+    private func writeActivity(_ activity: ActivityRecord, save: Bool) throws -> SourceIdentity {
         let members = Array(Set(activity.members)).sorted()
         guard let id = members.first, members.contains(activity.primary) else {
             throw StoreError.invalidMembers
@@ -218,8 +222,53 @@ public actor LibraryStore: ModelActor {
         entity.headlineUnavailableReason = activity.headline?.value.reason?.rawValue
         entity.isHidden = activity.isHidden
         entity.members = records
-        try modelContext.save()
+        if save { try modelContext.save() }
         return id
+    }
+
+    /// Atomically replaces a set of resolved activities after a merge or split.
+    /// Originals and source records are retained. No member may occur twice or
+    /// be taken from an activity outside `removing`.
+    public func replaceActivities(
+        removing: Set<SourceIdentity>, with activities: [ActivityRecord],
+        results: [DerivedResult] = []
+    ) throws {
+        var seen: Set<SourceIdentity> = []
+        for activity in activities {
+            guard let id = activity.id, activity.members.contains(activity.primary),
+                  Set(activity.members).count == activity.members.count else { throw StoreError.invalidMembers }
+            if try fetchActivityEntity(id) != nil, !removing.contains(id) {
+                throw StoreError.memberOfAnotherActivity(id)
+            }
+            for member in activity.members {
+                guard seen.insert(member).inserted else { throw StoreError.invalidMembers }
+                guard let record = try fetchRecord(member) else { throw StoreError.unknownSourceRecord(member) }
+                if let current = record.activity, !removing.contains(where: { $0.description == current.id }) {
+                    throw StoreError.memberOfAnotherActivity(member)
+                }
+            }
+        }
+        let newIDs = Set(activities.compactMap(\.id))
+        do {
+            for id in removing {
+                if let entity = try fetchActivityEntity(id) {
+                    for record in entity.members { record.activity = nil }
+                    entity.members = []
+                    if !newIDs.contains(id) { modelContext.delete(entity) }
+                }
+                let owner = ResultOwner.activity(id).rawValue
+                let replacementKinds = Set(results.filter { $0.owner.rawValue == owner }.map(\.kind))
+                for result in try modelContext.fetch(FetchDescriptor<DerivedResultEntity>(predicate: #Predicate { $0.owner == owner })) {
+                    if !newIDs.contains(id) || !replacementKinds.contains(result.kind) { modelContext.delete(result) }
+                }
+            }
+            for activity in activities { _ = try writeActivity(activity, save: false) }
+            for result in results { try writeDerivedResult(result, save: false) }
+            try modelContext.save()
+        } catch {
+            modelContext.rollback()
+            throw error
+        }
     }
 
     public func activity(_ id: SourceIdentity) throws -> ActivityRecord? {
@@ -354,6 +403,10 @@ public actor LibraryStore: ModelActor {
 
     /// Saves a derived result, replacing the one with the same owner and kind.
     public func saveDerivedResult(_ result: DerivedResult) throws {
+        try writeDerivedResult(result, save: true)
+    }
+
+    private func writeDerivedResult(_ result: DerivedResult, save: Bool) throws {
         guard (result.profileReading == nil) == (result.provenance.profileFingerprint == nil) else {
             throw StoreError.inconsistentProvenance
         }
@@ -380,7 +433,7 @@ public actor LibraryStore: ModelActor {
         entity.profileReadingInputs = result.profileReading?.inputs.rawValue
         entity.payload = result.payload
         entity.computedAt = result.computedAt
-        try modelContext.save()
+        if save { try modelContext.save() }
     }
 
     public func derivedResult(owner: ResultOwner, kind: String) throws -> DerivedResult? {

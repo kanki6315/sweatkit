@@ -20,7 +20,7 @@ A native iOS app for viewing one person's own rides and walks. Local-first, no s
 | `Packages/SweatKitTrackCleanup` | Turns a stream's positions into a cleaned track for route matching and a simplified line for the flyover, each point keeping its sample index. | Model |
 | `Packages/SweatKitFlyover` | The MapKit flyover view and its camera and drawing logic. Takes an already-prepared route. | Model |
 | `Packages/SweatKitTimeline` | The detail screen's scrubbing timeline and stats panel. Takes already-prepared series and the same scrub binding as the flyover. | Model |
-| `Packages/SweatKitLibrary` | The pipeline from an imported file to a stored activity: decode, store, build the stream, compute metrics, write the feed row, and recompute what goes stale. A layer above the leaf packages. | Model, Store, Ingest, Analysis |
+| `Packages/SweatKitLibrary` | The pipeline from an imported file to a stored activity: decode, store, build the stream, compute metrics, write the feed row, and recompute what goes stale. A layer above the leaf packages. | Model, Store, Ingest, Analysis, Sync, Identity |
 | `Packages/SweatKitDetail` | Prepares one activity's stream for the detail screen: the coloured route, the timeline's series, stats at the cursor and over a range. A layer above the leaf packages. | Model, Analysis, TrackCleanup, Flyover, Timeline |
 | `Packages/SweatKitSync` | Garmin reconciliation: quick sync, deep scan, backfill and deletion inference, behind interfaces for Garmin and for the library. No storage of its own. | Model, Garmin |
 | `Packages/SweatKitPalette` | The colours of the data: power, heart-rate, pace and gradient ramps in band order, and the map line's casing. `DESIGN.md` records the values and how they were measured. | Nothing |
@@ -28,7 +28,7 @@ A native iOS app for viewing one person's own rides and walks. Local-first, no s
 | `Fixtures/` | Real FIT files shared by every package's tests | |
 | `project.yml` | XcodeGen spec. `SweatKit.xcodeproj` is generated and not committed. | |
 
-The spec's "Core" package is split into Model, Ingest and Identity so that each can be built and tested alone. Storage is `SweatKitStore` and the pipeline that feeds it is `SweatKitLibrary`. The screens that use them, the adapter that joins Garmin sync to the library, de-duplication in the pipeline and the HealthKit adapter do not exist yet.
+The spec's "Core" package is split into Model, Ingest and Identity so that each can be built and tested alone. Storage is `SweatKitStore` and the pipeline that feeds it is `SweatKitLibrary`. The app now has initial import, feed, detail, profile and Garmin connection screens, and Library contains the persistent Garmin sync adapter. Pipeline matching and persisted merge/split/title/primary/visibility decisions are implemented, with duplicate review and restoration screens. The HealthKit adapter and permanent-deletion flow do not exist yet. `Documentation/M1-M3-ACCEPTANCE.md` records remaining implementation and verification; these screens are not yet milestone-complete.
 
 M0 is closed: all five gates passed. `Spikes/GarminPull/RESULTS.md` and `Spikes/Flyover/RESULTS.md` hold the evidence, the decisions, and what was left unmeasured.
 

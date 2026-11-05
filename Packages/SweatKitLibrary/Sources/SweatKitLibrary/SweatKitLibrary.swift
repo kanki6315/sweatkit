@@ -14,7 +14,8 @@
 /// depend on each other. The spec's "Data model and storage", "Activity
 /// feed" and "Analysis metrics" sections are the contract.
 ///
-/// Not here yet: de-duplication across sources (each imported file is its
-/// own activity), reading a zip or a folder, geocoding a locality for the
-/// title, HealthKit snapshots, and hiding or deleting.
+/// Identity matching, merge/split, title, primary and visibility decisions
+/// are persisted separately from the resolved feed.
+/// Not here yet: reading a zip or a folder, geocoding a locality for the
+/// title, HealthKit snapshots, and permanent deletion.
 public enum SweatKitLibrary {}

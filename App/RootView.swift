@@ -3,16 +3,18 @@ import SwiftUI
 /// The three tabs. Settings opens from the profile button on each.
 struct RootView: View {
     @State private var showsSettings = false
+    @State private var library = LibraryModel()
 
     var body: some View {
         TabView {
             Tab("Activities", systemImage: "list.bullet") {
-                screen("Activities") {
-                    ContentUnavailableView(
-                        "No activities yet",
-                        systemImage: "figure.outdoor.cycle",
-                        description: Text("Activities from Garmin, Apple Health and FIT files will appear here.")
-                    )
+                NavigationStack {
+                    ActivityFeedView(model: library)
+                        .toolbar {
+                            ToolbarItem(placement: .topBarTrailing) {
+                                Button("Settings", systemImage: "person.crop.circle") { showsSettings = true }
+                            }
+                        }
                 }
             }
             Tab("Routes", systemImage: "point.topleft.down.to.point.bottomright.curvepath") {
@@ -35,7 +37,7 @@ struct RootView: View {
             }
         }
         .sheet(isPresented: $showsSettings) {
-            SettingsView()
+            SettingsView(model: library)
         }
     }
 

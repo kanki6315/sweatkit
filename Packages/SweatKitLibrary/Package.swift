@@ -12,6 +12,8 @@ let package = Package(
         .package(path: "../SweatKitStore"),
         .package(path: "../SweatKitIngest"),
         .package(path: "../SweatKitAnalysis"),
+        .package(path: "../SweatKitSync"),
+        .package(path: "../SweatKitIdentity"),
     ],
     targets: [
         .target(
@@ -21,6 +23,8 @@ let package = Package(
                 .product(name: "SweatKitStore", package: "SweatKitStore"),
                 .product(name: "SweatKitIngest", package: "SweatKitIngest"),
                 .product(name: "SweatKitAnalysis", package: "SweatKitAnalysis"),
+                .product(name: "SweatKitSync", package: "SweatKitSync"),
+                .product(name: "SweatKitIdentity", package: "SweatKitIdentity"),
             ]
         ),
         .testTarget(
@@ -31,6 +35,8 @@ let package = Package(
                 .product(name: "SweatKitStore", package: "SweatKitStore"),
                 .product(name: "SweatKitIngest", package: "SweatKitIngest"),
                 .product(name: "SweatKitAnalysis", package: "SweatKitAnalysis"),
+                .product(name: "SweatKitSync", package: "SweatKitSync"),
+                .product(name: "SweatKitIdentity", package: "SweatKitIdentity"),
                 .product(name: "SweatKitTestSupport", package: "SweatKitModel"),
             ]
         ),

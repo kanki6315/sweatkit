@@ -1,0 +1,95 @@
+import Foundation
+import Observation
+import SweatKitModel
+import SweatKitLibrary
+import SweatKitStore
+
+/// Owns the persistent library and the visible page, shared by all app screens.
+@MainActor @Observable
+final class LibraryModel {
+    private(set) var garmin: GarminConnection?
+    private(set) var library: ActivityLibrary?
+    private(set) var possibleDuplicateCount = 0
+    private(set) var units = UnitSystem.metric
+    private(set) var activities: [ActivityRecord] = []
+    private(set) var isLoading = false
+    private(set) var isImporting = false
+    private(set) var importProgress: ImportProgress?
+    private(set) var outcomes: [ImportFileOutcome] = []
+    var error: String?
+    var filter = FeedFilter()
+    private var cursor: FeedCursor?
+    private var generation = 0
+    private var importTask: Task<Void, Never>?
+    var hasMore: Bool { cursor != nil }
+
+    func open() async {
+        guard library == nil else { return }
+        do {
+            let root = try FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask,
+                                                   appropriateFor: nil, create: true)
+                .appendingPathComponent("SweatKit", isDirectory: true)
+            let opened = try ActivityLibrary(root: root)
+            library = opened
+            garmin = GarminConnection(library: opened, root: root)
+            await reload()
+        } catch { self.error = error.localizedDescription }
+    }
+
+    func reload() async {
+        generation += 1
+        let request = generation
+        guard let library else { return }
+        isLoading = true
+        do {
+            let page = try await library.feed(filter, limit: 50)
+            let profile = try await library.profile()
+            let duplicates = try await library.possibleDuplicates()
+            guard request == generation else { return }
+            activities = page.activities
+            units = profile.units
+            possibleDuplicateCount = duplicates.count
+            cursor = page.next
+            error = nil
+        } catch {
+            guard request == generation else { return }
+            self.error = error.localizedDescription
+        }
+        if request == generation { isLoading = false }
+    }
+
+    func loadMore() async {
+        guard let library, let cursor, !isLoading else { return }
+        let request = generation
+        isLoading = true
+        defer { if request == generation { isLoading = false } }
+        do {
+            let page = try await library.feed(filter, limit: 50, after: cursor)
+            guard request == generation else { return }
+            let existing = Set(activities.compactMap(\.id))
+            activities += page.activities.filter { !existing.contains($0.id ?? $0.primary) }
+            self.cursor = page.next
+        } catch { if request == generation { self.error = error.localizedDescription } }
+    }
+
+    func importFiles(_ urls: [URL]) {
+        guard let library, !isImporting else { return }
+        isImporting = true
+        outcomes = []
+        importProgress = nil
+        importTask = Task {
+            let scoped = urls.filter { $0.startAccessingSecurityScopedResource() }
+            defer {
+                scoped.forEach { $0.stopAccessingSecurityScopedResource() }
+                isImporting = false
+                importTask = nil
+            }
+            outcomes = await library.importFiles(urls.map(ImportFile.init(url:))) { [self] progress in
+                Task { @MainActor in self.importProgress = progress }
+            }
+            await reload()
+        }
+    }
+
+    func cancelImport() { importTask?.cancel() }
+}

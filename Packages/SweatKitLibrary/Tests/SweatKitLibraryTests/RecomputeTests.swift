@@ -413,12 +413,8 @@ private func ids(_ fixtures: [Fixtures.FIT]) throws -> [SourceIdentity] {
         let hidden = try fileIdentity(.walk)
         do {
             let library = try temporary.open()
-            var row = try #require(try await library.activity(renamed))
-            row.title = "Race day"
-            try await library.store.saveActivity(row)
-            row = try #require(try await library.activity(hidden))
-            row.isHidden = true
-            try await library.store.saveActivity(row)
+            try await library.decide(.title("Race day"), for: renamed)
+            try await library.decide(.hidden(true), for: hidden)
         }
         var newer = PipelineVersions.current
         newer.algorithms[PipelineVersions.AlgorithmName.feedRow] = PipelineVersions.feedRowVersion + 1
