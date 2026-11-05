@@ -1,0 +1,56 @@
+# Throwaway harness for the M0 flyover gates. Not part of the app.
+name: FlyoverSpike
+options:
+  bundleIdPrefix: com.arjunakankipati
+  deploymentTarget:
+    iOS: "26.0"
+  createIntermediateGroups: true
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    DEVELOPMENT_TEAM: TDBAHN96B3
+packages:
+  SweatKitModel:
+    path: ../../Packages/SweatKitModel
+  SweatKitFlyover:
+    path: ../../Packages/SweatKitFlyover
+  fit-swift-sdk:
+    url: https://github.com/garmin/fit-swift-sdk
+    from: 21.221.0
+targets:
+  FlyoverSpike:
+    type: application
+    platform: iOS
+    sources:
+      - Harness
+      - path: ../../Fixtures/fit/outdoor-ride.fit
+        buildPhase: resources
+      - path: ../../Fixtures/fit/walk.fit
+        buildPhase: resources
+      - path: ../../Fixtures/fit/walk-pitlane.fit
+        buildPhase: resources
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.arjunakankipati.sweatkit.flyoverspike
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_CFBundleDisplayName: Flyover Spike
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        INFOPLIST_KEY_UISupportedInterfaceOrientations: UIInterfaceOrientationPortrait
+        # Lets CADisplayLink and MapKit run at 120 Hz on ProMotion.
+        INFOPLIST_KEY_CADisableMinimumFrameDurationOnPhone: YES
+        TARGETED_DEVICE_FAMILY: "1"
+    dependencies:
+      - package: SweatKitModel
+        product: SweatKitModel
+      - package: SweatKitFlyover
+      - package: fit-swift-sdk
+        product: FITSwiftSDK
+schemes:
+  FlyoverSpike:
+    build:
+      targets:
+        FlyoverSpike: all
+    run:
+      config: Release
