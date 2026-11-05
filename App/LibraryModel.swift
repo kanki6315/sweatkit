@@ -26,6 +26,7 @@ final class LibraryModel {
     var filter = FeedFilter()
     private var cursor: FeedCursor?
     private var generation = 0
+    var routeRefreshTask: Task<Void, Never>?
     private var importTask: Task<Void, Never>?
     private let localityResolver = ActivityLocalityResolver()
     var hasMore: Bool { cursor != nil }
@@ -68,6 +69,7 @@ final class LibraryModel {
             cursor = page.next
             error = nil
             resolveLocalities()
+            scheduleRouteMatching()
         } catch {
             guard request == generation else { return }
             self.error = error.localizedDescription

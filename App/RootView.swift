@@ -21,11 +21,7 @@ struct RootView: View {
             }
             Tab("Routes", systemImage: "point.topleft.down.to.point.bottomright.curvepath") {
                 screen("Routes") {
-                    ContentUnavailableView(
-                        "No routes yet",
-                        systemImage: "point.topleft.down.to.point.bottomright.curvepath",
-                        description: Text("A course becomes a route the second time you do it.")
-                    )
+                    RoutesView(libraryModel: library)
                 }
             }
             Tab("Trends", systemImage: "chart.xyaxis.line") {
