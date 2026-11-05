@@ -1,0 +1,27 @@
+{
+  "activityId": 24172582403,
+  "activityUUID": { "uuid": "00000000-0000-0000-0000-000000000000" },
+  "activityName": "Morning Ride",
+  "userProfileId": 1,
+  "isMultiSportParent": false,
+  "activityTypeDTO": { "typeId": 10, "typeKey": "road_biking", "parentTypeId": 2 },
+  "summaryDTO": {
+    "startTimeLocal": "2026-08-23T07:41:02.0",
+    "startTimeGMT": "2026-08-23T14:41:02.0",
+    "distance": 37530.0,
+    "duration": 5335.7,
+    "movingDuration": 5200.0,
+    "elapsedDuration": 5755.7
+  },
+  "metadataDTO": {
+    "isOriginal": true,
+    "fileFormat": { "formatId": 7, "formatKey": "fit" },
+    "lastUpdateDate": "2026-08-23T16:02:10.0",
+    "uploadedDate": "2026-08-23T16:01:58.0",
+    "manufacturer": "GARMIN",
+    "lapCount": 8,
+    "trimmed": false,
+    "favorite": false
+  },
+  "splitSummaries": []
+}

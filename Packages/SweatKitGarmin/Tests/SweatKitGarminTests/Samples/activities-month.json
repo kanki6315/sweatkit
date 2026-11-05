@@ -1,0 +1,35 @@
+[
+  {
+    "activityId": 24906063494,
+    "activityName": "Zwift - Watopia",
+    "startTimeLocal": "2026-10-14 18:02:11",
+    "startTimeGMT": "2026-10-15 01:02:11",
+    "activityType": { "typeId": 152, "typeKey": "virtual_ride", "parentTypeId": 2 },
+    "eventType": { "typeId": 9, "typeKey": "uncategorized" },
+    "distance": 18740.0,
+    "duration": 2409.0,
+    "elapsedDuration": 2408.0,
+    "movingDuration": 2400.0,
+    "manufacturer": "ZWIFT",
+    "avgPower": 182.0,
+    "averageHR": 141.0,
+    "hasPolyline": true,
+    "beginTimestamp": 1792112531000,
+    "isFavorite": false,
+    "summarizedExerciseSets": [],
+    "maxAvgPower_1": 512
+  },
+  {
+    "activityId": 24830689204,
+    "activityName": "Walk",
+    "startTimeLocal": "2026-10-03 09:15:40",
+    "startTimeGMT": "2026-10-03 16:15:40",
+    "activityType": { "typeId": 9, "typeKey": "walking", "parentTypeId": 17 },
+    "distance": 3270.5,
+    "duration": 2490.3,
+    "elapsedDuration": 2492.7,
+    "manufacturer": "GARMIN",
+    "averageHR": 98.0,
+    "hasPolyline": true
+  }
+]
