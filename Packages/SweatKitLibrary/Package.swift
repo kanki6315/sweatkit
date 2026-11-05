@@ -9,6 +9,7 @@ let package = Package(
     ],
     dependencies: [
         .package(path: "../SweatKitModel"),
+        .package(path: "../SweatKitCloud"),
         .package(path: "../SweatKitStore"),
         .package(path: "../SweatKitIngest"),
         .package(path: "../SweatKitAnalysis"),
@@ -21,6 +22,7 @@ let package = Package(
             name: "SweatKitLibrary",
             dependencies: [
                 .product(name: "SweatKitModel", package: "SweatKitModel"),
+                .product(name: "SweatKitCloud", package: "SweatKitCloud"),
                 .product(name: "SweatKitStore", package: "SweatKitStore"),
                 .product(name: "SweatKitIngest", package: "SweatKitIngest"),
                 .product(name: "SweatKitAnalysis", package: "SweatKitAnalysis"),
@@ -34,6 +36,7 @@ let package = Package(
                 "SweatKitLibrary",
                 .product(name: "SweatKitGarmin", package: "SweatKitGarmin"),
                 .product(name: "SweatKitModel", package: "SweatKitModel"),
+                .product(name: "SweatKitCloud", package: "SweatKitCloud"),
                 .product(name: "SweatKitStore", package: "SweatKitStore"),
                 .product(name: "SweatKitIngest", package: "SweatKitIngest"),
                 .product(name: "SweatKitAnalysis", package: "SweatKitAnalysis"),

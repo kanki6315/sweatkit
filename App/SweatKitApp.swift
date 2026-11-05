@@ -14,6 +14,7 @@ struct SweatKitApp: App {
             async let garminRefresh: Void? = library.garmin?.sync(.quick)
             async let healthRefresh: Void? = library.health?.sync()
             _ = await (garminRefresh, healthRefresh)
+            await library.cloud?.sync()
             await BackgroundRefresh.schedule()
         }
     }

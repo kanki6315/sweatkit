@@ -92,6 +92,8 @@ public actor ActivityLibrary {
     /// rides that started in that range. Weight and units stale nothing.
     @discardableResult
     public func saveProfile(_ profile: AthleteProfile) async throws(LibraryError) -> [StaleActivity] {
+        let token = SourceIdentity(source: .file, externalID: "profile-writer")
+        await begin(token); defer { end(token) }
         do {
             try await store.saveProfile(profile)
             return try await scan(profile: profile, checkingStreamFiles: false)
@@ -209,19 +211,20 @@ public actor ActivityLibrary {
         return ImportFileOutcome(index: index, name: file.name, result: result)
     }
 
-    private func importBytes(
+    func importBytes(
         _ bytes: Data,
         as identity: SourceIdentity?,
         fallbackUTCOffset: Int?,
-        at date: Date
+        at date: Date,
+        alreadyLocked: Bool = false
     ) async throws -> ImportResult {
         let hash = ContentHash(of: bytes)
         let identity = identity ?? SourceIdentity(source: .file, externalID: hash.hex)
 
         // One import of an identity at a time, so the same file twice in one
         // batch is added once and found already there once.
-        await begin(identity)
-        defer { end(identity) }
+        if !alreadyLocked { await begin(identity) }
+        defer { if !alreadyLocked { end(identity) } }
 
         if identityNeedsRecovery && FileManager.default.fileExists(atPath: identityURL.path) { try await reconcileIdentity() }
 
@@ -664,7 +667,7 @@ public actor ActivityLibrary {
     private var waiting: [SourceIdentity: [CheckedContinuation<Void, Never>]] = [:]
 
     /// Waits for the library mutation slot. Reads can continue during derivation.
-    private func begin(_ source: SourceIdentity) async {
+    func begin(_ source: SourceIdentity) async {
         let identity = SourceIdentity(source: .file, externalID: "library-writer")
         while busy.contains(identity) {
             await withCheckedContinuation { continuation in
@@ -674,7 +677,7 @@ public actor ActivityLibrary {
         busy.insert(identity)
     }
 
-    private func end(_ source: SourceIdentity) {
+    func end(_ source: SourceIdentity) {
         let identity = SourceIdentity(source: .file, externalID: "library-writer")
         busy.remove(identity)
         for continuation in waiting.removeValue(forKey: identity) ?? [] {
@@ -712,7 +715,7 @@ public actor ActivityLibrary {
 
     // MARK: Durable identity decisions and resolved feed
 
-    private struct IdentityJournal: Codable {
+    struct IdentityJournal: Codable {
         var version = 1
         var device = DeviceID(UUID().uuidString)
         var candidates: [String: MatchCandidate] = [:]
@@ -748,7 +751,7 @@ public actor ActivityLibrary {
 
     private var identityURL: URL { store.root.appendingPathComponent("identity.json") }
 
-    private func readIdentityJournal() throws -> IdentityJournal {
+    func readIdentityJournal() throws -> IdentityJournal {
         guard FileManager.default.fileExists(atPath: identityURL.path) else { return IdentityJournal() }
         var journal = try JSONDecoder().decode(IdentityJournal.self, from: Data(contentsOf: identityURL))
         guard journal.version == 1 else { throw LibraryError.storage("Unsupported identity journal version") }
@@ -760,7 +763,7 @@ public actor ActivityLibrary {
         return journal
     }
 
-    private func writeIdentityJournal(_ journal: IdentityJournal) throws {
+    func writeIdentityJournal(_ journal: IdentityJournal) throws {
         var safe = journal
         let local = journal.candidates.filter { $0.value.identity.source == .healthKit }
         safe.candidates = journal.candidates.filter { $0.value.identity.source != .healthKit }
@@ -777,12 +780,13 @@ public actor ActivityLibrary {
     /// Rebuilds the resolved feed from source facts and add-only decisions.
     /// The journal is the durable intent; a failed cache replacement is retried
     /// on the next feed read or import, including after relaunch.
-    private func reconcileIdentity() async throws {
+    func reconcileIdentity() async throws {
         var journal = try readIdentityJournal()
         let deleted = Set(journal.tombstones.filter { $0.kind == .deleted }.map(\.identity))
         if !deleted.isEmpty {
             // Intent is durable before any erasure. Recovery also repeats file
             // collection after a crash between the metadata save and unlink.
+            try await cloudPurgeDeletedAssets(deleted)
             try await store.eraseSources(deleted)
             journal.candidates = journal.candidates.filter { !deleted.contains($0.value.identity) }
         }
