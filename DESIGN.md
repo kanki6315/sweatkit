@@ -34,8 +34,42 @@ A full palette with four named roles, each used deliberately, plus a user-select
   - **Neon Lime**
   - **Cobalt**
 
+  The accent values are still to be chosen. Measured against the effort ramps with stand-in values, every theme sits close to a zone colour: Electric Cyan is effectively the cyan of power zone 3, Neon Lime is near the yellow of zone 4, and Cobalt is near the blue of zone 1. Electric Cyan and Neon Lime are also too pale to be an interactive colour on a light surface (1.7:1 and 1.3:1 on white), so each needs a darker light-mode value.
+
 ### Secondary
-- **Effort Ramps** `[to be resolved during implementation]`: data colour. Seven power zones, five heart-rate zones, a relative pace or speed ramp, and gradient bands (descent, flat, three climb steepnesses). Colour-blind safe and identical across the map, the timeline, charts and legends.
+- **Effort Ramps**: data colour. Seven power zones, five heart-rate zones, a relative pace or speed ramp, and gradient bands (descent, flat, three climb steepnesses). Colour-blind safe and identical across the map, the timeline, charts and legends. The values live in `Packages/SweatKitPalette`, whose tests pin them to this table.
+
+  **Power, seven zones.** Blue below threshold, yellow at it, warm above it, so a route shows which side of threshold it was ridden on.
+
+  | Zone | Share of threshold power | Hex | OKLCH |
+  | --- | --- | --- | --- |
+  | 1 | Under 55% | `#184998` | `0.42 0.14 260` |
+  | 2 | 55 to 75% | `#0e89d6` | `0.61 0.15 245` |
+  | 3 | 75 to 90% | `#65cbe3` | `0.79 0.10 215` |
+  | 4 | 90 to 105% | `#f8e94c` | `0.92 0.17 104` |
+  | 5 | 105 to 120% | `#fe9823` | `0.77 0.17 62` |
+  | 6 | 120 to 150% | `#ea5202` | `0.64 0.21 40` |
+  | 7 | Over 150% | `#ba0329` | `0.50 0.20 22` |
+
+  The OKLCH figures are the targets the hex values were fitted to inside sRGB; the hex is what ships.
+
+  **Heart rate, five zones.** Power zones 1, 2, 3, 4 and 6, so the meaning carries over: zone 4, just under threshold, is the yellow, and zone 5, at or above threshold, is warm.
+
+  **Pace or speed, five bands.** The same five colours, from slowest to fastest within the activity's own range. Yellow here means the upper middle of that activity, not threshold.
+
+  **Gradient, five bands.** Terrain, not effort, so it has its own colours, separated by lightness as well as hue.
+
+  | Band | Hex | OKLCH |
+  | --- | --- | --- |
+  | Descent, under -2% | `#1b8fa5` | `0.60 0.10 215` |
+  | Flat, -2 to 2% | `#e0ded7` | `0.90 0.01 95` |
+  | Climb, 2 to 5% | `#e6b14e` | `0.79 0.13 80` |
+  | Climb, 5 to 8% | `#c3610d` | `0.60 0.15 52` |
+  | Climb, over 8% | `#6d2a1a` | `0.38 0.10 35` |
+
+  **How they were checked.** Distances are Euclidean in OKLab, times 100, with protanopia and deuteranopia simulated at full severity. The targets are 8 between any two colours of a ramp for colour-blind viewers and 15 for full colour vision. Power: 12.9 and 15.2. Heart rate and pace: 18.4 and 19.2. Gradient: 15.7 and 16.3. A single-direction ramp from dark to bright through purple, red and yellow was tried four ways and failed one target or the other each time.
+
+  **Still open.** On a white chart background the yellow and the cyan are weak (1.3:1 and 1.9:1). They hold on the map and on dark surfaces. Charts in the analysis sheet in light mode need a darker edge on those marks or another treatment, and there are no Increase Contrast values yet.
 
 ### Tertiary
 - **Signal Colours** `[to be resolved during implementation]`: status only. Sync state, stale results, warnings and errors (expired key, denied Health access, failed request), plus the record and repeated-route marks in the feed. Never decorative.
@@ -48,7 +82,11 @@ A full palette with four named roles, each used deliberately, plus a user-select
 
 **The Theme Collision Rule.** Each accent theme is checked against every effort ramp it will sit beside. Where an accent sits too close to a zone hue (Neon Lime against the green zones, Electric Cyan against the cool end of the ramps), the chrome near the data steps back to neutral, rather than the data changing colour.
 
-**The One Accent Rule.** The theme accent stays at 10% of any screen or less. On the flyover it appears only on the cursor and the active control.
+**The One Accent Rule.** The theme accent stays at 10% of any screen or less. On the flyover it appears only on the active control.
+
+**The Neutral Marker Rule.** The marker on the map and the cursor on the timeline are white with a dark ring, never the accent. Every accent theme sits close to a zone colour, so an accent cursor can vanish against a matching stretch of route.
+
+**The Casing Rule.** A coloured line on the map is drawn over a dark outline (`#0b0b0b` at 55%). No ramp holds its contrast on both dark and bright ground without one.
 
 ## 3. Typography
 

@@ -20,6 +20,7 @@ A native iOS app for viewing one person's own rides and walks. Local-first, no s
 | `Packages/SweatKitTrackCleanup` | Turns a stream's positions into a cleaned track for route matching and a simplified line for the flyover, each point keeping its sample index. | Model |
 | `Packages/SweatKitFlyover` | The MapKit flyover view and its camera and drawing logic. Takes an already-prepared route. | Model |
 | `Packages/SweatKitTimeline` | The detail screen's scrubbing timeline and stats panel. Takes already-prepared series and the same scrub binding as the flyover. | Model |
+| `Packages/SweatKitPalette` | The colours of the data: power, heart-rate, pace and gradient ramps in band order, and the map line's casing. `DESIGN.md` records the values and how they were measured. | Nothing |
 | `Spikes/` | The M0 probe tool and the device harnesses for the flyover and the timeline, with gate results in `RESULTS.md` and device checklists in each `README.md`. Throwaway: nothing depends on them. | |
 | `Fixtures/` | Real FIT files shared by every package's tests | |
 | `project.yml` | XcodeGen spec. `SweatKit.xcodeproj` is generated and not committed. | |
