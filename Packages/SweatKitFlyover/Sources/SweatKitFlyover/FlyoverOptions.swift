@@ -1,5 +1,6 @@
-/// How the flyover map looks and moves. The defaults follow the spec and are
-/// revisited once the M0 flyover gates have results.
+/// How the flyover map looks and moves. The defaults were set from the M0
+/// flyover gates, recorded in `Spikes/Flyover/RESULTS.md`: realistic
+/// elevation stays on, and the route is drawn as band runs.
 public struct FlyoverOptions: Hashable, Sendable {
     public enum MapStyle: String, Hashable, Sendable, CaseIterable {
         /// Satellite imagery.
@@ -8,8 +9,10 @@ public struct FlyoverOptions: Hashable, Sendable {
         case standard
     }
 
-    /// How the coloured route is drawn. The frame-rate gate chooses between
-    /// these.
+    /// How the coloured route is drawn. Both held 60 frames per second in the
+    /// M0 gate. Band runs are the default because their band edges are exact by
+    /// construction, while a gradient's depend on how MapKit measures stop
+    /// locations, which the gate did not settle.
     public enum LineDrawing: String, Hashable, Sendable, CaseIterable {
         /// One polyline with a colour gradient that has hard edges between
         /// bands.
@@ -62,7 +65,7 @@ public struct FlyoverOptions: Hashable, Sendable {
     public init(
         mapStyle: MapStyle = .satellite,
         realisticElevation: Bool = true,
-        lineDrawing: LineDrawing = .gradient,
+        lineDrawing: LineDrawing = .bandRuns,
         gradientLocations: GradientStops.Parameter = .vertexIndex,
         lineLevel: LineLevel = .aboveRoads,
         lineWidth: Double = 5,
