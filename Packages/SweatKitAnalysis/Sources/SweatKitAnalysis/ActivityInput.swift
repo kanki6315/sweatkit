@@ -16,6 +16,9 @@ public struct ActivityInput: Hashable, Sendable {
 
     public var sport: Sport
     public var isIndoor: Bool
+    /// A virtual activity's altitude is computed, not sensed, so ascent
+    /// counts every rise.
+    public var isVirtual: Bool
     public var recording: Recording
     public var profile: AthleteProfile
     /// The date whose threshold power applies.
@@ -24,12 +27,14 @@ public struct ActivityInput: Hashable, Sendable {
     public init(
         sport: Sport,
         isIndoor: Bool = false,
+        isVirtual: Bool = false,
         recording: Recording,
         profile: AthleteProfile = AthleteProfile(),
         activityDate: Date
     ) {
         self.sport = sport
         self.isIndoor = isIndoor
+        self.isVirtual = isVirtual
         self.recording = recording
         self.profile = profile
         self.activityDate = activityDate

@@ -58,11 +58,13 @@ func makeInput(
     _ stream: AnalysisStream,
     sport: Sport = .cycling,
     indoor: Bool = false,
+    virtual: Bool = false,
     profile: AthleteProfile = AthleteProfile()
 ) -> ActivityInput {
     ActivityInput(
         sport: sport,
         isIndoor: indoor,
+        isVirtual: virtual,
         recording: .stream(stream),
         profile: profile,
         activityDate: testStart
@@ -74,9 +76,10 @@ func analyse(
     _ stream: AnalysisStream,
     sport: Sport = .cycling,
     indoor: Bool = false,
+    virtual: Bool = false,
     profile: AthleteProfile = AthleteProfile()
 ) -> ActivityMetrics {
-    ActivityAnalysis.metrics(for: makeInput(stream, sport: sport, indoor: indoor, profile: profile))
+    ActivityAnalysis.metrics(for: makeInput(stream, sport: sport, indoor: indoor, virtual: virtual, profile: profile))
 }
 
 /// Expects an available value within `tolerance` of `expected`.

@@ -6,6 +6,7 @@ import SweatKitModel
 struct StreamAnalysis {
     let sport: Sport
     let isIndoor: Bool
+    let isVirtual: Bool
     let profile: AthleteProfile
     let activityDate: Date
 
@@ -30,6 +31,7 @@ struct StreamAnalysis {
     init(input: ActivityInput, stream: AnalysisStream) {
         sport = input.sport
         isIndoor = input.isIndoor
+        isVirtual = input.isVirtual
         profile = input.profile
         activityDate = input.activityDate
 

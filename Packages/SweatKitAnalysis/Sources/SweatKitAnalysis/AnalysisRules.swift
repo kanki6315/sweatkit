@@ -1,3 +1,5 @@
+import SweatKitModel
+
 /// The numbers in the spec's "Analysis metrics" section. Every one is a
 /// starting value, kept here by name so it is tuned in one place.
 public enum AnalysisRules {
@@ -49,8 +51,25 @@ public enum AnalysisRules {
 
     // MARK: Other
 
-    /// Metres. Altitude changes smaller than this are not counted.
-    public static let elevationHysteresis = 3.0
+    /// Metres. A climb or descent ends once the altitude has turned back by
+    /// this much, and a turn smaller than this is not counted.
+    public static let elevationThreshold = 3.0
+    /// Metres. The same for cycling, where real climbing dwarfs the wobble
+    /// of the sensor.
+    public static let cyclingElevationThreshold = 1.5
+    /// Metres. The same for a virtual activity, whose altitude is computed
+    /// and has no wobble, so every rise and fall counts.
+    public static let virtualElevationThreshold = 0.0
+
+    /// The elevation threshold for a recording. Virtual comes first, then
+    /// cycling, and every other sport takes `elevationThreshold`.
+    ///
+    /// These are fitted to four recordings, one or two of each kind, so they
+    /// are provisional until more history confirms them.
+    public static func elevationThreshold(sport: Sport, isVirtual: Bool) -> Double {
+        if isVirtual { return virtualElevationThreshold }
+        return sport == .cycling ? cyclingElevationThreshold : elevationThreshold
+    }
     /// Metres. The length of one split.
     public static let splitDistance = 1000.0
     /// Metres. The distances a best time is found for.
@@ -62,7 +81,7 @@ public enum AnalysisRules {
 public enum AlgorithmVersion {
     public static let time = 1
     public static let distance = 1
-    public static let elevation = 1
+    public static let elevation = 2
     public static let zones = 1
     /// Coverage, average power and work.
     public static let power = 1
@@ -74,6 +93,7 @@ public enum AlgorithmVersion {
     /// Load from power, load from heart rate and the choice between them.
     public static let load = 1
     public static let efficiency = 1
-    public static let splits = 1
+    /// Splits carry ascent, so this follows `elevation`.
+    public static let splits = 2
     public static let bestDistances = 1
 }

@@ -459,12 +459,14 @@ A ride with sparse power, a ride under 5 minutes and a ride with no threshold po
 
 | Metric | Definition |
 | --- | --- |
-| Ascent and descent | Summed altitude change with a 3 m hysteresis; barometric altitude preferred over GPS |
+| Ascent and descent | Summed by peak and valley. A climb runs from a low point to the next high point and ends once the altitude has fallen back by the threshold; a turn smaller than the threshold neither ends it nor counts. Descents mirror this. The threshold is 3 m, 1.5 m for cycling, and none for a virtual activity, whose altitude is computed and has no noise. Barometric altitude preferred over GPS. |
 | Time in zones | Seconds per zone from measured and interpolated values; missing seconds are reported as their own bucket |
 | Efficiency, cycling | Weighted power divided by average heart rate, when both are available |
 | Efficiency, on foot | Average speed divided by average heart rate, over the seconds that have both. Always speed, never pace, so a higher value always means more output per heartbeat. |
 | Splits | Pace, heart rate and ascent per km, for walking, running and hiking |
 | Best distances | Fastest 1 km, 5 km and 10 km by timer time, for walking and running |
+
+The elevation thresholds are provisional. They were fitted to four recordings, where they bring ascent within 2 to 17% of the figure each file states, and within 11 m in every case. They are to be checked against a larger set of activities before they are relied on.
 
 **Rules across all metrics**
 

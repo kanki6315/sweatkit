@@ -51,8 +51,11 @@ import Testing
     }
 
     @Test func otherConstantsMatchTheSpec() {
-        // "a 3 m hysteresis"
-        #expect(AnalysisRules.elevationHysteresis == 3)
+        // "The threshold is 3 m, 1.5 m for cycling, and none for a virtual
+        // activity"
+        #expect(AnalysisRules.elevationThreshold == 3)
+        #expect(AnalysisRules.cyclingElevationThreshold == 1.5)
+        #expect(AnalysisRules.virtualElevationThreshold == 0)
         // "per km"
         #expect(AnalysisRules.splitDistance == 1000)
         // "Fastest 1 km, 5 km and 10 km"

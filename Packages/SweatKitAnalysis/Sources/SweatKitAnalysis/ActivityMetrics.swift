@@ -18,17 +18,15 @@ public struct ActivityMetrics: Hashable, Codable, Sendable {
     public var distance: Metric<Double>
     /// Metres climbed.
     ///
-    /// Summed altitude change with hysteresis, over every second that has
-    /// altitude. The reference is the first altitude. Each later altitude is
-    /// compared with the reference: when it differs by
-    /// `AnalysisRules.elevationHysteresis` or more, the whole difference is
-    /// added to ascent or descent and that altitude becomes the reference.
-    /// A smaller difference changes nothing. Unavailable with `.noAltitude`.
+    /// Summed by peak and valley, over every second that has altitude. A
+    /// climb runs from a low point to the next high point and ends once the
+    /// altitude has fallen back by the threshold; a turn smaller than the
+    /// threshold neither ends it nor counts. The threshold comes from
+    /// `AnalysisRules.elevationThreshold(sport:isVirtual:)`, and a turn of
+    /// exactly the threshold counts. Unavailable with `.noAltitude`.
     ///
-    /// The spec says only "a 3 m hysteresis"; this is its simplest form, and
-    /// a change of exactly 3 m counts. The stream carries one altitude
-    /// channel, so preferring barometric altitude over GPS is the stream
-    /// builder's job.
+    /// The stream carries one altitude channel, so preferring barometric
+    /// altitude over GPS is the stream builder's job.
     public var ascent: Metric<Double>
     /// Metres descended, as a positive number, under the same rule as `ascent`.
     public var descent: Metric<Double>
