@@ -2,10 +2,13 @@ import SwiftUI
 import SweatKitModel
 import SweatKitAnalysis
 import SweatKitSync
+import UniformTypeIdentifiers
 
 struct SettingsView: View {
     let model: LibraryModel
     @Environment(\.dismiss) private var dismiss
+    @AppStorage(AppTheme.preferenceKey) private var accent = AppTheme.cyan.rawValue
+    @State private var showsImporter = false
     @State private var profile = AthleteProfile()
     @State private var garminKey = ""
     @State private var keyCreated = Date()
@@ -18,104 +21,45 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack {
             Form {
-                if let health = model.health {
-                    Section("Apple Health") {
-                        Text(health.status)
-                        if let backgroundStatus = HealthBackgroundDelivery.shared.status {
-                            Text(backgroundStatus).font(.footnote).foregroundStyle(.secondary)
-                        }
-                        Button(health.enabled ? "Review Health access" : "Connect Apple Health") {
-                            Task { await health.connect(); await model.reload() }
-                        }.disabled(health.running)
-                        if health.enabled {
-                            Button("Refresh Health workouts") { Task { await health.sync(); await model.reload() } }
-                                .disabled(health.running)
-                            if health.running { Button("Pause Health refresh") { health.pause() } }
-                        }
-                        Text("Read-only access. Your workouts and samples stay on this device.")
-                            .font(.footnote).foregroundStyle(.secondary)
+                Section("Sources") {
+                    NavigationLink { Form { garminSettings }.navigationTitle("Garmin Connect") } label: {
+                        SettingsSummaryRow(title: "Garmin Connect", symbol: "watch.analog", detail: model.garmin?.status ?? "Opening library…")
                     }
+                    NavigationLink { Form { healthSettings }.navigationTitle("Apple Health") } label: {
+                        SettingsSummaryRow(title: "Apple Health", symbol: "heart.fill", detail: model.health?.status ?? "Opening library…")
+                    }
+                    Button { showsImporter = true } label: {
+                        SettingsSummaryRow(title: "Import files", symbol: "doc", detail: "FIT files from your device")
+                    }.disabled(model.library == nil || model.isImporting)
                 }
-                Section("Garmin") {
-                    if let garmin = model.garmin {
-                        Text(garmin.status)
-                        if let notice = garmin.expiryNotice() { Text(notice).foregroundStyle(.secondary) }
-                        SecureField("Personal API key", text: $garminKey)
-                            .textInputAutocapitalization(.never).autocorrectionDisabled()
-                        DatePicker("Key created", selection: $keyCreated, in: ...Date(), displayedComponents: .date)
-                        Picker("Key expiry period", selection: $keyPeriod) {
-                            ForEach(GarminKeyLifetime.Period.allCases, id: \.self) { period in
-                                Text(period == .year ? "1 year" : "\(period.rawValue) days").tag(period)
-                            }
-                        }
-                        Text("Use the creation date and period chosen in Garmin. The expiry reminder is an estimate; Garmin does not report the expiry date.")
-                            .font(.footnote).foregroundStyle(.secondary)
-                        Button(garmin.connected ? "Replace Garmin key" : "Connect Garmin") {
-                            Task {
-                                if await garmin.connect(key: garminKey, lifetime: GarminKeyLifetime(created: keyCreated, period: keyPeriod)) {
-                                    garminKey = ""
-                                    await garmin.sync()
-                                    await model.reload()
-                                }
-                            }
-                        }.disabled(garmin.running || garminKey.isEmpty)
-                        if garmin.connected {
-                            Button("Sync activities") { Task { await garmin.sync(); await model.reload() } }
-                                .disabled(!garmin.canSync)
-                            Button("Reconcile all history and files") {
-                                Task { await garmin.sync(.fullReconciliation(.all)); await model.reload() }
-                            }.disabled(!garmin.canSync)
-                            Text("Full reconciliation checks all history and downloads every original again. Unchanged files do not create new revisions. You can pause and resume.")
-                                .font(.footnote).foregroundStyle(.secondary)
-                            if garmin.running { Button("Pause sync") { garmin.pause() } }
-                        }
-                        Text("Your key stays in this device’s Keychain. Garmin supplies the activity data.")
-                            .font(.footnote).foregroundStyle(.secondary)
+                Section("Athlete profile") {
+                    NavigationLink { Form { athleteSettings; profileSave }.navigationTitle("Athlete profile") } label: {
+                        SettingsSummaryRow(title: "Thresholds and weight", symbol: "person", detail: "Heart rate, power history and weight")
+                    }
+                    NavigationLink { Form { zoneSettings(power: true); profileSave }.navigationTitle("Power zones") } label: {
+                        SettingsSummaryRow(title: "Power zones", symbol: "bolt.fill", detail: profile.powerZoneBounds == nil ? "Automatic · personal threshold or starter zones" : "Custom boundaries")
+                    }
+                    NavigationLink { Form { zoneSettings(power: false); profileSave }.navigationTitle("Heart-rate zones") } label: {
+                        SettingsSummaryRow(title: "Heart-rate zones", symbol: "heart", detail: profile.heartRateZoneBounds == nil ? "Automatic · personal threshold or starter zones" : "Custom boundaries")
                     }
                 }
                 if let library = model.library {
-                    Section("Library") {
+                    Section("Sync and storage") {
                         NavigationLink("Review duplicates and hidden activities") { LibraryReviewView(library: library) }
                     }
                 }
-                Section("Units") {
-                    Picker("Distance and speed", selection: $profile.units) {
+                Section("Display") {
+                    Picker("Units", selection: $profile.units) {
                         Text("Metric").tag(UnitSystem.metric)
                         Text("Imperial").tag(UnitSystem.imperial)
                     }
-                }
-                Section {
-                    optionalNumber("Maximum heart rate (bpm)", value: $profile.maxHeartRate)
-                    optionalNumber("Threshold heart rate (bpm)", value: $profile.statedThresholdHeartRate)
-                    optionalNumber("Weight (kg)", value: $profile.weight)
-                } header: { Text("Athlete profile") } footer: {
-                    Text("Leave unknown values blank. Without a threshold heart rate, zones use 90% of your maximum heart rate when set. Starter zones apply when neither is known.")
-                }
-                Section {
-                    ForEach(profile.thresholdPowerHistory.indices, id: \.self) { index in
-                        VStack(alignment: .leading) {
-                            DatePicker("Effective from", selection: $profile.thresholdPowerHistory[index].effectiveFrom,
-                                       displayedComponents: .date)
-                            TextField("Threshold power (watts)", value: $profile.thresholdPowerHistory[index].watts, format: .number)
-                                .keyboardType(.decimalPad)
-                                .accessibilityLabel("Threshold power in watts")
-                        }
+                    Picker("Accent", selection: $accent) {
+                        ForEach(AppTheme.allCases) { theme in Text(theme.name).tag(theme.rawValue) }
                     }
-                    .onDelete { profile.thresholdPowerHistory.remove(atOffsets: $0) }
-                    Button("Add threshold power") {
-                        profile.thresholdPowerHistory.append(.init(effectiveFrom: .now, watts: 0))
-                    }
-                } header: { Text("Threshold power history") } footer: {
-                    Text("Each value applies from its date until the next entry. Corrections recalculate the affected activities. Swipe an entry to delete it.")
+                    Text("Appearance follows your device. Accent changes apply immediately; save profile to apply units and zones.")
+                        .font(.footnote).foregroundStyle(.secondary)
                 }
-                zoneSettings(power: true)
-                zoneSettings(power: false)
-                if let error { Section { Text(error).foregroundStyle(.red) } }
-                if let status { Section { Text(status) } }
-                Section {
-                    Button(saving ? "Saving and recalculating…" : "Save profile") { Task { await save() } }
-                        .disabled(!loaded || saving)
-                }
+                profileSave
             }
             .disabled(saving)
             .navigationTitle("Settings")
@@ -129,7 +73,111 @@ struct SettingsView: View {
                 } catch { self.error = error.localizedDescription }
             }
         }
+        .tint((AppTheme(rawValue: accent) ?? .cyan).color)
+        .fileImporter(isPresented: $showsImporter, allowedContentTypes: [.data], allowsMultipleSelection: true) { result in
+            switch result {
+            case .success(let urls): model.importFiles(urls); dismiss()
+            case .failure(let failure): error = failure.localizedDescription
+            }
+        }
         .interactiveDismissDisabled(saving)
+    }
+
+    @ViewBuilder private var profileSave: some View {
+        if let error { Section { Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.red) } }
+        if let status { Section { Text(status) } }
+        Section {
+            Button(saving ? "Saving and recalculating…" : "Save profile") { Task { await save() } }
+                .disabled(!loaded || saving)
+        }
+    }
+
+    @ViewBuilder private var healthSettings: some View {
+        if let health = model.health {
+            Section("Apple Health") {
+                Text(health.status)
+                if let backgroundStatus = HealthBackgroundDelivery.shared.status {
+                    Text(backgroundStatus).font(.footnote).foregroundStyle(.secondary)
+                }
+                Button(health.enabled ? "Review Health access" : "Connect Apple Health") {
+                    Task { await health.connect(); await model.reload() }
+                }.disabled(health.running)
+                if health.enabled {
+                    Button("Refresh Health workouts") { Task { await health.sync(); await model.reload() } }
+                        .disabled(health.running)
+                    if health.running { Button("Pause Health refresh") { health.pause() } }
+                }
+                Text("Read-only access. Your workouts and samples stay on this device.")
+                    .font(.footnote).foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private var garminSettings: some View {
+        Section("Garmin") {
+            if let garmin = model.garmin {
+                Text(garmin.status)
+                if let notice = garmin.expiryNotice() { Text(notice).foregroundStyle(.secondary) }
+                SecureField("Personal API key", text: $garminKey)
+                    .textInputAutocapitalization(.never).autocorrectionDisabled()
+                DatePicker("Key created", selection: $keyCreated, in: ...Date(), displayedComponents: .date)
+                Picker("Key expiry period", selection: $keyPeriod) {
+                    ForEach(GarminKeyLifetime.Period.allCases, id: \.self) { period in
+                        Text(period == .year ? "1 year" : "\(period.rawValue) days").tag(period)
+                    }
+                }
+                Text("Use the creation date and period chosen in Garmin. The expiry reminder is an estimate; Garmin does not report the expiry date.")
+                    .font(.footnote).foregroundStyle(.secondary)
+                Button(garmin.connected ? "Replace Garmin key" : "Connect Garmin") {
+                    Task {
+                        if await garmin.connect(key: garminKey, lifetime: GarminKeyLifetime(created: keyCreated, period: keyPeriod)) {
+                            garminKey = ""
+                            await garmin.sync()
+                            await model.reload()
+                        }
+                    }
+                }.disabled(garmin.running || garminKey.isEmpty)
+                if garmin.connected {
+                    Button("Sync activities") { Task { await garmin.sync(); await model.reload() } }
+                        .disabled(!garmin.canSync)
+                    Button("Reconcile all history and files") {
+                        Task { await garmin.sync(.fullReconciliation(.all)); await model.reload() }
+                    }.disabled(!garmin.canSync)
+                    Text("Full reconciliation checks all history and downloads every original again. Unchanged files do not create new revisions. You can pause and resume.")
+                        .font(.footnote).foregroundStyle(.secondary)
+                    if garmin.running { Button("Pause sync") { garmin.pause() } }
+                }
+                Text("Your key stays in this device’s Keychain. Garmin supplies the activity data.")
+                    .font(.footnote).foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    @ViewBuilder private var athleteSettings: some View {
+        Section {
+            optionalNumber("Maximum heart rate (bpm)", value: $profile.maxHeartRate)
+            optionalNumber("Threshold heart rate (bpm)", value: $profile.statedThresholdHeartRate)
+            optionalNumber("Weight (kg)", value: $profile.weight)
+        } header: { Text("Athlete profile") } footer: {
+            Text("Leave unknown values blank. Without a threshold heart rate, zones use 90% of your maximum heart rate when set. Starter zones apply when neither is known.")
+        }
+        Section {
+            ForEach(profile.thresholdPowerHistory.indices, id: \.self) { index in
+                VStack(alignment: .leading) {
+                    DatePicker("Effective from", selection: $profile.thresholdPowerHistory[index].effectiveFrom,
+                               displayedComponents: .date)
+                    TextField("Threshold power (watts)", value: $profile.thresholdPowerHistory[index].watts, format: .number)
+                        .keyboardType(.decimalPad)
+                        .accessibilityLabel("Threshold power in watts")
+                }
+            }
+            .onDelete { profile.thresholdPowerHistory.remove(atOffsets: $0) }
+            Button("Add threshold power") {
+                profile.thresholdPowerHistory.append(.init(effectiveFrom: .now, watts: 0))
+            }
+        } header: { Text("Threshold power history") } footer: {
+            Text("Each value applies from its date until the next entry. Corrections recalculate the affected activities. Swipe an entry to delete it.")
+        }
     }
 
     private func zoneSettings(power: Bool) -> some View {
@@ -172,9 +220,13 @@ struct SettingsView: View {
     }
 
     private func optionalNumber(_ title: String, value: Binding<Double?>) -> some View {
-        TextField(title, value: value, format: .number)
-            .keyboardType(.decimalPad)
-            .accessibilityLabel(title)
+        LabeledContent(title) {
+            TextField("Not set", value: value, format: .number)
+                .keyboardType(.decimalPad)
+                .multilineTextAlignment(.trailing)
+                .frame(minWidth: 65)
+                .accessibilityLabel(title)
+        }
     }
 
     private func save() async {
@@ -206,6 +258,7 @@ struct SettingsView: View {
             status = report.failures.isEmpty ? "Profile saved. Activities are up to date."
                 : "Profile saved. \(report.failures.count) activities could not be recalculated. Save again to retry."
             await model.reload()
+            NotificationCenter.default.post(name: AppTheme.profileDidChange, object: nil)
         } catch { self.error = error.localizedDescription }
     }
 }

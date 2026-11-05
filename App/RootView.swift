@@ -3,6 +3,7 @@ import SwiftUI
 /// The three tabs. Settings opens from the profile button on each.
 struct RootView: View {
     @State private var showsSettings = false
+    @AppStorage(AppTheme.preferenceKey) private var accent = AppTheme.cyan.rawValue
     let library: LibraryModel
     @Environment(\.scenePhase) private var scenePhase
 
@@ -37,6 +38,7 @@ struct RootView: View {
                 }
             }
         }
+        .tint((AppTheme(rawValue: accent) ?? .cyan).color)
         .task(id: scenePhase) {
             if scenePhase == .active {
                 await library.open()
