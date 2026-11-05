@@ -74,7 +74,7 @@ public struct FlyoverOptions: Hashable, Sendable {
         cameraMode: CameraMode = .overview,
         overviewPitch: Double = 45,
         followDistance: Double = 600,
-        followPitch: Double = 60,
+        followPitch: Double = 45,
         followHeading: FollowHeading = FollowHeading(),
         headingSmoothing: HeadingSmoother = HeadingSmoother()
     ) {

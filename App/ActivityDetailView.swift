@@ -502,7 +502,9 @@ struct ActivityDetailView: View {
             let seconds = Double(elapsed.seconds) + Double(elapsed.attoseconds) / 1e18
             last = now
             let end = Double(prepared.input.stream.count - 1)
-            scrub = min(end, scrub + seconds * end / 60 * playbackSpeed)
+            // The analysis stream is 1 Hz: 1× means recorded time, regardless
+            // of activity length. Do not jump ahead after a main-thread stall.
+            scrub = min(end, scrub + min(seconds, 0.1) * playbackSpeed)
             if scrub >= end { playing = false }
         }
     }
