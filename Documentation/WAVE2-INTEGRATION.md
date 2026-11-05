@@ -46,12 +46,46 @@ Approved targets were not changed. Light/dark captures cover all nine surfaces, 
 
 Read-only exports confirmed the container exists, but development and production initially contained only Users. The additive RecoveryRecord schema was validated, installed in development and verified by re-export. `CloudKit/schema.ckdb` records that exact schema. No user activity data was uploaded.
 
-Production schema promotion is outstanding. Apple's CLI rejects production schema validation; managed browser policy denied access to CloudKit Console. This is a deployment blocker for TestFlight iCloud testing, not a failed unit test. See `CloudKit/README.md`.
+The user promoted the schema through CloudKit Console. A fresh read-only production export on 5 November confirmed RecoveryRecord with envelope BYTES and original ASSET (`/tmp/sweatkit-wave2-cloud-production-deployed.ckdb`). Production schema deployment is now verified. The earlier CLI/browser limitation is no longer a deployment blocker. See `CloudKit/README.md`.
 
-Still required: production schema promotion, signed-device cloud transport and two-device/wiped-device restore, Health UUID reattachment, the user's Health reference run, elapsed/timer/moving split agreement, real repeated-history false-merge review, phone camera/performance, comprehensive accessibility and full design parity. Feature implementation and passing integration tests do not close these gates.
+Still required: signed-device cloud transport and two-device/wiped-device restore, Health UUID reattachment, the user's Health reference run, elapsed/timer/moving split agreement, real repeated-history false-merge review, phone camera/performance, comprehensive accessibility and full design parity. Feature implementation and passing integration tests do not close these gates.
 
 ## Signed build handoff
 
-Release source: `5b02064` on main. `release.sh --no-upload --skip-tests` completed archive and App Store IPA export for **0.1.0 (309.20.37)** from a clean detached checkout. Tests were skipped inside the release script only because the full package, tooling and integrated UI suites had already passed. Artifacts and release log are retained in `build/release/0.1.0-309.20.37/`. No TestFlight upload or release tag was made.
+Release source: `5b02064` on main. `release.sh --no-upload --skip-tests` completed archive and App Store IPA export for **0.1.0 (309.20.37)** from a clean detached checkout. Tests were skipped inside the release script only because the full package, tooling and integrated UI suites had already passed. Artifacts and release log are retained in `build/release/0.1.0-309.20.37/`. The signed archive was subsequently uploaded on 5 November using Xcode’s archive export with destination `upload`, without rebuilding or rerunning tests. `upload.log` reports **Upload succeeded**, **EXPORT SUCCEEDED**, and that Apple has begun processing the package. Processing completion and tester availability have not been verified. Release tag `ios/v0.1.0-309.20.37` identifies source `5b02064`.
 
-The exported app passes `codesign --verify --deep --strict`. Entitlements confirm Production CloudKit, the intended container, production push, HealthKit and Health background delivery. Signed build/provisioning is therefore verified; production schema promotion and live cloud behavior remain separate outstanding gates. The temporary release checkout and simulator lease were released after preserving artifacts.
+The exported app passes `codesign --verify --deep --strict`. Entitlements confirm Production CloudKit, the intended container, production push, HealthKit and Health background delivery. Signed build/provisioning is therefore verified; production schema is separately verified, while live cloud behavior remains an outstanding gate. The temporary release checkout and simulator lease were released after preserving artifacts.
+
+
+## Original MVP remaining work after TestFlight upload
+
+Audit on 5 November against `SweatKit - Activity App MVP Spec.md`, current source and user-reported acceptance. Passing fixture tests and simulator screenshots are not physical-device acceptance.
+
+### Implementation and presentation
+
+- **M5 feed headline:** cycling still uses average power in FeedRules and ActivityFeedView. Switch eligible rides to weighted power, including feed cache versioning/recomputation and truthful unavailable handling.
+- **On-foot splits:** split calculations exist, but ActivityAnalysisView does not present the required kilometre table with pace, heart rate and ascent.
+- **Known-route context:** detail links to comparison and shows rank, but lacks the full occurrence ordinal and time-behind-best sentence required by the spec.
+- **Source attribution:** feed sources exist; complete consistent source attribution across detail, Routes and Trends as required by the spec.
+- **Approved design parity:** all nine surfaces have remaining differences documented above. Specific functional presentation gaps include the activity-versus-historical power-curve overlay and designed Settings threshold review flow. Threshold estimation and the Trends prompt to review a higher estimate already exist; these are not missing analysis engines. Source-defined segment presentation is a later enhancement, separate from the original kilometre-split requirement.
+
+### Acceptance still open
+
+- **HealthKit and timing:** retest the Apple Watch reference activity (2.53 km, 23:29, 116 spm in Fitness), distance/gradient/cadence and newly added running metrics; reconcile elapsed, timer and moving time in summary/splits. Importer fixes are implemented, phone confirmation is outstanding.
+- **M1/M2 performance:** 500 representative files on the phone; corrupt/truncated import leaving the library unchanged; cached five-hour ride under one second, smooth scrubbing/dimming, steep terrain and playback-camera feel.
+- **M3 recovery:** live late-upload/deep-scan and interrupted-backfill checks, expired/revoked credentials, partial/denied Health permissions and delayed samples/routes, network recovery, no duplicate imports. Overlap/partial-recording and keep-separate-through-a-third-record cases remain untested with the user's library; permanent deletion needs a disposable record.
+- **Checkpoint:** two weeks of daily use replacing the existing viewing workflow.
+- **M4:** signed-device cloud copy, two-device convergence, wiped-device restore, offline deletion/tombstones, retry behavior and stable Health UUID reattachment. Production schema and signing are complete; transport/restore acceptance is not.
+- **M6:** manual review of genuine repeated routes in real history, with no false merges; large-library matching performance.
+- **M7:** each Trends view renders a full year in under one second on the phone. Host aggregation timing alone does not meet this gate.
+- **M8:** full VoiceOver, Dynamic Type, contrast/transparency, Reduce Motion and empty/error recovery review; dense real-history visual comparison against the boards.
+
+Already user-accepted: library contents, basic map/scrub, analysis/reopen, indoor behavior, offline use, units and hide/restore. These are not being reopened wholesale. The user has no intentional overlapping recordings and does not know their HR threshold; those checks remain unverified rather than failed.
+
+### Suggested next parallel work
+
+1. Analysis and spec completion: weighted-power feed, kilometre splits, route context and timing semantics.
+2. Design completion: nine-board parity, consistent attribution, historical overlay and Settings threshold review.
+3. Device acceptance: Health reference retest, live sync/recovery, two-device cloud, performance and accessibility evidence. Coordinate shared devices and keep acceptance fixes isolated from the two implementation branches.
+
+Future-spec features (AI, route planning/course push, video export, partial-route matching, fitness/fatigue modelling and additional platforms) are not v1 blockers.
