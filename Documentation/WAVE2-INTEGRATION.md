@@ -1,5 +1,7 @@
 # Wave 2 integration
 
+**Subsequent implementation update:** the spec-completion and design-parity work below has now been implemented and integrated. See [Spec completion](SPEC-COMPLETION.md) and [Design parity](DESIGN-PARITY.md) for changes and fresh automated visual evidence. The remaining-work audit below records the state before that follow-up; its physical acceptance gates remain open and are intentionally deferred until the new TestFlight build.
+
 5 November 2026. Integration branch: `codex/integrate-wave2`. Preserves main through `280357d`, including marketing-site changes.
 
 - Trends `ecbd0a3`, merge `ed9463f`.

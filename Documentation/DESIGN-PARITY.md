@@ -44,3 +44,16 @@ The harness contains real FIT fixtures plus an explicitly test-only shifted/time
 - Color encoding follows the committed effort palettes; the neutral timeline cursor follows DESIGN.md even where the illustrative board uses cyan.
 
 Physical Health/Garmin/cloud acceptance, camera feel, performance milestones, full accessibility acceptance and dense real-library review remain deferred until the new TestFlight build.
+
+
+## Integrated release validation
+
+Both workstreams are merged on main. Release source `7a2955c` includes the spec changes, final large-text control correction and readable historical duration axes. Later evidence-only commits do not change production code.
+
+- Full package suite: **1,576 tests passed**, `/tmp/sweatkit-spec-design-packages.log`.
+- Release tooling: **6 tests passed**, `/tmp/sweatkit-spec-design-release-tests.log`.
+- Final signed archive and IPA export: **0.1.0 (309.21.15)**; `codesign --verify --deep --strict` passed. Tests were skipped inside the release script because the separate suites and integrated simulator verification had passed.
+- Earlier builds 309.21.10 and 309.21.12 were superseded before upload by the final large-text/axis corrections. They were not uploaded.
+- The elapsed-versus-moving source comparison, live Health/Garmin/iCloud behavior, phone performance, full accessibility acceptance and daily-use checkpoint remain deferred for the user’s next acceptance session.
+
+TestFlight upload succeeded on 5 November at 16:20 EST. Apple reported that the uploaded package is processing; processing completion and tester availability are not yet verified. Release tag `ios/v0.1.0-309.21.15` identifies `7a2955c`. Final artifacts and upload evidence are retained in `build/release/0.1.0-309.21.15/`.
