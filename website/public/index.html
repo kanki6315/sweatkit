@@ -6,11 +6,21 @@
   <meta name="description" content="SweatKit. Coming soon.">
   <meta name="color-scheme" content="light dark">
   <title>SweatKit — #soon</title>
+  <link rel="icon" type="image/svg+xml" href="/assets/app-icon-light.svg" media="(prefers-color-scheme: light)">
+  <link rel="icon" type="image/svg+xml" href="/assets/app-icon-dark.svg" media="(prefers-color-scheme: dark)">
   <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
   <header><a class="brand" href="/" aria-label="SweatKit home">SweatKit</a></header>
-  <main class="soon"><h1>#soon</h1></main>
+  <main class="soon">
+    <div class="announcement">
+      <picture class="app-icon">
+        <source srcset="/assets/app-icon-dark.svg" media="(prefers-color-scheme: dark)">
+        <img src="/assets/app-icon-light.svg" width="144" height="144" alt="SweatKit app icon">
+      </picture>
+      <h1>#soon</h1>
+    </div>
+  </main>
   <footer><span>© 2026 SweatKit</span><nav aria-label="Footer"><a href="/support">Support</a><a href="/privacy">Privacy</a></nav></footer>
 </body>
 </html>
