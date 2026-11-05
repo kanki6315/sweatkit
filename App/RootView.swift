@@ -3,7 +3,8 @@ import SwiftUI
 /// The three tabs. Settings opens from the profile button on each.
 struct RootView: View {
     @State private var showsSettings = false
-    @State private var library = LibraryModel()
+    let library: LibraryModel
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         TabView {
@@ -36,6 +37,15 @@ struct RootView: View {
                 }
             }
         }
+        .task(id: scenePhase) {
+            if scenePhase == .active {
+                await library.open()
+                await library.garmin?.sync()
+                await library.reload()
+            } else if scenePhase == .background {
+                BackgroundRefresh.schedule()
+            }
+        }
         .sheet(isPresented: $showsSettings) {
             SettingsView(model: library)
         }
@@ -57,5 +67,5 @@ struct RootView: View {
 }
 
 #Preview {
-    RootView()
+    RootView(library: LibraryModel())
 }

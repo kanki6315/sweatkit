@@ -9,6 +9,10 @@ import SweatKitSync
 final class GarminConnection {
     private(set) var connected = false
     private(set) var running = false
+    private(set) var lifetime: GarminKeyLifetime?
+    private(set) var keyRefused = false
+    var canSync: Bool { connected && !keyRefused && !running }
+    private var credential: GarminCredential?
     private(set) var status = "Connect Garmin in Settings to sync your activities."
     private var engine: GarminSync?
     private var task: Task<Void, Never>?
@@ -18,34 +22,51 @@ final class GarminConnection {
     init(library: ActivityLibrary, root: URL) {
         self.library = library
         bridge = PersistentGarminLibrary(library: library, metadataURL: root.appendingPathComponent("garmin-sync.json"))
+        restoreCredential()
+    }
+
+    /// A protected Keychain may be unavailable at background launch. Retry on
+    /// the next foreground refresh rather than requiring a new key or reinstall.
+    private func restoreCredential() {
         do {
-            if let key = try GarminKeychain.read() {
+            if let saved = try GarminKeychain.read() {
+                credential = saved
+                lifetime = saved.lifetime
+                keyRefused = saved.refused
+                let key = saved.key
                 engine = GarminSync(remote: GarminClientSource(client: GarminClient(apiKey: key)), library: bridge)
                 connected = true
-                status = "Garmin connected. Refresh to sync."
+                status = saved.refused ? "Garmin refused your key. Replace it in Settings to resume sync." : "Garmin connected. Refresh to sync."
             }
         } catch { status = "The Garmin key couldn't be read. Unlock your device and try again." }
     }
 
-    func connect(key: String) async {
-        guard !running else { return }
+    func connect(key: String, lifetime: GarminKeyLifetime) async -> Bool {
+        guard !running else { return false }
         let key = key.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !key.isEmpty else { status = "Enter your Garmin Personal API key."; return }
+        guard !key.isEmpty else { status = "Enter your Garmin Personal API key."; return false }
         running = true
         defer { running = false }
         let client = GarminClient(apiKey: key)
         do {
             try await client.validateKey()
-            try GarminKeychain.save(key)
+            let saved = GarminCredential(key: key, lifetime: lifetime, refused: false)
+            try GarminKeychain.save(saved)
+            credential = saved
+            self.lifetime = lifetime
+            keyRefused = false
             engine = GarminSync(remote: GarminClientSource(client: client), library: bridge)
             connected = true
-            status = "Garmin connected. Refresh to import your history."
+            status = "Garmin connected. Sync to import your history."
+            return true
         } catch let error as GarminError { status = Self.message(error) }
         catch { status = "The key couldn't be saved in Keychain. Unlock your device and try again." }
+        return false
     }
 
     func sync(_ run: SyncRun = .routine) async {
-        guard !running, let engine else { return }
+        if !connected && !running { restoreCredential() }
+        guard canSync, let engine else { return }
         running = true
         status = "Syncing Garmin. You can keep browsing; completed work is saved."
         task = Task {
@@ -57,7 +78,14 @@ final class GarminConnection {
                 if !report.unsettledMonths.isEmpty { status += " Some history changed during sync and will be checked again." }
             case .rateLimited(let until):
                 status = "Garmin asked us to wait until \(until.formatted(date: .abbreviated, time: .shortened)). Refresh after that to resume."
-            case .keyRefused: status = "Garmin refused your key. Enter a new Personal API key in Settings; your activities are safe."
+            case .keyRefused:
+                keyRefused = true
+                credential?.refused = true
+                status = "Garmin refused your key. Enter a new Personal API key in Settings; your activities are safe."
+                if let credential {
+                    do { try GarminKeychain.save(credential) }
+                    catch { status += " The refusal couldn't be saved; unlock your device before closing the app." }
+                }
             case .tokenRefused: status = "Garmin refused a renewed session. Try syncing again, or reconnect in Settings."
             case .listingFailed(let error): status = Self.message(error) + " Refresh to resume."
             case .interrupted: status = "Sync paused. Refresh to resume from saved progress."
@@ -65,12 +93,26 @@ final class GarminConnection {
             case .alreadyRunning: status = "Garmin sync is already running."
             }
         }
-        await task?.value
+        let runningTask = task
+        await withTaskCancellationHandler {
+            await runningTask?.value
+        } onCancel: {
+            runningTask?.cancel()
+        }
         task = nil
         running = false
     }
 
     func pause() { task?.cancel() }
+
+    func expiryNotice(at now: Date = Date()) -> String? {
+        guard let lifetime else { return connected ? "Key expiry is unknown. Enter the creation date and expiry period when replacing this key." : nil }
+        switch lifetime.warning(at: now) {
+        case .none: return nil
+        case .dueSoon: return "Your Garmin key is expected to expire on \(lifetime.estimatedExpiry.formatted(date: .abbreviated, time: .omitted)). Replace it in Settings."
+        case .expired: return "Your entered Garmin key period has ended. Replace the key if Garmin refuses sync. Stored activities are kept."
+        }
+    }
 
     private static func message(_ error: GarminError) -> String {
         switch error {
@@ -84,6 +126,12 @@ final class GarminConnection {
     }
 }
 
+private struct GarminCredential: Codable {
+    var key: String
+    var lifetime: GarminKeyLifetime?
+    var refused: Bool
+}
+
 private enum GarminKeychain {
     private static var query: [String: Any] {
         [kSecClass as String: kSecClassGenericPassword,
@@ -92,7 +140,7 @@ private enum GarminKeychain {
     }
     struct Failure: Error { let status: OSStatus }
 
-    static func read() throws -> String? {
+    static func read() throws -> GarminCredential? {
         var request = query
         request[kSecReturnData as String] = true
         request[kSecMatchLimit as String] = kSecMatchLimitOne
@@ -101,11 +149,14 @@ private enum GarminKeychain {
         if status == errSecItemNotFound { return nil }
         guard status == errSecSuccess, let data = result as? Data,
               let key = String(data: data, encoding: .utf8) else { throw Failure(status: status) }
-        return key
+        if let saved = try? JSONDecoder().decode(GarminCredential.self, from: data) { return saved }
+        // The first app version stored the plain key. Preserve it, with unknown expiry.
+        guard !key.hasPrefix("{") else { throw Failure(status: errSecDecode) }
+        return GarminCredential(key: key, lifetime: nil, refused: false)
     }
 
-    static func save(_ key: String) throws {
-        let attributes: [String: Any] = [kSecValueData as String: Data(key.utf8),
+    static func save(_ credential: GarminCredential) throws {
+        let attributes: [String: Any] = [kSecValueData as String: try JSONEncoder().encode(credential),
             kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly]
         var status = SecItemUpdate(query as CFDictionary, attributes as CFDictionary)
         if status == errSecItemNotFound {

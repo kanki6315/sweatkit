@@ -45,6 +45,15 @@ targets:
     platform: iOS
     sources:
       - App
+    info:
+      path: App/Info.plist
+      properties:
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        BGTaskSchedulerPermittedIdentifiers:
+          - com.arjunakankipati.sweatkit.refresh
+        UIBackgroundModes:
+          - fetch
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.arjunakankipati.sweatkit

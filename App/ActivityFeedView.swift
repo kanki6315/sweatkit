@@ -41,6 +41,7 @@ struct ActivityFeedView: View {
             if let garmin = model.garmin, garmin.connected {
                 Section {
                     Text(garmin.status).font(.subheadline)
+                    if let notice = garmin.expiryNotice() { Text(notice).font(.subheadline) }
                     if garmin.running { Button("Pause sync") { garmin.pause() } }
                 }
             }

@@ -13,6 +13,7 @@ let package = Package(
         .package(path: "../SweatKitIngest"),
         .package(path: "../SweatKitAnalysis"),
         .package(path: "../SweatKitSync"),
+        .package(path: "../SweatKitGarmin"),
         .package(path: "../SweatKitIdentity"),
     ],
     targets: [
@@ -31,6 +32,7 @@ let package = Package(
             name: "SweatKitLibraryTests",
             dependencies: [
                 "SweatKitLibrary",
+                .product(name: "SweatKitGarmin", package: "SweatKitGarmin"),
                 .product(name: "SweatKitModel", package: "SweatKitModel"),
                 .product(name: "SweatKitStore", package: "SweatKitStore"),
                 .product(name: "SweatKitIngest", package: "SweatKitIngest"),

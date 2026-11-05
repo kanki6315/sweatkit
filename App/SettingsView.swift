@@ -1,11 +1,14 @@
 import SwiftUI
 import SweatKitModel
+import SweatKitSync
 
 struct SettingsView: View {
     let model: LibraryModel
     @Environment(\.dismiss) private var dismiss
     @State private var profile = AthleteProfile()
     @State private var garminKey = ""
+    @State private var keyCreated = Date()
+    @State private var keyPeriod = GarminKeyLifetime.Period.days90
     @State private var loaded = false
     @State private var saving = false
     @State private var error: String?
@@ -32,17 +35,34 @@ struct SettingsView: View {
                 Section("Garmin") {
                     if let garmin = model.garmin {
                         Text(garmin.status)
+                        if let notice = garmin.expiryNotice() { Text(notice).foregroundStyle(.secondary) }
                         SecureField("Personal API key", text: $garminKey)
                             .textInputAutocapitalization(.never).autocorrectionDisabled()
+                        DatePicker("Key created", selection: $keyCreated, in: ...Date(), displayedComponents: .date)
+                        Picker("Key expiry period", selection: $keyPeriod) {
+                            ForEach(GarminKeyLifetime.Period.allCases, id: \.self) { period in
+                                Text(period == .year ? "1 year" : "\(period.rawValue) days").tag(period)
+                            }
+                        }
+                        Text("Use the creation date and period chosen in Garmin. The expiry reminder is an estimate; Garmin does not report the expiry date.")
+                            .font(.footnote).foregroundStyle(.secondary)
                         Button(garmin.connected ? "Replace Garmin key" : "Connect Garmin") {
                             Task {
-                                await garmin.connect(key: garminKey)
-                                if garmin.connected { garminKey = "" }
+                                if await garmin.connect(key: garminKey, lifetime: GarminKeyLifetime(created: keyCreated, period: keyPeriod)) {
+                                    garminKey = ""
+                                    await garmin.sync()
+                                    await model.reload()
+                                }
                             }
                         }.disabled(garmin.running || garminKey.isEmpty)
                         if garmin.connected {
                             Button("Sync activities") { Task { await garmin.sync(); await model.reload() } }
-                                .disabled(garmin.running)
+                                .disabled(!garmin.canSync)
+                            Button("Reconcile all history and files") {
+                                Task { await garmin.sync(.fullReconciliation(.all)); await model.reload() }
+                            }.disabled(!garmin.canSync)
+                            Text("Full reconciliation checks all history and downloads every original again. Unchanged files do not create new revisions. You can pause and resume.")
+                                .font(.footnote).foregroundStyle(.secondary)
                             if garmin.running { Button("Pause sync") { garmin.pause() } }
                         }
                         Text("Your key stays in this device’s Keychain. Garmin supplies the activity data.")
