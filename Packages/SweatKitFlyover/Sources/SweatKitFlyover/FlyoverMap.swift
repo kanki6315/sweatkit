@@ -202,7 +202,6 @@ final class FlyoverMapCoordinator: NSObject, MKMapViewDelegate {
     private var needsOverviewFit = false
 
     private var smoother = HeadingSmoother()
-    private var pacing = CameraPacing()
     private var headingTarget: Double?
     private var cameraNeedsUpdate = false
     private var displayLink: CADisplayLink?
@@ -246,12 +245,11 @@ final class FlyoverMapCoordinator: NSObject, MKMapViewDelegate {
             drawLines(geometry: geometry, settings: newLineSettings, in: mapView)
         }
 
-        marker.coordinate = CLLocationCoordinate2D(geometry.coordinate(at: position))
+        if cameraMode == .overview || !markerAdded { updateMarker() }
         if !markerAdded {
             mapView.addAnnotation(marker)
             markerAdded = true
         }
-        updateStrokeEnds()
 
         if routeChanged || cameraMode != self.cameraMode {
             self.cameraMode = cameraMode
@@ -260,7 +258,7 @@ final class FlyoverMapCoordinator: NSObject, MKMapViewDelegate {
                 stopDisplayLink()
                 fitOverview()
             case .follow:
-                pacing.reset(to: geometry.distance(at: position))
+                needsOverviewFit = false
                 smoother = options.headingSmoothing
                 headingTarget = options.followHeading.target(on: geometry, at: position)
                 smoother.reset(to: headingTarget ?? mapView.camera.heading)
@@ -351,6 +349,16 @@ final class FlyoverMapCoordinator: NSObject, MKMapViewDelegate {
         return CGFloat(geometry.strokeFraction(at: position, vertices: line.vertices))
     }
 
+    private func updateMarker() {
+        guard let geometry else { return }
+        // Commit the annotation and camera on the same display tick. Never animate
+        // the annotation independently of the camera following its coordinate.
+        UIView.performWithoutAnimation {
+            marker.coordinate = CLLocationCoordinate2D(geometry.coordinate(at: position))
+        }
+        updateStrokeEnds()
+    }
+
     private func updateStrokeEnds() {
         guard lineSettings?.dimsAhead == true else { return }
         for line in fullLines {
@@ -434,27 +442,32 @@ final class FlyoverMapCoordinator: NSObject, MKMapViewDelegate {
     }
 
     @objc private func stepCamera(_ link: CADisplayLink) {
-        guard cameraMode == .follow, let mapView, let geometry else {
+        guard cameraMode == .follow else {
             stopDisplayLink()
             return
         }
-        let targetDistance = geometry.distance(at: position)
-        guard cameraNeedsUpdate || !pacing.hasSettled(on: targetDistance) || !smoother.hasSettled(on: headingTarget) else {
+        guard cameraNeedsUpdate || !smoother.hasSettled(on: headingTarget) else {
             link.isPaused = true
             lastFrameTimestamp = nil
             return
         }
-        // Long gaps, such as after a pause, count as one frame.
-        let seconds = lastFrameTimestamp.map { min(link.timestamp - $0, 1.0 / 30) } ?? link.duration
+        // Bound long gaps without slowing rotation when a frame is dropped.
+        let seconds = lastFrameTimestamp.map { min(link.timestamp - $0, 0.1) } ?? link.duration
         lastFrameTimestamp = link.timestamp
+        updateFollowCamera(seconds: seconds)
+    }
+
+    func updateFollowCamera(seconds: Double) {
+        guard cameraMode == .follow, let mapView, let geometry else { return }
         cameraNeedsUpdate = false
-        let cameraDistance = pacing.step(towards: targetDistance, seconds: seconds)
-        let cameraPosition = geometry.position(atDistance: cameraDistance)
-        headingTarget = options.followHeading.target(on: geometry, at: cameraPosition) ?? headingTarget
+        // Translation is locked to the cursor; only orientation is eased.
+        // A second, lagging route position lets the marker escape at speed.
+        updateMarker()
+        headingTarget = options.followHeading.target(on: geometry, at: position) ?? headingTarget
         guard let heading = smoother.step(towards: headingTarget, seconds: seconds) else { return }
         mapView.setCamera(
             MKMapCamera(
-                lookingAtCenter: CLLocationCoordinate2D(geometry.coordinate(at: cameraPosition)),
+                lookingAtCenter: CLLocationCoordinate2D(geometry.coordinate(at: position)),
                 fromDistance: options.followDistance,
                 pitch: CGFloat(options.followPitch),
                 heading: heading

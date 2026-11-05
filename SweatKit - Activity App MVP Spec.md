@@ -350,7 +350,7 @@ The detail screen is a full-screen 3D map with a draggable timeline, and the tim
 - Overview mode fits the whole route with free pan, zoom and rotate.
 - Follow mode is a chase camera behind the marker. Its heading is the bearing to a point 150 to 300 m ahead on the route, smoothed so that switchbacks do not whip the view.
 - Pinch changes the follow distance and a drag orbits. A recentre button returns to the default view.
-- Play and pause sit beside the timeline. Default playback finishes any activity in about 60 seconds, with 0.5x, 2x and 4x options.
+- Play and pause sit beside the timeline. Default playback runs in recorded time (one activity second per second at 1x), with 0.5x, 2x and 4x options. Camera translation and the marker share the same position; only heading is smoothed.
 - With Reduce Motion on, follow mode is replaced by overview mode with a moving marker.
 
 **Route colouring**
