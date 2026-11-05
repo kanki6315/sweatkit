@@ -69,9 +69,11 @@ final class GarminConnection {
         if !connected && !running { restoreCredential() }
         guard canSync, let engine else { return }
         running = true
-        status = "Syncing Garmin. You can keep browsing; completed work is saved."
+        status = "Syncing Garmin: 0 added, 0 updated. You can keep browsing; completed work is saved."
         task = Task {
-            let report = await engine.run(run)
+            let report = await engine.run(run) { [weak self] progress in
+                await self?.showProgress(progress)
+            }
             switch report.outcome {
             case .completed:
                 status = "Garmin sync finished. \(report.added.count) added, \(report.revised.count) updated."
@@ -102,6 +104,10 @@ final class GarminConnection {
         }
         task = nil
         running = false
+    }
+
+    private func showProgress(_ progress: SyncProgress) {
+        status = "Syncing Garmin: \(progress.added) added, \(progress.updated) updated. You can keep browsing; completed work is saved."
     }
 
     func recoverDeletionCleanup() async {

@@ -73,3 +73,11 @@ public struct SyncReport: Sendable, Equatable {
         self.outcome = outcome
     }
 }
+
+/// Successfully saved new activities and file revisions in the current run.
+/// Unchanged activities, summary-only changes, and failed imports are excluded,
+/// matching the added/revised counts in the final report.
+public struct SyncProgress: Sendable, Equatable {
+    public let added: Int
+    public let updated: Int
+}

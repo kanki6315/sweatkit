@@ -46,11 +46,14 @@ public actor GarminSync {
         self.configuration = configuration
     }
 
-    public func run(_ run: SyncRun) async -> SyncReport {
+    public func run(
+        _ run: SyncRun,
+        onProgress: (@Sendable (SyncProgress) async -> Void)? = nil
+    ) async -> SyncReport {
         guard !running else { return SyncReport(outcome: .alreadyRunning) }
         running = true
         defer { running = false }
-        let reconciler = Reconciler(remote: remote, library: library, clock: clock, calendar: calendar, configuration: configuration, lastRequest: lastRequest)
+        let reconciler = Reconciler(remote: remote, library: library, clock: clock, calendar: calendar, configuration: configuration, lastRequest: lastRequest, onProgress: onProgress)
         let report = await reconciler.execute(run)
         lastRequest = await reconciler.lastRequest
         return report
@@ -82,19 +85,23 @@ actor Reconciler {
     private var known: [Int64: KnownGarminActivity] = [:]
     private var tombstoned: Set<Int64> = []
     private var report = SyncReport(outcome: .completed)
+    private let onProgress: (@Sendable (SyncProgress) async -> Void)?
+    private var lastProgress = SyncProgress(added: 0, updated: 0)
     /// Activities that already failed in this run, so they are not tried twice.
     private var failedThisRun: Set<Int64> = []
 
-    init(remote: any GarminRemoteSource, library: any GarminLibrary, clock: any SyncClock, calendar: Calendar, configuration: SyncConfiguration, lastRequest: Date?) {
+    init(remote: any GarminRemoteSource, library: any GarminLibrary, clock: any SyncClock, calendar: Calendar, configuration: SyncConfiguration, lastRequest: Date?, onProgress: (@Sendable (SyncProgress) async -> Void)?) {
         self.remote = remote
         self.library = library
         self.clock = clock
         self.calendar = calendar
         self.configuration = configuration
         self.lastRequest = lastRequest
+        self.onProgress = onProgress
     }
 
     func execute(_ run: SyncRun) async -> SyncReport {
+        await onProgress?(lastProgress)
         do {
             state = try await library.loadSyncState() ?? GarminSyncState()
             for (identity, activity) in try await library.knownGarminActivities() {
@@ -192,6 +199,7 @@ actor Reconciler {
         for id in state.pending.keys.sorted() where !failedThisRun.contains(id) {
             guard let pending = state.pending[id] else { continue }
             try await reconcile(pending.summary, force: pending.forceDownload)
+            await publishProgress()
         }
     }
 
@@ -241,6 +249,13 @@ actor Reconciler {
         state.unsettledMonths = finished?.unsettled ?? []
         report.pass = .finished(finished?.kind ?? .deepScan)
         try await save()
+    }
+
+    private func publishProgress() async {
+        let progress = SyncProgress(added: report.added.count, updated: report.revised.count)
+        guard progress != lastProgress else { return }
+        lastProgress = progress
+        await onProgress?(progress)
     }
 
     // MARK: Listing
@@ -302,6 +317,7 @@ actor Reconciler {
         }
         for entry in ordered {
             try await reconcile(entry, force: redownload.includes(entry.identity))
+            await publishProgress()
         }
     }
 

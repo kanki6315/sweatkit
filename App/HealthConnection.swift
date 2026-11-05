@@ -159,12 +159,12 @@ final class HealthConnection {
                     state.pending.remove(id)
                     try save(state)
                     completed += 1
-                    status = "Apple Health: updated \(completed) of \(pending.count) workouts."
+                    status = "Apple Health: processed \(completed) of \(pending.count) workouts."
                 } catch is CancellationError { throw CancellationError() }
                 catch { failures += 1 }
             }
             if failures > 0 {
-                status = "Apple Health updated \(completed) workouts; \(failures) need another attempt. Review read access in Health → profile → Apps → SweatKit, then refresh. Your stored recordings are kept."
+                status = "Apple Health processed \(completed) workouts; \(failures) need another attempt. Review read access in Health → profile → Apps → SweatKit, then refresh. Your stored recordings are kept."
             } else if state.workouts.isEmpty {
                 status = "No workouts are visible. There may be no workouts, or read access may be off. Review access in Health → profile → Apps → SweatKit, then refresh."
             } else {
