@@ -67,6 +67,7 @@ public actor ActivityLibrary {
     public init(root: URL, versions: PipelineVersions = .current) throws(LibraryError) {
         do {
             self.store = try LibraryStore(root: root)
+            try Self.separateLegacyHealthCandidates(root: root)
         } catch {
             throw LibraryError(error)
         }
@@ -720,17 +721,56 @@ public actor ActivityLibrary {
         var tombstones: [Tombstone] = []
     }
 
+    /// Upgrade the old mixed journal before returning the app's opened
+    /// library. User decisions/identities remain backed up; Health facts do not.
+    private nonisolated static func separateLegacyHealthCandidates(root: URL) throws {
+        let url = root.appendingPathComponent("identity.json")
+        guard FileManager.default.fileExists(atPath: url.path) else { return }
+        var journal = try JSONDecoder().decode(IdentityJournal.self, from: Data(contentsOf: url))
+        guard journal.version == 1 else { throw LibraryError.storage("Unsupported identity journal version") }
+        let health = journal.candidates.filter { $0.value.identity.source == .healthKit }
+        guard !health.isEmpty else { return }
+        var directory = root.appendingPathComponent("HealthMetadata", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        var values = URLResourceValues()
+        values.isExcludedFromBackup = true
+        try directory.setResourceValues(values)
+        let localURL = directory.appendingPathComponent("candidates.json")
+        var local: [String: MatchCandidate] = [:]
+        if FileManager.default.fileExists(atPath: localURL.path) {
+            local = try JSONDecoder().decode([String: MatchCandidate].self, from: Data(contentsOf: localURL))
+        }
+        local.merge(health) { local, _ in local }
+        try JSONEncoder().encode(local).write(to: localURL, options: .atomic)
+        journal.candidates = journal.candidates.filter { $0.value.identity.source != .healthKit }
+        try JSONEncoder().encode(journal).write(to: url, options: .atomic)
+    }
+
     private var identityURL: URL { store.root.appendingPathComponent("identity.json") }
 
     private func readIdentityJournal() throws -> IdentityJournal {
         guard FileManager.default.fileExists(atPath: identityURL.path) else { return IdentityJournal() }
-        let journal = try JSONDecoder().decode(IdentityJournal.self, from: Data(contentsOf: identityURL))
+        var journal = try JSONDecoder().decode(IdentityJournal.self, from: Data(contentsOf: identityURL))
         guard journal.version == 1 else { throw LibraryError.storage("Unsupported identity journal version") }
+        let healthURL = store.root.appendingPathComponent("HealthMetadata/candidates.json")
+        if FileManager.default.fileExists(atPath: healthURL.path) {
+            let local = try JSONDecoder().decode([String: MatchCandidate].self, from: Data(contentsOf: healthURL))
+            journal.candidates.merge(local) { _, local in local }
+        }
         return journal
     }
 
     private func writeIdentityJournal(_ journal: IdentityJournal) throws {
-        try JSONEncoder().encode(journal).write(to: identityURL, options: .atomic)
+        var safe = journal
+        let local = journal.candidates.filter { $0.value.identity.source == .healthKit }
+        safe.candidates = journal.candidates.filter { $0.value.identity.source != .healthKit }
+        var directory = store.root.appendingPathComponent("HealthMetadata", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        var values = URLResourceValues()
+        values.isExcludedFromBackup = true
+        try directory.setResourceValues(values)
+        try JSONEncoder().encode(local).write(to: directory.appendingPathComponent("candidates.json"), options: .atomic)
+        try JSONEncoder().encode(safe).write(to: identityURL, options: .atomic)
         identityNeedsRecovery = true
     }
 
@@ -897,7 +937,10 @@ public actor ActivityLibrary {
         await begin(id)
         defer { end(id) }
         if identityNeedsRecovery && FileManager.default.fileExists(atPath: identityURL.path) { try await reconcileIdentity() }
-        guard let row = try await store.activity(id) else { throw LibraryError.unknownActivity(id) }
+        guard let row = try await store.activity(id) else {
+            if try deletedIdentities().contains(id) { return }
+            throw LibraryError.unknownActivity(id)
+        }
         var journal = try readIdentityJournal()
         journal.tombstones += Tombstone.written(.deleted, for: Set(row.members), at: date)
         try writeIdentityJournal(journal)

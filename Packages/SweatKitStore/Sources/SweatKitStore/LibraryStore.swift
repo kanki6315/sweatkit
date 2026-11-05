@@ -18,10 +18,10 @@ import SweatKitModel
 ///
 /// Where later work attaches:
 /// - Hiding, restoring and deleting: `setState(_:for:)` records a source
-///   record's state and `ActivityRecord.isHidden` an activity's. Permanent
-///   deletion adds a method that writes a tombstone model keyed by identity
-///   before erasing the record's revisions, originals, streams and results;
-///   `importOriginal` then refuses identities with a tombstone.
+///   record's state and `ActivityRecord.isHidden` an activity's. The library
+///   coordinator durably writes tombstones before calling `eraseSources`,
+///   and refuses imports of those identities. The store erases metadata and
+///   collects only payloads that no surviving revision references.
 /// - Merge links and decisions: add-only models beside `ActivityEntity`, see
 ///   `StoreSchemaV1`. A merge or split replaces the affected activities in
 ///   one save; `saveActivity` refuses a member of another activity until then.
@@ -61,6 +61,7 @@ public actor LibraryStore: ModelActor {
         )
         let context = ModelContext(container)
         context.autosaveEnabled = false
+        try MetadataBackup.prepare(context, files: files)
         self.modelExecutor = DefaultSerialModelExecutor(modelContext: context)
         self.modelContainer = container
         self.files = files
@@ -98,11 +99,11 @@ public actor LibraryStore: ModelActor {
                 return .unchanged(try value(of: existing))
             }
             existing.currentRevisionHash = hash.hex
-            try modelContext.save()
+            try MetadataBackup.save(modelContext, files: files)
             return .newRevision(try value(of: existing))
         }
 
-        try files.writeOriginal(bytes, hash: hash)
+        try files.writeOriginal(bytes, hash: hash, health: identity.source == .healthKit)
 
         let record: SourceRecordEntity
         if let existing {
@@ -129,7 +130,7 @@ public actor LibraryStore: ModelActor {
         modelContext.insert(revision)
         revision.record = record
         record.currentRevisionHash = hash.hex
-        try modelContext.save()
+        try MetadataBackup.save(modelContext, files: files)
         let stored = try value(of: record)
         return existing == nil ? .newRecord(stored) : .newRevision(stored)
     }
@@ -154,7 +155,7 @@ public actor LibraryStore: ModelActor {
     public func setState(_ state: SourceRecordState, for identity: SourceIdentity) throws {
         guard let record = try fetchRecord(identity) else { throw StoreError.unknownSourceRecord(identity) }
         record.stateRaw = state.rawValue
-        try modelContext.save()
+        try MetadataBackup.save(modelContext, files: files)
     }
 
     /// The bytes of a stored original, checked against their hash. Nil when
@@ -518,7 +519,7 @@ public actor LibraryStore: ModelActor {
         } else {
             modelContext.insert(ProfileEntity(key: key, encoded: encoded))
         }
-        try modelContext.save()
+        try MetadataBackup.save(modelContext, files: files)
     }
 
     /// The stored profile, or nil before one is saved.
@@ -564,7 +565,7 @@ public actor LibraryStore: ModelActor {
                 modelContext.delete(result)
             }
             for record in records { modelContext.delete(record) }
-            try modelContext.save()
+            try MetadataBackup.save(modelContext, files: files)
         } catch { modelContext.rollback(); throw error }
         // Metadata commits first. A crash here leaves only unreferenced files;
         // retrying this method collects them even if the records are gone.
@@ -582,7 +583,7 @@ public actor LibraryStore: ModelActor {
         let manager = FileManager.default
 
         var removedOriginals: [ContentHash] = []
-        for url in try files.contents(of: files.originalsDirectory) where !known.contains(url.lastPathComponent) {
+        for url in try files.contents(of: files.originalsDirectory) + files.contents(of: files.healthOriginalsDirectory) where !known.contains(url.lastPathComponent) {
             try manager.removeItem(at: url)
             removedOriginals.append(ContentHash(hex: url.lastPathComponent))
         }
@@ -610,7 +611,7 @@ public actor LibraryStore: ModelActor {
         }
 
         let missing = known
-            .filter { !manager.fileExists(atPath: files.originalURL(ContentHash(hex: $0)).path) }
+            .filter { !manager.fileExists(atPath: files.originalURL(ContentHash(hex: $0)).path) && !manager.fileExists(atPath: files.healthOriginalsDirectory.appendingPathComponent($0).path) }
             .sorted()
             .map(ContentHash.init(hex:))
         return GarbageReport(

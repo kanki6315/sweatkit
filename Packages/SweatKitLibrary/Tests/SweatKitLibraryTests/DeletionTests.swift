@@ -34,6 +34,7 @@ import Testing
         }
         let reopened = try temporary.open()
         #expect(try await reopened.feed(limit: 10).activities.isEmpty)
+        try await reopened.permanentlyDelete(id) // A retry after recovery succeeds.
         await #expect(throws: LibraryError.permanentlyDeleted(id)) {
             try await reopened.importFile(first, as: id)
         }
