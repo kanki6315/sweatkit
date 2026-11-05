@@ -37,6 +37,8 @@ packages:
     path: Packages/SweatKitDetail
   SweatKitSync:
     path: Packages/SweatKitSync
+  SweatKitLibrary:
+    path: Packages/SweatKitLibrary
 targets:
   SweatKit:
     type: application
@@ -66,6 +68,7 @@ targets:
       - package: SweatKitPalette
       - package: SweatKitDetail
       - package: SweatKitSync
+      - package: SweatKitLibrary
 schemes:
   SweatKit:
     build:

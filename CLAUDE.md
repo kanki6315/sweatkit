@@ -20,6 +20,7 @@ A native iOS app for viewing one person's own rides and walks. Local-first, no s
 | `Packages/SweatKitTrackCleanup` | Turns a stream's positions into a cleaned track for route matching and a simplified line for the flyover, each point keeping its sample index. | Model |
 | `Packages/SweatKitFlyover` | The MapKit flyover view and its camera and drawing logic. Takes an already-prepared route. | Model |
 | `Packages/SweatKitTimeline` | The detail screen's scrubbing timeline and stats panel. Takes already-prepared series and the same scrub binding as the flyover. | Model |
+| `Packages/SweatKitLibrary` | The pipeline from an imported file to a stored activity: decode, store, build the stream, compute metrics, write the feed row, and recompute what goes stale. A layer above the leaf packages. | Model, Store, Ingest, Analysis |
 | `Packages/SweatKitDetail` | Prepares one activity's stream for the detail screen: the coloured route, the timeline's series, stats at the cursor and over a range. A layer above the leaf packages. | Model, Analysis, TrackCleanup, Flyover, Timeline |
 | `Packages/SweatKitSync` | Garmin reconciliation: quick sync, deep scan, backfill and deletion inference, behind interfaces for Garmin and for the library. No storage of its own. | Model, Garmin |
 | `Packages/SweatKitPalette` | The colours of the data: power, heart-rate, pace and gradient ramps in band order, and the map line's casing. `DESIGN.md` records the values and how they were measured. | Nothing |
@@ -27,7 +28,7 @@ A native iOS app for viewing one person's own rides and walks. Local-first, no s
 | `Fixtures/` | Real FIT files shared by every package's tests | |
 | `project.yml` | XcodeGen spec. `SweatKit.xcodeproj` is generated and not committed. | |
 
-The spec's "Core" package is split into Model, Ingest and Identity so that each can be built and tested alone. Storage exists as `SweatKitStore`; the pipeline that feeds it from Ingest, Identity and Analysis, Garmin sync and the HealthKit adapter do not exist yet.
+The spec's "Core" package is split into Model, Ingest and Identity so that each can be built and tested alone. Storage is `SweatKitStore` and the pipeline that feeds it is `SweatKitLibrary`. The screens that use them, the adapter that joins Garmin sync to the library, de-duplication in the pipeline and the HealthKit adapter do not exist yet.
 
 M0 is closed: all five gates passed. `Spikes/GarminPull/RESULTS.md` and `Spikes/Flyover/RESULTS.md` hold the evidence, the decisions, and what was left unmeasured.
 
@@ -44,7 +45,7 @@ xcodebuild -project SweatKit.xcodeproj -scheme SweatKit \
 ## Rules
 
 - Leaf packages depend only on Model and never on each other. Anything two of them need goes in Model.
-- Two kinds of package sit above the leaves and may depend on them: layers that join several, which today is `SweatKitDetail`, and packages built on one specific leaf, which today is `SweatKitSync` on `SweatKitGarmin`. The app depends on everything. Do not add another layer without saying why a leaf will not do.
+- Two kinds of package sit above the leaves and may depend on them: layers that join several, which today are `SweatKitLibrary` and `SweatKitDetail`, and packages built on one specific leaf, which today is `SweatKitSync` on `SweatKitGarmin`. The app depends on everything. Do not add another layer without saying why a leaf will not do.
 - Model is the shared contract. Change it only by adding to it, and say so in the summary of the work, because other packages are built against it in parallel.
 - Analysis, Route Matching and Identity are pure Swift: no interface, network, storage or FIT SDK code.
 - Tests use Swift Testing. Fixtures come from `Fixtures` in `SweatKitTestSupport`; see `Fixtures/README.md` for what each file holds and how to add one.
