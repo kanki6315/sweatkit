@@ -17,9 +17,10 @@ struct AccessToken: Sendable, CustomStringConvertible {
     /// The key name reported when the body is a bare token rather than an object.
     static let bareTokenKey = "<bare token>"
 
-    /// Garmin does not document the token response body. This accepts a JSON
-    /// object with the common OAuth2 spellings, a JSON string, or the token as
-    /// plain text, and falls back to the documented lifetime.
+    /// Garmin does not document the token response body. M0's live run got the
+    /// token as `text/plain` with no stated lifetime, so the documented lifetime
+    /// applies. A JSON string, or a JSON object with the common OAuth2 spellings,
+    /// is also accepted in case the format changes.
     static func parse(_ data: Data, status: Int, now: Date) throws(GarminError) -> AccessToken {
         let parsed = try? JSONSerialization.jsonObject(with: data, options: .fragmentsAllowed)
         if let bare = (parsed as? String) ?? (parsed == nil ? String(data: data, encoding: .utf8) : nil) {

@@ -2,8 +2,8 @@ import Foundation
 @testable import SweatKitGarmin
 import Testing
 
-func sample(_ name: String) throws -> Data {
-    let url = try #require(Bundle.module.url(forResource: name, withExtension: "json", subdirectory: "Samples"))
+func sample(_ name: String, _ ext: String = "json") throws -> Data {
+    let url = try #require(Bundle.module.url(forResource: name, withExtension: ext, subdirectory: "Samples"))
     return try Data(contentsOf: url)
 }
 
@@ -38,8 +38,16 @@ func sample(_ name: String) throws -> Data {
         #expect(detail.metadataDTO?.trimmed == false)
     }
 
-    @Test func tokenUsesTheStatedLifetime() throws {
-        let token = try AccessToken.parse(sample("token"), status: 200, now: now)
+    /// The shape the live endpoint returned: the token as plain text, no lifetime.
+    @Test func tokenAsPlainTextGetsTheDocumentedLifetime() throws {
+        let token = try AccessToken.parse(sample("token", "txt"), status: 200, now: now)
+        #expect(token.value == "sample.bare-token.not-real")
+        #expect(token.expiresAt == now.addingTimeInterval(24 * 60 * 60))
+        #expect(token.keys == [AccessToken.bareTokenKey])
+    }
+
+    @Test func tokenObjectUsesTheStatedLifetime() throws {
+        let token = try AccessToken.parse(sample("token-object"), status: 200, now: now)
         #expect(token.value == "sample-access-token-not-real")
         #expect(token.expiresAt == now.addingTimeInterval(86400))
         #expect(token.keys == ["access_token", "expires_in", "token_type"])
@@ -85,7 +93,7 @@ func sample(_ name: String) throws -> Data {
     }
 
     @Test func tokenDescriptionHidesTheValue() throws {
-        let token = try AccessToken.parse(sample("token"), status: 200, now: now)
+        let token = try AccessToken.parse(sample("token", "txt"), status: 200, now: now)
         #expect(!"\(token)".contains(token.value))
     }
 

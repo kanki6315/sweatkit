@@ -54,7 +54,7 @@ public struct GarminEndpoints: Sendable {
     }
 
     /// The FAQ says Connect APIs take "OAuth2 access tokens" but does not name
-    /// the scheme. `Bearer` is the OAuth2 default; M0's live run confirms it.
+    /// the scheme. M0's live run confirmed `Bearer`.
     private func authorized(_ request: URLRequest, accessToken: String, accept: String) -> URLRequest {
         var request = request
         request.httpMethod = "GET"
