@@ -20,6 +20,11 @@ struct ActivityDetailView: View {
     @State private var alternatives: [AlternativeOffer] = []
     @State private var presentation: DetailAnalysisPresentation?
     @State private var metrics: ActivityMetrics?
+    @State private var historicalCurve: [PowerCurvePoint] = []
+    @State private var historicalCurveError: String?
+    @State private var historyWindow = 90
+    @State private var historicalCurveLoading = false
+    @State private var expandsAnalysisTimeline = false
     @State private var showsAnalysis = false
     @State private var playing = false
     @State private var playbackSpeed = 1.0
@@ -95,14 +100,50 @@ struct ActivityDetailView: View {
             if let presentation, let prepared {
                 NavigationStack {
                     analysis(presentation, prepared)
-                        .safeAreaInset(edge: .bottom) { timeline(prepared) }
+                        .safeAreaInset(edge: .bottom) {
+                            if expandsAnalysisTimeline {
+                                VStack(spacing: 0) {
+                                    Button("Compact timeline", systemImage: "chevron.down") { expandsAnalysisTimeline = false }.font(.caption)
+                                    timeline(prepared)
+                                }.background(Color(uiColor: .systemBackground))
+                            } else { compactPlayback(prepared) }
+                        }
                         .navigationTitle(record.title)
                         .navigationBarTitleDisplayMode(.inline)
                         .toolbar { Button("Done") { showsAnalysis = false } }
                 }
-                .presentationDetents(dynamicTypeSize.isAccessibilitySize ? [.large] : [.medium, .large])
+                .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
             }
+        }
+        .task(id: "\(showsAnalysis)-\(historyWindow)") {
+            guard showsAnalysis, record.sport.family == .cycling, let library else { return }
+            historicalCurve = []
+            historicalCurveError = nil
+            historicalCurveLoading = true
+            do {
+                let history = try await library.trendsHistory()
+                try Task.checkCancellation()
+                let start = historyWindow == 0 ? Date.distantPast : historyWindow == 365
+                    ? (Calendar.current.dateInterval(of: .year, for: record.start)?.start ?? record.start)
+                    : record.start.addingTimeInterval(-90 * 86400)
+                let end = record.start
+                let points = await Task.detached(priority: .utility) {
+                    let eligible = history.activities.filter {
+                        !$0.isStale && $0.activity.start >= start && $0.activity.start < end
+                            && $0.activity.sport.family == .cycling
+                    }.flatMap(\.curve)
+                    let groups = Dictionary(grouping: eligible, by: \.duration)
+                    return groups.keys.sorted().compactMap { duration in
+                        groups[duration]?.filter { $0.power.value != nil }.max { ($0.power.value ?? -.infinity) < ($1.power.value ?? -.infinity) }
+                    }
+                }.value
+                try Task.checkCancellation()
+                historicalCurve = points
+                historicalCurveLoading = false
+                historicalCurveError = nil
+            } catch is CancellationError { }
+            catch { historicalCurve = []; historicalCurveLoading = false; historicalCurveError = "Historical comparison couldn’t load." }
         }
         .task(id: selection) {
             guard let selection, let prepared else { selectionStats = nil; return }
@@ -110,6 +151,21 @@ struct ActivityDetailView: View {
             guard !Task.isCancelled else { return }
             selectionStats = result
         }
+    }
+
+    private func compactPlayback(_ detail: PreparedDetail) -> some View {
+        HStack(spacing: 12) {
+            Button(playing ? "Pause" : "Play", systemImage: playing ? "pause.fill" : "play.fill") { playing.toggle() }
+                .labelStyle(.iconOnly).buttonStyle(.borderedProminent).buttonBorderShape(.circle)
+                .frame(minWidth: 44, minHeight: 44)
+            Button("Expand timeline", systemImage: "waveform.path") { expandsAnalysisTimeline = true }
+                .labelStyle(.iconOnly).frame(minWidth: 44, minHeight: 44)
+            Slider(value: manualScrub, in: 0...Double(max(1, detail.input.stream.count - 1)))
+                .tint(.primary).accessibilityLabel("Analysis playback position")
+            Text(Duration.seconds(scrub.rounded(.down)).formatted(.time(pattern: .hourMinuteSecond)))
+                .font(.caption.monospacedDigit()).frame(minWidth: 64, alignment: .trailing)
+        }.padding(.horizontal, 16).padding(.vertical, 8)
+            .background(Color(uiColor: .systemBackground))
     }
 
     private func updateTimelineOverlay() {
@@ -140,7 +196,7 @@ struct ActivityDetailView: View {
                         }.accessibilityLabel("Back")
                         VStack(alignment: .leading, spacing: 3) {
                             Text(record.title).font(.headline).lineLimit(2)
-                            Text("\(record.start.formatted(.dateTime.month(.abbreviated).day().hour().minute())) · \(record.sport.rawValue.capitalized)")
+                            Text("\(record.start.formatted(.dateTime.month(.abbreviated).day().hour().minute())) · \(SourceAttributionView.names(record.members.map(\.source)))")
                                 .font(.caption).foregroundStyle(.secondary)
                         }.frame(maxWidth: .infinity, alignment: .leading)
                         Menu {
@@ -209,7 +265,7 @@ struct ActivityDetailView: View {
 
     private func analysis(_ presentation: DetailAnalysisPresentation, _ detail: PreparedDetail) -> some View {
         ActivityAnalysisView(presentation: presentation, detail: detail, metrics: metrics, units: units,
-                             scrub: manualScrub, selection: $selection)
+                             scrub: manualScrub, selection: $selection, historicalCurve: historicalCurve, historicalCurveError: historicalCurveError, historicalCurveLoading: historicalCurveLoading, historyWindow: $historyWindow)
     }
 
     @ViewBuilder private func timeline(_ detail: PreparedDetail) -> some View {

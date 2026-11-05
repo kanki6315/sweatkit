@@ -38,18 +38,19 @@ struct RouteComparisonView: View {
                 VStack(alignment: .leading, spacing: 0) {
                     RouteMap(line: route.reference.line, frame: frame, satellite: true, follow: follow, coloredRuns: coloredRuns).frame(height: 300)
                         .overlay(alignment: .bottomTrailing) { Text(routeLegend).font(.caption2).padding(6).background(.regularMaterial, in: Capsule()).padding(.trailing, 12).padding(.bottom, 34) }
-                    VStack(alignment: .leading, spacing: 16) {
+                    VStack(alignment: .leading, spacing: 12) {
                         if typeSize.isAccessibilitySize {
-                            Text("Effort comparison").font(.title.bold())
+                            Text(baseline.id == route.ranked.first?.id ? "This effort vs best" : "Effort comparison").font(.title.bold())
                             clockPicker(comparison)
                         } else {
                             HStack(alignment: .top) {
-                                Text("Effort comparison").font(.title2.bold())
+                                Text(baseline.id == route.ranked.first?.id ? "This effort vs best" : "Effort comparison").font(.title2.bold())
                                 Spacer(minLength: 8)
                                 clockPicker(comparison).frame(width: 155)
                             }
                         }
                         Text("\(route.name) · \(subject.activity.start.formatted(.dateTime.day().month(.abbreviated))) vs \(baseline.activity.start.formatted(.dateTime.day().month(.abbreviated)))").font(.subheadline).foregroundStyle(Color.secondary)
+                        SourceAttributionView(sources: subject.activity.members.map(\.source) + baseline.activity.members.map(\.source))
                         if !comparison.movingTimeIsAvailable { Text("Elapsed time for both efforts: pause positions are unknown.").font(.caption).foregroundStyle(Color.secondary) }
                         if typeSize.isAccessibilitySize {
                             VStack(alignment: .leading, spacing: 12) { gapStats(comparison, frame) }
@@ -58,7 +59,7 @@ struct RouteComparisonView: View {
                                 gapStats(comparison, frame)
                             }
                         }
-                        Text("Time gap (seconds) · negative = ahead, positive = behind").font(.caption).foregroundStyle(Color.secondary)
+                        Text("Time gap · ahead / behind").font(.caption).foregroundStyle(Color.secondary)
                         Chart {
                             RuleMark(y: .value("Even", 0)).foregroundStyle(Color.secondary)
                             ForEach(comparison.grid.indices, id: \.self) { i in
@@ -75,7 +76,7 @@ struct RouteComparisonView: View {
                         pairedChart(comparison, distance: frame.subjectRouteDistance)
                         if let error { Text(error).foregroundStyle(Color.secondary); Button("Reload charts") { Task { await loadStreams() } } }
                         summary(comparison, baseline)
-                    }.padding(20)
+                    }.padding(16)
                         .background(Color(uiColor: .systemGroupedBackground), in: UnevenRoundedRectangle(topLeadingRadius: 28, topTrailingRadius: 28))
                         .padding(.top, -24)
                 }.padding(.bottom, 12)
@@ -84,6 +85,7 @@ struct RouteComparisonView: View {
         .background(Color(uiColor: .systemGroupedBackground))
         .ignoresSafeArea(edges: .top)
         .toolbarBackground(.hidden, for: .navigationBar)
+        .toolbar(.hidden, for: .tabBar)
         .safeAreaInset(edge: .bottom) {
             if let comparison {
                 HStack(spacing: 12) {
@@ -138,15 +140,15 @@ struct RouteComparisonView: View {
         let point = comparison.grid.min { abs($0.routeDistance - frame.subjectRouteDistance) < abs($1.routeDistance - frame.subjectRouteDistance) }
         VStack(alignment: .leading) {
             Text(routeTime(point?.gap)).font(.title2.bold()).monospacedDigit().frame(minWidth: 85, alignment: .leading)
-            Text(abs(point?.gap ?? 0) < 0.5 ? "even with baseline" : (point?.gap ?? 0) >= 0 ? "behind baseline" : "ahead of baseline").foregroundStyle(Color.secondary)
+            Text(abs(point?.gap ?? 0) < 0.5 ? "even with baseline" : (point?.gap ?? 0) >= 0 ? "behind baseline" : "ahead of baseline").font(.caption).foregroundStyle(Color.secondary)
         }
         VStack(alignment: .leading) {
             Text(routeDistance(abs(frame.separation), units: units)).font(.title2.bold()).monospacedDigit().frame(minWidth: 85, alignment: .leading)
-            Text(abs(frame.separation) < 0.5 ? "together" : frame.separation >= 0 ? "baseline is ahead" : "subject is ahead").foregroundStyle(Color.secondary)
+            Text(abs(frame.separation) < 0.5 ? "together" : frame.separation >= 0 ? "baseline is ahead" : "subject is ahead").font(.caption).foregroundStyle(Color.secondary)
         }
         VStack(alignment: .leading) {
             Text(routeDistance(frame.subjectRouteDistance, units: units)).font(.title2.bold()).monospacedDigit().frame(minWidth: 85, alignment: .leading)
-            Text("route distance").foregroundStyle(Color.secondary)
+            Text("route distance").font(.caption).foregroundStyle(Color.secondary)
         }
     }
     @ViewBuilder private func clockPicker(_ comparison: EffortComparison) -> some View {
@@ -237,7 +239,7 @@ struct RouteComparisonView: View {
             row("Heart rate (bpm)", subject.metrics?.heartRate.average.value, baseline.metrics?.heartRate.average.value),
             row("Efficiency", RouteChartMetric.efficiency.value(subject), RouteChartMetric.efficiency.value(baseline))
         ]
-        return VStack(alignment: .leading, spacing: 16) {
+        return VStack(alignment: .leading, spacing: 12) {
             Text("Timed section").font(.headline)
             summaryTable(timed)
             Text("Whole-activity measurements").font(.headline)

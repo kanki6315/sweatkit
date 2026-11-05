@@ -79,14 +79,14 @@ struct RoutesView: View {
                         RoutePageView(routeID: route.id, model: model)
                     } label: {
                         HStack(alignment: .top, spacing: 12) {
-                            RouteGeographicThumbnail(line: route.reference.line).frame(width: 74, height: 74).clipShape(.rect(cornerRadius: 12)).allowsHitTesting(false).accessibilityHidden(true)
-                            VStack(alignment: .leading, spacing: 6) {
+                            RouteGeographicThumbnail(line: route.reference.line).frame(width: 64, height: 64).clipShape(.rect(cornerRadius: 12)).allowsHitTesting(false).accessibilityHidden(true)
+                            VStack(alignment: .leading, spacing: 4) {
                                 Text(route.name).font(.headline)
-                                Text(routeMetadata(route, units: model.units)).font(.subheadline).foregroundStyle(Color.secondary)
-                                Text("\(route.efforts.count) efforts · best \(routeTime(route.best))").font(.subheadline).monospacedDigit()
-                                RouteDotChart(route: route, metric: .time, compact: true).frame(height: 30)
+                                Text(routeMetadata(route, units: model.units)).font(.caption).foregroundStyle(Color.secondary)
+                                Text("\(route.efforts.count) efforts · best \(routeTime(route.best))").font(.caption).monospacedDigit()
+                                RouteDotChart(route: route, metric: .time, compact: true).frame(height: 20)
                             }
-                        }.padding(.vertical, 8)
+                        }.padding(.vertical, 4)
                     }.accessibilityIdentifier("route-row")
                 }
             }
@@ -229,7 +229,7 @@ struct RoutePageView: View {
     let routeID: SourceIdentity
     @Bindable var model: RoutesModel
     @Environment(\.dynamicTypeSize) private var typeSize
-    @ScaledMetric(relativeTo: .title2) private var statWidth = 110.0
+    @ScaledMetric(relativeTo: .title2) private var statWidth = 78.0
     @State private var metric = RouteChartMetric.time
     @State private var byTime = true
     @State private var editing = false
@@ -241,13 +241,15 @@ struct RoutePageView: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 0) {
                         RouteMap(line: route.reference.line, satellite: true).frame(height: 320)
-                        VStack(alignment: .leading, spacing: 20) {
-                            Text(route.name).font(.largeTitle.bold())
-                            Text("\(routeDistance(route.reference.line.length, units: model.units)) · \(route.efforts.count) efforts").foregroundStyle(Color.secondary)
+                        VStack(alignment: .leading, spacing: 14) {
+                            Text(route.name).font(.title.bold())
+                            Text(routeMetadata(route, units: model.units)).font(.subheadline).foregroundStyle(Color.secondary)
+                            SourceAttributionView(sources: route.efforts.flatMap { $0.activity.members.map(\.source) })
                             if let first = route.efforts.min(by: { $0.activity.start < $1.activity.start }) {
                                 Text("\(first.activity.isVirtual ? "Virtual ride" : first.activity.sport.rawValue.capitalized) · first recorded \(first.activity.start.formatted(date: .abbreviated, time: .omitted))").font(.subheadline).foregroundStyle(Color.secondary)
                             }
                             LazyVGrid(columns: [GridItem(.adaptive(minimum: statWidth))], alignment: .leading, spacing: 16) {
+                                stat("Efforts", String(route.efforts.count))
                                 stat("Best", routeTime(route.best))
                                 stat("Latest", routeTime(route.efforts.max(by: { $0.activity.start < $1.activity.start })?.movingTime))
                                 stat("Median", routeTime(route.median))
@@ -272,7 +274,10 @@ struct RoutePageView: View {
                                             Text(route.rank(of: effort.id).map(String.init) ?? "—").foregroundStyle(Color.secondary)
                                             VStack(alignment: .leading) {
                                                 Text(routeTime(effort.movingTime ?? effort.elapsedTime)).font(.title3).monospacedDigit()
-                                                Text(effort.activity.start, style: .date).font(.subheadline).foregroundStyle(Color.secondary)
+                                                HStack {
+                                                    Text(effort.activity.start, style: .date)
+                                                    SourceAttributionView(sources: effort.activity.members.map(\.source))
+                                                }.font(.caption).foregroundStyle(Color.secondary)
                                                 Text("\(effort.metrics?.power.average.value.map { String(format: "%.0f W", $0) } ?? "Power unavailable") · \(effort.metrics?.heartRate.average.value.map { String(format: "%.0f bpm", $0) } ?? "Heart rate unavailable")").font(.caption).foregroundStyle(Color.secondary)
                                                 if effort.movingTime == nil { Text("Elapsed only · pause positions unknown").font(.caption) }
                                             }
@@ -313,7 +318,7 @@ struct RoutePageView: View {
         Picker("Chart", selection: $metric) { ForEach(RouteChartMetric.allCases, id: \.self) { Text($0.rawValue).tag($0) } }
     }
     private func stat(_ title: String, _ value: String) -> some View {
-        VStack(alignment: .leading) { Text(value).font(.title2.bold()).monospacedDigit(); Text(title).foregroundStyle(Color.secondary) }
+        VStack(alignment: .leading) { Text(value).font(.title2.bold()).monospacedDigit(); Text(title).font(.caption).foregroundStyle(Color.secondary) }
     }
     private func sorted(_ route: LibraryRoute) -> [RouteEffort] {
         byTime ? route.efforts.sorted { ($0.movingTime ?? .infinity) < ($1.movingTime ?? .infinity) } : route.efforts.sorted { $0.activity.start > $1.activity.start }

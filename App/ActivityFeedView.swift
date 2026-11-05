@@ -241,19 +241,19 @@ struct ActivityFeedRow: View {
     var route: LibraryRoute?
     @Environment(\.dynamicTypeSize) private var typeSize
     var body: some View {
-        VStack(alignment: .leading, spacing: prominent ? 12 : 8) {
+        VStack(alignment: .leading, spacing: prominent ? 8 : 5) {
             if prominent, let library {
                 ActivityThumbnail(activity: activity, library: library, revision: revision)
-                    .frame(height: 180)
+                    .frame(height: 164)
                     .clipShape(RoundedRectangle(cornerRadius: 18))
             }
             HStack(alignment: .top, spacing: 12) {
                 if !prominent, !typeSize.isAccessibilitySize, let library {
                     ActivityThumbnail(activity: activity, library: library, revision: revision, compact: true)
-                        .frame(width: 68, height: 72)
+                        .frame(width: 60, height: 64)
                         .clipShape(RoundedRectangle(cornerRadius: 12))
                 }
-                VStack(alignment: .leading, spacing: 6) {
+                VStack(alignment: .leading, spacing: 4) {
                     ViewThatFits(in: .horizontal) {
                         HStack(alignment: .top, spacing: 12) {
                             Text(activity.title).font(prominent ? .title3.bold() : .headline)
@@ -266,10 +266,16 @@ struct ActivityFeedRow: View {
                             headline
                         }
                     }
-                    Text("\(activity.isVirtual ? "Virtual " : activity.isIndoor ? "Indoor " : "")\(activity.sport.rawValue.capitalized) · \(sourceNames)")
-                        .font(.caption).foregroundStyle(.secondary)
-                    Text(activity.start, format: .dateTime.month(.abbreviated).day().year().hour().minute())
-                        .font(.caption).foregroundStyle(.secondary)
+                    ViewThatFits(in: .horizontal) {
+                        HStack(spacing: 5) {
+                            Text("\(activity.isVirtual ? "Virtual ride" : activity.isIndoor ? "Indoor " + activity.sport.rawValue : activity.sport.rawValue.capitalized) · \(activity.start.formatted(.dateTime.weekday(.abbreviated).day().month(.abbreviated)))")
+                            SourceAttributionView(sources: activity.members.map(\.source))
+                        }
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(activity.start, format: .dateTime.month(.abbreviated).day().hour().minute())
+                            SourceAttributionView(sources: activity.members.map(\.source))
+                        }
+                    }.font(.caption).foregroundStyle(.secondary)
                     ViewThatFits(in: .horizontal) {
                         HStack(spacing: 12) { metrics }
                         VStack(alignment: .leading, spacing: 4) { metrics }
@@ -278,12 +284,14 @@ struct ActivityFeedRow: View {
             }
             if !stale, !records.isEmpty {
                 Label(records.count == 1 ? records[0].title + " record" : "\(records.count) personal records", systemImage: "chart.line.uptrend.xyaxis")
-                    .font(.caption).foregroundStyle(.secondary)
+                    .font(.caption2).foregroundStyle(.secondary).padding(.horizontal, 6).padding(.vertical, 3)
+                    .background(Color(uiColor: .secondarySystemFill), in: RoundedRectangle(cornerRadius: 4))
             }
             if let route {
                 Label(route.rank(of: activity.id ?? activity.primary).map { "\(route.name) · #\($0) of \(route.ranked.count)" } ?? route.name,
                       systemImage: "point.topleft.down.to.point.bottomright.curvepath")
-                    .font(.caption).foregroundStyle(.secondary)
+                    .font(.caption2).foregroundStyle(.secondary).padding(.horizontal, 6).padding(.vertical, 3)
+                    .background(Color(uiColor: .secondarySystemFill), in: RoundedRectangle(cornerRadius: 4))
             }
             if stale { Label("Results need recalculation", systemImage: "arrow.clockwise").font(.caption) }
             if removedAtSource {
@@ -291,7 +299,7 @@ struct ActivityFeedRow: View {
                     .font(.caption).foregroundStyle(.secondary)
             }
         }
-        .padding(.vertical, 8)
+        .padding(.vertical, 5)
         .monospacedDigit()
     }
     @ViewBuilder private var headline: some View {

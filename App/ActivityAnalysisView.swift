@@ -14,12 +14,23 @@ struct ActivityAnalysisView: View {
     @Binding var selection: ClosedRange<Int>?
 
     var chartsOnly = false
+    var historicalCurve: [PowerCurvePoint] = []
+    var historicalCurveError: String?
+    var historicalCurveLoading = false
+    @Binding var historyWindow: Int
+
+    init(presentation: DetailAnalysisPresentation, detail: PreparedDetail, metrics: ActivityMetrics?, units: UnitSystem, scrub: Binding<Double>, selection: Binding<ClosedRange<Int>?>, chartsOnly: Bool = false, historicalCurve: [PowerCurvePoint] = [], historicalCurveError: String? = nil, historicalCurveLoading: Bool = false, historyWindow: Binding<Int> = .constant(90)) {
+        self.presentation = presentation; self.detail = detail; self.metrics = metrics; self.units = units
+        self._scrub = scrub; self._selection = selection; self.chartsOnly = chartsOnly
+        self.historicalCurve = historicalCurve; self.historicalCurveError = historicalCurveError; self.historicalCurveLoading = historicalCurveLoading; self._historyWindow = historyWindow
+    }
+    @Environment(\.dynamicTypeSize) private var typeSize
     @State private var fullPaceRange = false
     @ScaledMetric(relativeTo: .body) private var summaryColumnWidth: CGFloat = 105
 
     var body: some View {
         ScrollView {
-            LazyVStack(alignment: .leading, spacing: 28) {
+            LazyVStack(alignment: .leading, spacing: 20) {
                 if !chartsOnly, let metrics { summary(metrics) }
                 if presentation.charts.isEmpty {
                     ContentUnavailableView("No chart samples", systemImage: "chart.xyaxis.line",
@@ -39,39 +50,62 @@ struct ActivityAnalysisView: View {
                 }
                 if !chartsOnly, !presentation.powerCurve.isEmpty {
                     VStack(alignment: .leading, spacing: 12) {
-                        Text("Power curve").font(.title2.bold())
-                        Text("Best efforts in this activity").font(.subheadline).foregroundStyle(.secondary)
-                        Chart(presentation.powerCurve.filter { $0.power.value != nil }, id: \.duration) { point in
-                            LineMark(x: .value("Duration, seconds", point.duration), y: .value("Power, W", point.power.value!))
-                                .foregroundStyle(Color.primary).symbol(.circle)
+                        HStack {
+                            Text("Power curve").font(.headline)
+                            Spacer()
+                            Picker("Historical power window", selection: $historyWindow) {
+                                Text("90 days").tag(90)
+                                Text("This year").tag(365)
+                                Text("All time").tag(0)
+                            }.pickerStyle(.menu).font(.caption)
+                        }
+                        Text(historicalCurveLoading ? "Loading historical comparison…" : historicalCurve.isEmpty ? (historicalCurveError ?? "No earlier power curve in this window") : "This activity — · Historical best – –")
+                            .font(.caption).foregroundStyle(.secondary)
+                        Chart {
+                            ForEach(historicalCurve.filter { $0.power.value != nil }, id: \.duration) { point in
+                                LineMark(x: .value("Duration, seconds", point.duration), y: .value("Power, W", point.power.value!), series: .value("Curve", "Historical best"))
+                                    .foregroundStyle(Color.secondary).lineStyle(StrokeStyle(lineWidth: 1.5, dash: [4, 3]))
+                            }
+                            ForEach(presentation.powerCurve.filter { $0.power.value != nil }, id: \.duration) { point in
+                            LineMark(x: .value("Duration, seconds", point.duration), y: .value("Power, W", point.power.value!), series: .value("Curve", "Activity"))
+                                .foregroundStyle(Color.primary).lineStyle(StrokeStyle(lineWidth: 2))
+                            }
                         }
                         .chartXScale(type: .log).frame(height: 160)
+                        DisclosureGroup("All best efforts") {
                         ForEach(presentation.powerCurve, id: \.duration) { point in
                             VStack(alignment: .leading, spacing: 4) {
                                 LabeledContent(duration(Double(point.duration)), value: number(point.power.value, suffix: " W"))
                                 if let reason = point.power.reason { Text(unavailable(reason)).font(.caption).foregroundStyle(.secondary) }
                             }
                         }
-                    }
+                        }.font(.subheadline)
+                    }.padding(16).background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 18))
                 }
                 if !chartsOnly, !presentation.laps.isEmpty {
                     VStack(alignment: .leading, spacing: 12) {
-                        Text("Laps").font(.title2.bold())
+                        Text("Laps").font(.headline)
                         ForEach(presentation.laps) { lap in
                             Button {
                                 selection = lap.range
                                 scrub = Double(lap.range.lowerBound)
                             } label: {
-                                VStack(alignment: .leading, spacing: 6) {
-                                    Text("Lap \(lap.id)").font(.headline)
-                                    Text("\(duration(lap.stats.time)) · \(distance(lap.stats.distance))")
-                                    if detail.input.sport.family == .cycling {
-                                        Text("Average power: \(number(lap.stats.averagePower, suffix: " W"))")
-                                            .font(.subheadline).foregroundStyle(.secondary)
+                                ViewThatFits(in: .horizontal) {
+                                    HStack(spacing: 12) {
+                                        Text(String(lap.id)).frame(width: 24, alignment: .leading)
+                                        Text(distance(lap.stats.distance)).frame(maxWidth: .infinity, alignment: .trailing)
+                                        Text(duration(lap.stats.time)).frame(maxWidth: .infinity, alignment: .trailing)
+                                        if detail.input.sport.family == .cycling {
+                                            Text(number(lap.stats.averagePower, suffix: " W")).frame(maxWidth: .infinity, alignment: .trailing)
+                                        }
+                                        Text(number(lap.stats.averageHeartRate, suffix: " bpm")).frame(maxWidth: .infinity, alignment: .trailing)
                                     }
-                                    Text("Average heart rate: \(number(lap.stats.averageHeartRate, suffix: " bpm"))")
-                                        .font(.subheadline).foregroundStyle(.secondary)
-                                }.frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 8)
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        Text("Lap \(lap.id) · \(distance(lap.stats.distance)) · \(duration(lap.stats.time))")
+                                        Text("\(number(lap.stats.averagePower, suffix: " W")) · \(number(lap.stats.averageHeartRate, suffix: " bpm"))")
+                                    }
+                                }.font(.caption).frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                                    .accessibilityElement(children: .combine)
                             }.tint(.primary)
                             Divider()
                         }
@@ -139,7 +173,7 @@ struct ActivityAnalysisView: View {
             .padding()
         }
         .monospacedDigit()
-        .background(Color(uiColor: .systemBackground))
+        .background(Color(uiColor: chartsOnly ? .systemBackground : .systemGroupedBackground))
     }
 
     private func powerColor(at second: Int) -> Color {
@@ -175,8 +209,8 @@ struct ActivityAnalysisView: View {
 
     private func summary(_ metrics: ActivityMetrics) -> some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("Summary").font(.title2.bold())
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: summaryColumnWidth), alignment: .topLeading)], alignment: .leading, spacing: 20) {
+            Text("Summary").font(.headline)
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: summaryColumnWidth), alignment: .topLeading)], alignment: .leading, spacing: 14) {
                 summaryValue("Moving time", text: duration(metrics.time.moving.value), reason: metrics.time.moving.reason)
                 summaryValue("Distance", text: distance(metrics.distance.value), reason: metrics.distance.reason)
                 summaryValue("Ascent", text: number(metrics.ascent.value.map { $0 * (units == .metric ? 1 : 3.28084) }, suffix: units == .metric ? " m" : " ft"), reason: metrics.ascent.reason)
@@ -193,7 +227,7 @@ struct ActivityAnalysisView: View {
             if metrics.power.averageShowsCoverage, let coverage = metrics.power.coverage.value {
                 Text("Power coverage: \(coverage * 100, specifier: "%.0f")% of timer time.").font(.footnote).foregroundStyle(.secondary)
             }
-        }.padding(16).background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 24))
+        }.padding(16).background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 18))
     }
     private func summaryValue(_ label: String, text: String, reason: UnavailableReason?) -> some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -203,22 +237,49 @@ struct ActivityAnalysisView: View {
         }.accessibilityElement(children: .combine)
     }
 
+    private func zoneDescription(_ title: String, index: Int) -> String {
+        if title == "Gradient bands" { return ["Descent · below −2%", "Flat · −2 to 2%", "Climb · 2–5%", "Climb · 5–8%", "Climb · over 8%"][index] }
+        let power = title == "Power zones"
+        let resolved = power ? ResolvedZones.power(profile: detail.input.profile, on: detail.input.activityDate) : ResolvedZones.heartRate(profile: detail.input.profile)
+        let bounds = resolved.absoluteBounds
+        let name = power ? ["Recovery", "Endurance", "Tempo", "Threshold", "VO₂ max", "Anaerobic", "Neuromuscular"][index] : ["Recovery", "Endurance", "Tempo", "Threshold", "Above threshold"][index]
+        let range: String
+        if index == 0 { range = "<\(Int(bounds[0].rounded(.up)))" }
+        else if index == bounds.count { range = "≥\(Int(bounds[index - 1].rounded(.up)))" }
+        else { range = "\(Int(bounds[index - 1].rounded(.up)))–\(Int(bounds[index].rounded(.up)) - 1)" }
+        return "\(name) · \(range) \(power ? "W" : "bpm")"
+    }
+
     @ViewBuilder private func zones(_ title: String, metric: Metric<TimeInZones>, colors: [RampColor]) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text(title).font(.title2.bold())
+            HStack(alignment: .firstTextBaseline) {
+                Text(title).font(.headline)
+                Spacer()
+                if title == "Power zones", let threshold = detail.input.profile.thresholdPower(on: detail.input.activityDate) {
+                    Text("Threshold \(threshold, specifier: "%.0f") W").font(.caption).foregroundStyle(.secondary)
+                }
+            }
             if let zones = metric.value {
                 ForEach(zones.seconds.indices, id: \.self) { index in
-                    HStack {
-                        RoundedRectangle(cornerRadius: 3).fill(colors[index % colors.count].color)
-                            .overlay { RoundedRectangle(cornerRadius: 3).stroke(Color.primary, lineWidth: 1) }
-                            .frame(width: 20, height: 20).accessibilityHidden(true)
-                        Text(title == "Gradient bands" ? ["Descent", "Flat", "Climb 2–5%", "Climb 5–8%", "Climb over 8%"][index] : "Zone \(index + 1)")
-                        Spacer()
-                        Text(duration(Double(zones.seconds[index])))
-                    }
-                    ProgressView(value: Double(zones.seconds[index]), total: Double(max(1, zones.seconds.reduce(0, +))))
-                        .tint(colors[index % colors.count].color)
-                        .accessibilityLabel("Share of recorded zone time")
+                    HStack(alignment: .center, spacing: 8) {
+                        Text(title == "Gradient bands" ? "" : "Z\(index + 1)")
+                            .font(.caption2.weight(.semibold)).frame(width: title == "Gradient bands" ? 8 : 24, height: 18)
+                            .background(colors[index % colors.count].color.opacity(0.25), in: RoundedRectangle(cornerRadius: 4))
+                            .overlay { RoundedRectangle(cornerRadius: 4).stroke(colors[index % colors.count].color, lineWidth: 1) }
+                        VStack(alignment: .leading, spacing: 5) {
+                            Text(zoneDescription(title, index: index)).font(.caption).foregroundStyle(.secondary)
+                            GeometryReader { geometry in
+                                Capsule().fill(Color.secondary.opacity(0.12))
+                                Capsule().fill(colors[index % colors.count].color)
+                                    .overlay { Capsule().stroke(Color.primary.opacity(0.3), lineWidth: 0.5) }
+                                    .frame(width: max(0, geometry.size.width * Double(zones.seconds[index]) / Double(max(1, zones.seconds.reduce(0, +)))))
+                            }.frame(height: 5).accessibilityHidden(true)
+                        }
+                        Text(duration(Double(zones.seconds[index]))).font(.caption.monospacedDigit()).frame(minWidth: 52, alignment: .trailing)
+                        Text("\(100 * Double(zones.seconds[index]) / Double(max(1, zones.seconds.reduce(0, +))), specifier: "%.0f")%")
+                            .font(.caption2.monospacedDigit()).foregroundStyle(.secondary).frame(width: 30, alignment: .trailing)
+                    }.frame(minHeight: typeSize.isAccessibilitySize ? 50 : 30)
+                        .accessibilityElement(children: .combine)
                 }
                 LabeledContent("Missing data", value: duration(Double(zones.missing)))
                     .foregroundStyle(.secondary)

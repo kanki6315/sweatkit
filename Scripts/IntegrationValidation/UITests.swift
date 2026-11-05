@@ -44,14 +44,28 @@ final class IntegratedScreens: XCTestCase {
         XCTAssertTrue(first.waitForExistence(timeout: 20)); first.tap()
         XCTAssertTrue(app.buttons["Analysis"].waitForExistence(timeout: 60)); capture("02-detail-" + suffix)
         app.buttons["Analysis"].tap(); XCTAssertTrue(app.buttons["Done"].waitForExistence(timeout: 10)); capture("03-analysis-" + suffix)
+        app.swipeUp(); capture("analysis-content-" + suffix)
         app.buttons["Done"].tap(); app.buttons["Back"].tap()
         XCTAssertTrue(app.tabBars.buttons["Activities"].waitForExistence(timeout: 10))
         let indoor = app.buttons["indoor-activity-row"].firstMatch
         for _ in 0..<5 { if indoor.isHittable { break }; app.swipeUp() }
         XCTAssertTrue(indoor.exists); indoor.tap()
         XCTAssertTrue(app.buttons["Analysis"].waitForExistence(timeout: 60)); capture("04-indoor-" + suffix)
-        app.buttons["Back"].tap()
+        app.buttons["Analysis"].tap()
+        let history = app.buttons.containing(NSPredicate(format: "label BEGINSWITH 'Historical power window'")).firstMatch
+        for _ in 0..<8 { if history.isHittable { break }; app.swipeUp() }
+        XCTAssertTrue(history.exists); capture("historical-curve-" + suffix)
+        history.tap(); app.buttons["All time"].firstMatch.tap()
+        capture("historical-all-time-" + suffix)
+        app.buttons["Done"].tap(); app.buttons["Back"].tap()
         app.buttons["Settings"].tap(); XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: 10)); capture("09-settings-" + suffix)
+        let review = app.buttons["Review"].firstMatch
+        for _ in 0..<3 { if review.isHittable { break }; app.swipeUp() }
+        if review.exists {
+            review.tap(); XCTAssertTrue(app.navigationBars["Review threshold"].waitForExistence(timeout: 10))
+            capture("threshold-review-" + suffix)
+            app.buttons["Cancel"].tap()
+        }
         app.swipeUp(); app.buttons.containing(NSPredicate(format: "label BEGINSWITH 'iCloud'")).firstMatch.tap()
         capture("cloud-" + suffix)
     }
