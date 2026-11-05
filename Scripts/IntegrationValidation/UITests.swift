@@ -2,6 +2,28 @@ import XCTest
 final class IntegratedScreens: XCTestCase {
     @MainActor func testLight() { flow(dark: false) }
     @MainActor func testDark() { flow(dark: true) }
+    @MainActor func testHistoricalCurveLabels() {
+        for dark in [false, true] {
+            let app = XCUIApplication()
+            let suffix = dark ? "dark" : "light"
+            app.launchArguments = dark ? ["dark"] : []
+            app.launch()
+            XCTAssertTrue(app.tabBars.buttons["Activities"].waitForExistence(timeout: 120))
+            let indoor = app.buttons["indoor-activity-row"].firstMatch
+            XCTAssertTrue(indoor.waitForExistence(timeout: 30)); indoor.tap()
+            XCTAssertTrue(app.buttons["Analysis"].waitForExistence(timeout: 60)); app.buttons["Analysis"].tap()
+            let history = app.buttons.containing(NSPredicate(format: "label BEGINSWITH 'Historical power window'")).firstMatch
+            for _ in 0..<8 { if history.isHittable { break }; app.swipeUp() }
+            XCTAssertTrue(history.exists)
+            let sources = app.staticTexts.containing(NSPredicate(format: "label BEGINSWITH 'Historical sources:'")).firstMatch
+            XCTAssertTrue(sources.waitForExistence(timeout: 30))
+            alignNearTop(history, in: app); capture("historical-curve-" + suffix)
+            history.tap(); app.buttons["All time"].firstMatch.tap()
+            XCTAssertTrue(sources.waitForExistence(timeout: 30))
+            capture("historical-all-time-" + suffix)
+            app.terminate()
+        }
+    }
     @MainActor func testRouteLinkAndLargeText() {
         let app = XCUIApplication()
         app.launchArguments = ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityM"]

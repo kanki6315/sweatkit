@@ -22,7 +22,17 @@ The threshold review preserves dated history before the chosen effective day, ex
 
 ## Verification
 
-Fresh integrated simulator results and captures are recorded below after the final run. This is automated implementation verification, not the physical-device acceptance that the user explicitly deferred.
+Automated implementation verification on a Simlock-leased iPhone 18 Pro Max simulator, iOS 27.2:
+
+- Light and dark integrated flows passed, including full split-table rendering, historical window selection, threshold Apply enabled on first presentation, sheet dismissal, suggestion disappearance and the saved 155 W fixture threshold after reopening Settings. Result: `/tmp/sweatkit-design-captures.xcresult`, log `/tmp/sweatkit-design-captures.log`.
+- Final accessibility-size feed → detail → route comparison flow passed after fixing playback-speed wrapping. All adjacent playback controls remain visible. Result: `/tmp/sweatkit-design-large-final.xcresult`, log `/tmp/sweatkit-design-large-final.log`.
+- Focused final historical-curve check passed in light and dark after adding duration-formatted axes. Both current and historical curves, source legend, selector and readable time units are visible. Result: `/tmp/sweatkit-design-axis.xcresult`, log `/tmp/sweatkit-design-axis.log`.
+- 35 fresh downscaled captures are committed under `Evidence/DESIGN-PARITY/`. `historical-curve-{light,dark}.png`, `splits-table-{light,dark}.png`, `threshold-review-{light,dark}.png`, `threshold-applied-{light,dark}.png` and `detail-route-large.png` show substantive features beyond the initial viewport. Source progression: light/dark at `7e80402`; final large-text correction at `d8fa977`; final historical axis at `c4dd65a`. The singular Settings metadata correction in `d8fa977` does not change the earlier flow's behavior.
+- Swift app/test compilation and `git diff --check` passed. Impeccable mechanical scan returned no findings; that scan does not certify native visuals.
+- Earlier navigation-only runs passed but a stronger Apply assertion exposed a first-presentation sheet-state defect. The review now owns its draft state; the failing `/tmp/sweatkit-design-final.xcresult` is not passing evidence. Final results above include the fix.
+- Simulator lease released after verification. No production Health, Garmin or CloudKit acceptance was performed.
+
+This is implementation verification, not the physical-device acceptance that the user explicitly deferred.
 
 The harness contains real FIT fixtures plus an explicitly test-only shifted/time-scaled derivative for route comparison. Its explicit test profile (100 W, 170 bpm, 72 kg) enables metrics and the threshold-suggestion flow. These values and fixture injections exist only under `Scripts/IntegrationValidation`, not in production behavior.
 
