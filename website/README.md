@@ -24,3 +24,7 @@ Submission URLs, after deployment:
 - Privacy: `https://<your-hostname>/privacy`
 
 The privacy text describes the current local-first implementation. Review it against the release being submitted and update it if data handling changes. The pages alone do not establish Apple or Garmin approval.
+
+## App theme
+
+The site extends the native app's system typography, neutral light/dark surfaces, cyan interaction color, and rounded navigation. The landing page and favicons reuse the route and endpoint artwork from `App/SweatKit.icon/Assets/`, flattened into the two SVGs in `public/assets/`. These are static web renditions; they do not reproduce iOS Icon Composer lighting. Keep the app's source icon layers unchanged when editing the website.
