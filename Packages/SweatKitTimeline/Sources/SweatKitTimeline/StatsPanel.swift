@@ -16,11 +16,13 @@ public struct StatsPanel: View {
     private let stats: CursorStats
     private let sport: Sport
     private let units: UnitSystem
+    private let floating: Bool
 
     @Environment(\.locale) private var locale
     @ScaledMetric(relativeTo: .title3) private var minimumHeight: CGFloat = 44
 
-    public init(stats: CursorStats, sport: Sport, units: UnitSystem = .metric) {
+    public init(stats: CursorStats, sport: Sport, units: UnitSystem = .metric, floating: Bool = true) {
+        self.floating = floating
         self.stats = stats
         self.sport = sport
         self.units = units
@@ -36,14 +38,25 @@ public struct StatsPanel: View {
         .frame(minHeight: minimumHeight)
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
-        .modifier(FloatingPanel())
+        .modifier(FloatingPanel(enabled: floating))
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Stats at the cursor")
     }
 
-    private func grid(_ slots: [StatSlot]) -> some View {
-        StatGridLayout(maximumColumns: 4) {
-            ForEach(slots) { StatSlotView(slot: $0, style: .panel) }
+    @ViewBuilder private func grid(_ slots: [StatSlot]) -> some View {
+        let primaryLabels = sport.family == .cycling ? ["3 s power", "Heart rate", "Speed"] : ["Pace", "Heart rate"]
+        VStack(alignment: .leading, spacing: 12) {
+            StatGridLayout(maximumColumns: 3) {
+                ForEach(primaryLabels.compactMap { label in slots.first { $0.label == label } }) {
+                    StatSlotView(slot: $0, style: .headline)
+                }
+            }
+            Divider()
+            StatGridLayout(maximumColumns: 5, spacing: 8) {
+                ForEach(slots.filter { !primaryLabels.contains($0.label) }) {
+                    StatSlotView(slot: $0, style: .compact)
+                }
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }

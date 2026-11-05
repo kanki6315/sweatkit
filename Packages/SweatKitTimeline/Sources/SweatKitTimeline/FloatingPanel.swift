@@ -5,7 +5,9 @@ import SwiftUI
 /// With Reduce Transparency on it is the system's opaque background instead.
 /// With Increase Contrast on it gains a border. Nothing inside a panel is
 /// glass, so glass is never stacked on glass.
-struct FloatingPanel: ViewModifier {
+public struct FloatingPanel: ViewModifier {
+    public var enabled: Bool
+    public init(enabled: Bool = true) { self.enabled = enabled }
     static let cornerRadius: CGFloat = 26
 
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
@@ -19,19 +21,21 @@ struct FloatingPanel: ViewModifier {
         colorScheme == .dark ? Color.black.opacity(0.45) : Color.white.opacity(0.45)
     }
 
-    func body(content: Content) -> some View {
+    public func body(content: Content) -> some View {
         let shape = RoundedRectangle(cornerRadius: Self.cornerRadius, style: .continuous)
         Group {
-            if reduceTransparency {
+            if !enabled {
+                content
+            } else if reduceTransparency {
                 content.background(.background, in: shape)
             } else {
                 content.glassEffect(.regular.tint(Self.tint(for: colorScheme)), in: shape)
             }
         }
         .overlay {
-            if contrast == .increased {
+            if enabled && contrast == .increased {
                 shape.strokeBorder(.primary.opacity(0.7), lineWidth: 1)
-            } else if reduceTransparency {
+            } else if enabled && reduceTransparency {
                 shape.strokeBorder(.primary.opacity(0.15), lineWidth: 1)
             }
         }

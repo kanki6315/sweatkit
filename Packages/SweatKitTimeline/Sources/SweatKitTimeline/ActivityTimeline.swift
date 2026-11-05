@@ -86,7 +86,8 @@ public struct ActivityTimeline: View {
         axisMode: TimelineAxisMode = .distance,
         collapsesStops: Bool = false,
         sport: Sport,
-        units: UnitSystem = .metric
+        units: UnitSystem = .metric,
+        floating: Bool = true
     ) {
         self.data = data
         self.overlay = overlay
@@ -97,7 +98,10 @@ public struct ActivityTimeline: View {
         self.collapsesStops = collapsesStops
         self.sport = sport
         self.units = units
+        self.floating = floating
     }
+
+    private var floating = true
 
     public var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -107,7 +111,7 @@ public struct ActivityTimeline: View {
         .padding(.horizontal, 14)
         .padding(.top, 12)
         .padding(.bottom, 8)
-        .modifier(FloatingPanel())
+        .modifier(FloatingPanel(enabled: floating))
         .animation(reduceMotion ? nil : .snappy(duration: 0.25), value: selection != nil)
         .sensoryFeedback(.impact(weight: .light), trigger: lapTaps)
         .sensoryFeedback(.selection, trigger: selectionTaps)
@@ -243,7 +247,7 @@ public struct ActivityTimeline: View {
         .frame(height: Self.chartHeight + labelHeight)
     }
 
-    /// The scrub cursor, in the accent colour. It is the only part of the
+    /// The neutral scrub cursor with a dark casing. It is the only part of the
     /// timeline that moves during a scrub.
     @ViewBuilder
     private func cursor(frame: Frame, visible: TimelineViewport) -> some View {
@@ -251,7 +255,8 @@ public struct ActivityTimeline: View {
         if fraction >= 0, fraction <= 1 {
             let width: CGFloat = contrast == .increased ? 4 : 3
             Capsule()
-                .fill(.tint)
+                .fill(.white)
+                .overlay { Capsule().stroke(.black.opacity(0.8), lineWidth: 1) }
                 .frame(width: width, height: Self.chartHeight + 4)
                 .offset(x: fraction * frame.width - width / 2, y: -2)
                 .allowsHitTesting(false)

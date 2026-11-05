@@ -3,6 +3,7 @@ import SwiftUI
 /// How large a grid of stats is set.
 enum StatStyle {
     /// The stats panel: large numerals.
+    case headline
     case panel
     /// A range's stats inside the timeline: smaller, so they do not compete
     /// with the panel.
@@ -10,6 +11,7 @@ enum StatStyle {
 
     var valueFont: Font {
         switch self {
+        case .headline: .title.weight(.bold)
         case .panel: .title3.weight(.heavy)
         case .compact: .callout.weight(.bold)
         }
@@ -17,6 +19,7 @@ enum StatStyle {
 
     var labelFont: Font {
         switch self {
+        case .headline: .caption
         case .panel: .caption
         case .compact: .caption2
         }
@@ -24,13 +27,14 @@ enum StatStyle {
 
     var unitFont: Font {
         switch self {
+        case .headline: .caption.weight(.medium)
         case .panel: .caption.weight(.medium)
         case .compact: .caption2.weight(.medium)
         }
     }
 }
 
-/// One stat: its label above its numerals, with the unit beside them, smaller
+/// One stat: its label below its numerals, with the unit beside them, smaller
 /// and lighter.
 ///
 /// The numerals use fixed-width digits and sit in a slot sized to the widest
@@ -44,9 +48,6 @@ struct StatSlotView: View {
     var body: some View {
         let quiet: HierarchicalShapeStyle = contrast == .increased ? .primary : .secondary
         VStack(alignment: .leading, spacing: 0) {
-            Text(slot.label)
-                .font(style.labelFont)
-                .foregroundStyle(quiet)
             HStack(alignment: .firstTextBaseline, spacing: 3) {
                 // The numerals sit against their unit, so a value with
                 // fewer digits leaves its space on the left.
@@ -63,6 +64,9 @@ struct StatSlotView: View {
                         .foregroundStyle(quiet)
                 }
             }
+            Text(slot.label)
+                .font(style.labelFont)
+                .foregroundStyle(quiet)
         }
         .lineLimit(1)
         .fixedSize()

@@ -1,5 +1,6 @@
 import Foundation
 import SweatKitModel
+import SweatKitAnalysis
 import SweatKitTimeline
 
 /// Display points retain their original grid second and contiguous run. Never
@@ -59,6 +60,7 @@ public struct DetailLap: Sendable, Identifiable {
 public struct DetailAnalysisPresentation: Sendable {
     public let charts: [DetailChartSeries]
     public let laps: [DetailLap]
+    public let powerCurve: [PowerCurvePoint]
 
     public static func prepare(_ detail: PreparedDetail) -> Self {
         let stream = detail.input.stream
@@ -106,6 +108,25 @@ public struct DetailAnalysisPresentation: Sendable {
                 return DetailLap(id: index + 1, range: range, stats: detail.rangeStats(range))
             } : []
         }
-        return Self(charts: charts, laps: laps)
+        let curve = detail.input.sport.family == .cycling ? ActivityAnalysis.powerCurve(for:
+            ActivityInput(sport: detail.input.sport, isIndoor: detail.input.isIndoor,
+                isVirtual: detail.input.isVirtual, recording: .stream(stream),
+                profile: detail.input.profile, activityDate: detail.input.activityDate),
+            durations: [5, 15, 30, 60, 300, 1200, 3600]) : []
+        return Self(charts: charts, laps: laps, powerCurve: curve)
+    }
+}
+
+/// Presentation-only pace scale. A fixed, disclosed ceiling avoids a near-zero
+/// speed flattening the moving trace. No source or cursor values are changed.
+public enum PaceChartScale {
+    public static func minutesPerUnit(speed: Double, units: UnitSystem) -> Double? {
+        guard speed.isFinite, speed > 0 else { return nil }
+        return (units == .metric ? 1000 : 1609.344) / speed / 60
+    }
+
+    /// 30 min/km represents 2 km/h; imperial uses the same physical boundary.
+    public static func ceiling(units: UnitSystem) -> Double {
+        30 * (units == .metric ? 1 : 1.609344)
     }
 }

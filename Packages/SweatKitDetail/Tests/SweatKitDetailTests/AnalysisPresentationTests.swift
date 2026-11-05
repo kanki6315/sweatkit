@@ -1,8 +1,42 @@
+import SweatKitAnalysis
 import SweatKitDetail
 import SweatKitModel
 import Testing
 
 @Suite struct AnalysisPresentationTests {
+    @Test func fiveHourAnalysisPresentationRemainsBounded() {
+        let stream = makeStream(count: 18000, power: Array(repeating: 200, count: 18000))
+        let start = ContinuousClock.now
+        let detail = DetailPreparation.prepare(DetailInput(stream: stream, sport: .cycling, activityDate: testStart))
+        let presentation = DetailAnalysisPresentation.prepare(detail)
+        print("Five-hour detail plus analysis preparation: \(start.duration(to: .now))")
+        #expect(presentation.charts.allSatisfy { $0.points.count <= 1200 })
+        #expect(presentation.powerCurve.allSatisfy { $0.power.value == 200 })
+    }
+
+    @Test func powerCurveUsesActivityWindowsAndMarksLongDurationsUnavailable() throws {
+        let stream = makeStream(count: 300, power: Array(repeating: 200, count: 300))
+        let detail = DetailPreparation.prepare(DetailInput(stream: stream, sport: .cycling, activityDate: testStart))
+        let curve = DetailAnalysisPresentation.prepare(detail).powerCurve
+        #expect(curve.filter { $0.duration <= 300 }.allSatisfy { $0.power.value == 200 })
+        #expect(curve.filter { $0.duration > 300 }.allSatisfy { $0.power.reason == .noValidWindow })
+    }
+
+    @Test func paceScaleKeepsRawNearStopValuesAndConvertsUnits() throws {
+        #expect(PaceChartScale.minutesPerUnit(speed: 0, units: .metric) == nil)
+        #expect(PaceChartScale.minutesPerUnit(speed: -.infinity, units: .metric) == nil)
+        #expect(PaceChartScale.minutesPerUnit(speed: 2, units: .metric) == 1000.0 / 120)
+        #expect(PaceChartScale.ceiling(units: .imperial) == 30 * 1.609344)
+        let slow = 1000.0 / (800 * 60)
+        #expect(PaceChartScale.minutesPerUnit(speed: slow, units: .metric) == 800)
+        let stream = makeStream(count: 5, speed: [2, slow, nil, 1, 0])
+        let detail = DetailPreparation.prepare(DetailInput(stream: stream, sport: .running, activityDate: testStart))
+        let chart = try #require(DetailAnalysisPresentation.prepare(detail).charts.first { $0.kind == .speed })
+        #expect(chart.points.map(\.value) == [2, slow, 1])
+        #expect(chart.points[1].segment != chart.points[2].segment)
+        #expect(detail.input.stream.speed[1] == slow)
+    }
+
     @Test func runningFormChartsPreserveGapsAndAreAbsentForOtherSports() {
         var stream = makeStream(count: 3)
         stream.runningStrideLength = Series([1.1, nil, 1.2])
