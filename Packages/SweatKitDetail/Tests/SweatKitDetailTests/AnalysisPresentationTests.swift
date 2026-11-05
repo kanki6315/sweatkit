@@ -34,6 +34,29 @@ import Testing
         let unmarked = DetailInput(stream: stream, sport: .cycling, activityDate: testStart)
         #expect(DetailAnalysisPresentation.prepare(DetailPreparation.prepare(unmarked)).laps.isEmpty)
     }
+    @Test func explicitLapEndsPreserveGapsAndTrailingUnlappedSamples() {
+        let stream = makeStream(count: 10, power: [999, 100, 100, 999, 200, 200, 200, 999, 999, 999])
+        let laps = [RecordedLap(start: testStart.addingTimeInterval(1), end: testStart.addingTimeInterval(3)),
+                    RecordedLap(start: testStart.addingTimeInterval(4), end: testStart.addingTimeInterval(7))]
+        let input = DetailInput(stream: stream, sport: .cycling, lapStarts: [1, 4], recordedLaps: laps, activityDate: testStart)
+        let shown = DetailAnalysisPresentation.prepare(DetailPreparation.prepare(input)).laps
+        #expect(shown.map(\.range) == [1...2, 4...6])
+        #expect(shown.map(\.stats.time) == [2, 3])
+        #expect(shown.map(\.stats.averagePower) == [100, 200])
+    }
+
+    @Test func lapBoundsClampToStreamAndInvalidLapsDoNotInventValues() {
+        let stream = makeStream(count: 8)
+        let offsets: [(Double, Double)] = [(-2, 2.8), (2.8, 5.7), (5.7, 20), (6, 6), (9, 12), (7, 3)]
+        let recorded = offsets.map { RecordedLap(start: testStart.addingTimeInterval($0.0), end: testStart.addingTimeInterval($0.1)) }
+        let input = DetailInput(stream: stream, sport: .walking, recordedLaps: recorded, activityDate: testStart)
+        let shown = DetailAnalysisPresentation.prepare(DetailPreparation.prepare(input)).laps
+        #expect(shown.map(\.range) == [0...1, 2...4, 5...7])
+        #expect(shown.map(\.id) == [1, 2, 3])
+        let empty = DetailInput(stream: stream, sport: .walking, lapStarts: [0, 4], recordedLaps: [], activityDate: testStart)
+        #expect(DetailAnalysisPresentation.prepare(DetailPreparation.prepare(empty)).laps.isEmpty)
+    }
+
     @Test func onFootStopsBreakPaceLines() throws {
         let stream = makeStream(count: 5, speed: [1, 0, 2, nil, 3])
         let input = DetailInput(stream: stream, sport: .walking, activityDate: testStart)

@@ -267,6 +267,7 @@ struct ActivityDetailView: View {
             let input = try await DetailInput(stream: stream, sport: record.sport,
                 isIndoor: record.isIndoor, isVirtual: record.isVirtual,
                 lapStarts: DetailInput.lapStarts(of: native.laps, streamStart: stream.start),
+                recordedLaps: native.laps,
                 profile: athlete, activityDate: record.start)
             let result = await Task.detached(priority: .userInitiated) {
                 let detail = DetailPreparation.prepare(input)

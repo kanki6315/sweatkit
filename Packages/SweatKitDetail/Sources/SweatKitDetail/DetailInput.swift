@@ -13,6 +13,10 @@ public struct DetailInput: Hashable, Sendable {
     /// order. The first lap's start, and any start outside the stream, marks
     /// no boundary. `lapStarts(of:streamStart:)` converts recorded laps.
     public var lapStarts: [Int]
+    /// Device lap intervals, when available. An explicit empty array means no
+    /// recorded laps; nil supports older callers supplying only lap starts.
+    /// Both boundaries project down to the 1 Hz grid, matching lapStarts.
+    public var recordedLaps: [RecordedLap]?
     public var profile: AthleteProfile
     /// The date whose threshold power applies.
     public var activityDate: Date
@@ -23,6 +27,7 @@ public struct DetailInput: Hashable, Sendable {
         isIndoor: Bool = false,
         isVirtual: Bool = false,
         lapStarts: [Int] = [],
+        recordedLaps: [RecordedLap]? = nil,
         profile: AthleteProfile = AthleteProfile(),
         activityDate: Date
     ) {
@@ -31,6 +36,7 @@ public struct DetailInput: Hashable, Sendable {
         self.isIndoor = isIndoor
         self.isVirtual = isVirtual
         self.lapStarts = lapStarts
+        self.recordedLaps = recordedLaps
         self.profile = profile
         self.activityDate = activityDate
     }

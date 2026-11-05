@@ -75,12 +75,31 @@ public struct DetailAnalysisPresentation: Sendable {
             })
             return points.isEmpty ? nil : DetailChartSeries(kind: kind, points: points)
         }
-        let starts = Array(Set([0] + detail.input.lapStarts.filter { $0 > 0 && $0 < stream.count })).sorted()
-        let laps: [DetailLap] = stream.count > 0 && !detail.input.lapStarts.isEmpty ? starts.enumerated().map { index, start in
-            let end = (index + 1 < starts.count ? starts[index + 1] : stream.count) - 1
-            let range = start...end
-            return DetailLap(id: index + 1, range: range, stats: detail.rangeStats(range))
-        } : []
+        let laps: [DetailLap]
+        if let recorded = detail.input.recordedLaps {
+            laps = recorded.enumerated().compactMap { index, lap in
+                let start = lap.start.timeIntervalSince(stream.start)
+                let end = lap.end.timeIntervalSince(stream.start)
+                guard start.isFinite, end.isFinite, end > start, end > 0,
+                      start < Double(stream.count) else { return nil }
+                // Bounds are half-open on the 1 Hz grid. Do not fill gaps
+                // between laps or extend the last lap to the activity end.
+                let lower = Int(max(0, start.rounded(.down)))
+                let upper = Int(min(Double(stream.count), end.rounded(.down)))
+                guard upper > lower else { return nil }
+                let range = lower...(upper - 1)
+                return DetailLap(id: index + 1, range: range, stats: detail.rangeStats(range))
+            }
+        } else {
+            // Compatibility for callers that have only start markers. The
+            // app passes recordedLaps, including an explicit empty array.
+            let starts = Array(Set([0] + detail.input.lapStarts.filter { $0 > 0 && $0 < stream.count })).sorted()
+            laps = stream.count > 0 && !detail.input.lapStarts.isEmpty ? starts.enumerated().map { index, start in
+                let end = (index + 1 < starts.count ? starts[index + 1] : stream.count) - 1
+                let range = start...end
+                return DetailLap(id: index + 1, range: range, stats: detail.rangeStats(range))
+            } : []
+        }
         return Self(charts: charts, laps: laps)
     }
 }
