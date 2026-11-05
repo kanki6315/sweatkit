@@ -18,7 +18,7 @@ public struct RecordName: RawRepresentable, Hashable, Codable, Sendable, Compara
     }
 
     public static func < (lhs: RecordName, rhs: RecordName) -> Bool {
-        fatalError("unimplemented")
+        lhs.rawValue < rhs.rawValue
     }
 }
 
@@ -39,7 +39,7 @@ public struct DeviceID: RawRepresentable, Hashable, Codable, Sendable, Comparabl
     }
 
     public static func < (lhs: DeviceID, rhs: DeviceID) -> Bool {
-        fatalError("unimplemented")
+        lhs.rawValue < rhs.rawValue
     }
 }
 
@@ -56,16 +56,35 @@ public struct IdentityPair: Hashable, Codable, Sendable, Comparable {
 
     /// The pair of `first` and `second`, in either order.
     public init(_ first: SourceIdentity, _ second: SourceIdentity) {
-        fatalError("unimplemented")
+        if second < first {
+            lower = second
+            upper = first
+        } else {
+            lower = first
+            upper = second
+        }
+    }
+
+    /// Decodes a pair through the same normalising step as `init(_:_:)`, so
+    /// a stored pair whose two identities are the wrong way round still
+    /// equals the pair built in code.
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let lower = try container.decode(SourceIdentity.self, forKey: .lower)
+        let upper = try container.decode(SourceIdentity.self, forKey: .upper)
+        self.init(lower, upper)
     }
 
     /// Whether `identity` is one of the two.
     public func contains(_ identity: SourceIdentity) -> Bool {
-        fatalError("unimplemented")
+        identity == lower || identity == upper
     }
 
     /// Ordered by `lower`, then by `upper`.
     public static func < (lhs: IdentityPair, rhs: IdentityPair) -> Bool {
-        fatalError("unimplemented")
+        if lhs.lower != rhs.lower {
+            return lhs.lower < rhs.lower
+        }
+        return lhs.upper < rhs.upper
     }
 }

@@ -30,7 +30,7 @@ public struct Tombstone: Hashable, Codable, Sendable {
         for members: Set<SourceIdentity>,
         at time: Date
     ) -> [Tombstone] {
-        fatalError("unimplemented")
+        members.sorted().map { Tombstone(identity: $0, kind: kind, time: time) }
     }
 
     /// Where `identity` stands once its tombstones are taken into account.
@@ -53,7 +53,8 @@ public struct Tombstone: Hashable, Codable, Sendable {
         tombstones: some Sequence<Tombstone>,
         decisions: some Sequence<DecisionRecord>
     ) -> IdentityStanding {
-        fatalError("unimplemented")
+        TombstoneIndex(tombstones.lazy.filter { $0.identity == identity })
+            .standing(of: identity, decisions: DecisionIndex(decisions))
     }
 
     /// The records that may exist: `records` without every identity that
@@ -64,7 +65,48 @@ public struct Tombstone: Hashable, Codable, Sendable {
         _ records: Set<SourceIdentity>,
         tombstones: some Sequence<Tombstone>
     ) -> Set<SourceIdentity> {
-        fatalError("unimplemented")
+        TombstoneIndex(tombstones).surviving(records)
+    }
+}
+
+/// What the tombstones say about each identity, worked out in one pass.
+struct TombstoneIndex {
+    private var deleted: Set<SourceIdentity> = []
+    /// The time of each identity's latest `.hidden` tombstone.
+    private var latestHides: [SourceIdentity: Date] = [:]
+
+    init(_ tombstones: some Sequence<Tombstone>) {
+        for tombstone in tombstones {
+            switch tombstone.kind {
+            case .deleted:
+                deleted.insert(tombstone.identity)
+            case .hidden:
+                if let latest = latestHides[tombstone.identity] {
+                    latestHides[tombstone.identity] = max(latest, tombstone.time)
+                } else {
+                    latestHides[tombstone.identity] = tombstone.time
+                }
+            }
+        }
+    }
+
+    /// See `Tombstone.standing(of:tombstones:decisions:)`.
+    func standing(of identity: SourceIdentity, decisions: DecisionIndex) -> IdentityStanding {
+        if deleted.contains(identity) {
+            return .deleted
+        }
+        guard let hidden = latestHides[identity] else {
+            return .live
+        }
+        if let restored = decisions.latestRestore(of: identity), restored > hidden {
+            return .live
+        }
+        return .hidden
+    }
+
+    /// See `Tombstone.surviving(_:tombstones:)`.
+    func surviving(_ records: Set<SourceIdentity>) -> Set<SourceIdentity> {
+        records.subtracting(deleted)
     }
 }
 

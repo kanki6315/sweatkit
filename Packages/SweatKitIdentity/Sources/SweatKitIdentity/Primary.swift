@@ -26,8 +26,20 @@ public enum PrimaryChoice {
     /// member has. The spec does not say which of several such members to
     /// take, so this takes the lowest identity among them, which is the same
     /// on every device.
-    public static func defaultPrimary(among members: Set<SourceIdentity>) -> SourceIdentity? {
-        fatalError("unimplemented")
+    ///
+    /// `order` is `defaultOrder` unless the caller passes another. A member
+    /// whose source kind `order` does not list ranks after every kind it
+    /// does list, and among such members the lowest identity is taken.
+    public static func defaultPrimary(
+        among members: Set<SourceIdentity>,
+        order: [Set<SourceKind>] = defaultOrder
+    ) -> SourceIdentity? {
+        for kinds in order {
+            if let lowest = members.lazy.filter({ kinds.contains($0.source) }).min() {
+                return lowest
+            }
+        }
+        return members.min()
     }
 
     /// The primary record of an activity of `members`, or nil when there are
@@ -45,7 +57,15 @@ public enum PrimaryChoice {
         of members: Set<SourceIdentity>,
         among decisions: some Sequence<DecisionRecord>
     ) -> SourceIdentity? {
-        fatalError("unimplemented")
+        primary(of: members, index: DecisionIndex(decisions))
+    }
+
+    /// `primary(of:among:)` read from decisions that are already indexed.
+    static func primary(of members: Set<SourceIdentity>, index: DecisionIndex) -> SourceIdentity? {
+        if let chosen = index.primaryChoice(of: members), members.contains(chosen) {
+            return chosen
+        }
+        return defaultPrimary(among: members)
     }
 
     /// The alternatives that hold a channel the primary lacks, ordered by
@@ -58,6 +78,13 @@ public enum PrimaryChoice {
         than primary: SourceIdentity,
         channelsByMember: [SourceIdentity: Set<Channel>]
     ) -> [AlternativeOffer] {
-        fatalError("unimplemented")
+        let held = channelsByMember[primary] ?? []
+        return channelsByMember
+            .compactMap { identity, channels -> AlternativeOffer? in
+                guard identity != primary else { return nil }
+                let extra = channels.subtracting(held)
+                return extra.isEmpty ? nil : AlternativeOffer(identity: identity, channels: extra)
+            }
+            .sorted { $0.identity < $1.identity }
     }
 }

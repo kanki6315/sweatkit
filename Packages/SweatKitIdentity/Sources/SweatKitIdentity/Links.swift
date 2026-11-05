@@ -55,7 +55,7 @@ public struct LinkRecord: Hashable, Codable, Sendable {
     /// and the kind, so two devices that make the same automatic merge write
     /// the same record.
     public static func automaticName(pair: IdentityPair, kind: LinkKind) -> RecordName {
-        fatalError("unimplemented")
+        RecordName("link|\(kind.rawValue)|\(pair.lower)|\(pair.upper)")
     }
 
     /// An automatic link, named by `automaticName(pair:kind:)`.
@@ -65,7 +65,14 @@ public struct LinkRecord: Hashable, Codable, Sendable {
         time: Date,
         device: DeviceID
     ) -> LinkRecord {
-        fatalError("unimplemented")
+        LinkRecord(
+            name: automaticName(pair: pair, kind: kind),
+            pair: pair,
+            kind: kind,
+            maker: .automatic,
+            time: time,
+            device: device
+        )
     }
 
     /// The link in effect for `pair`, or nil when `links` holds none for it.
@@ -83,11 +90,52 @@ public struct LinkRecord: Hashable, Codable, Sendable {
         for pair: IdentityPair,
         among links: some Sequence<LinkRecord>
     ) -> LinkRecord? {
-        fatalError("unimplemented")
+        var winner: LinkRecord?
+        for link in links where link.pair == pair {
+            if let current = winner {
+                if link.beats(current) {
+                    winner = link
+                }
+            } else {
+                winner = link
+            }
+        }
+        return winner
     }
 
     /// The link in effect for every pair that has one.
     public static func inEffect(among links: some Sequence<LinkRecord>) -> [IdentityPair: LinkRecord] {
-        fatalError("unimplemented")
+        var winners: [IdentityPair: LinkRecord] = [:]
+        for link in links {
+            if let current = winners[link.pair] {
+                if link.beats(current) {
+                    winners[link.pair] = link
+                }
+            } else {
+                winners[link.pair] = link
+            }
+        }
+        return winners
+    }
+
+    /// Whether this link is in effect over `other`, a link on the same pair.
+    ///
+    /// Two links that tie on every step hold the same pair, kind, maker,
+    /// time, device and name, so they are the same record and neither beats
+    /// the other.
+    func beats(_ other: LinkRecord) -> Bool {
+        if maker != other.maker {
+            return maker == .user
+        }
+        if time != other.time {
+            return time > other.time
+        }
+        if kind != other.kind {
+            return kind == .keepSeparate
+        }
+        if device != other.device {
+            return device > other.device
+        }
+        return name > other.name
     }
 }

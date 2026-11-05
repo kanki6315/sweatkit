@@ -25,14 +25,41 @@ public enum Split {
     ///
     /// The copies are ordered by name. A copy is written for every part,
     /// including parts the original already applies to. `parts` should
-    /// divide `members` between them with no overlap.
+    /// divide `members` between them with no overlap. That is not checked:
+    /// each copy applies to its part's members exactly as given. An empty
+    /// part gets no copy, because a copy would apply to nothing, and a part
+    /// given twice gets one copy.
+    ///
+    /// A decision in effect can itself be an inherited copy, from an
+    /// earlier split of records that were then merged again. Its copy keeps
+    /// the same time, which is the original decision's.
     public static func inheritedCopies(
         splitting members: Set<SourceIdentity>,
         into parts: [Set<SourceIdentity>],
         decisions: some Sequence<DecisionRecord>,
         device: DeviceID
     ) -> [DecisionRecord] {
-        fatalError("unimplemented")
+        let index = DecisionIndex(decisions)
+        let inEffect = DecisionField.allCases.compactMap { index.inEffect($0, members: members) }
+        // An empty part has no members for a copy to apply to, and a part
+        // given twice is one part.
+        let distinctParts = Set(parts).filter { !$0.isEmpty }
+        var copies: [DecisionRecord] = []
+        for original in inEffect {
+            for part in distinctParts {
+                copies.append(DecisionRecord(
+                    name: copyName(of: original.name, part: part),
+                    value: original.value,
+                    time: original.time,
+                    device: device,
+                    members: part,
+                    origin: .inheritedCopy
+                ))
+            }
+        }
+        // The field settles the order only if two originals share a name,
+        // which names are not meant to do.
+        return copies.sorted { ($0.name, $0.field.rawValue) < ($1.name, $1.field.rawValue) }
     }
 
     /// The name of the copy of the decision named `original` for `part`.
@@ -44,6 +71,7 @@ public enum Split {
     /// split made twice writes the same records, and two different parts
     /// never share a name.
     public static func copyName(of original: RecordName, part: Set<SourceIdentity>) -> RecordName {
-        fatalError("unimplemented")
+        let members = part.sorted().map(\.description).joined(separator: ",")
+        return RecordName("\(original.rawValue)|copy|\(members)")
     }
 }

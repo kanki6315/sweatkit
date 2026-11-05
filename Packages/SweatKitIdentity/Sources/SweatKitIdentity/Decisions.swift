@@ -19,7 +19,11 @@ public enum DecisionValue: Hashable, Codable, Sendable {
 
     /// The field this value sets.
     public var field: DecisionField {
-        fatalError("unimplemented")
+        switch self {
+        case .title: .title
+        case .hidden: .hidden
+        case .primary: .primary
+        }
     }
 }
 
@@ -66,7 +70,7 @@ public struct DecisionRecord: Hashable, Codable, Sendable {
 
     /// The field this decision sets.
     public var field: DecisionField {
-        fatalError("unimplemented")
+        value.field
     }
 
     /// The winner among `decisions`, or nil when there are none.
@@ -75,10 +79,26 @@ public struct DecisionRecord: Hashable, Codable, Sendable {
     /// direct decision beats an inherited copy, then the higher device ID
     /// wins, then the higher record name.
     ///
-    /// Fields and values are not looked at, so the caller passes decisions
-    /// on one field. The result does not depend on their order.
+    /// Fields are not looked at, so the caller passes decisions on one
+    /// field. The result does not depend on their order.
+    ///
+    /// The spec does not say what happens when two different records tie on
+    /// time, origin, device and name. Names are meant to be unique, so that
+    /// is a storage fault. So that the result still does not depend on
+    /// order, such a tie goes to the higher value and then the higher
+    /// member list, each compared in a canonical text form.
     public static func winner(among decisions: some Sequence<DecisionRecord>) -> DecisionRecord? {
-        fatalError("unimplemented")
+        var winner: DecisionRecord?
+        for decision in decisions {
+            if let current = winner {
+                if decision.beats(current) {
+                    winner = decision
+                }
+            } else {
+                winner = decision
+            }
+        }
+        return winner
     }
 
     /// The winning decision on `field` among those that apply to `member`,
@@ -89,7 +109,7 @@ public struct DecisionRecord: Hashable, Codable, Sendable {
         for member: SourceIdentity,
         among decisions: some Sequence<DecisionRecord>
     ) -> DecisionRecord? {
-        fatalError("unimplemented")
+        winner(among: decisions.lazy.filter { $0.field == field && $0.members.contains(member) })
     }
 
     /// The decision that gives an activity of `members` its value for
@@ -108,7 +128,7 @@ public struct DecisionRecord: Hashable, Codable, Sendable {
         members: Set<SourceIdentity>,
         among decisions: some Sequence<DecisionRecord>
     ) -> DecisionRecord? {
-        fatalError("unimplemented")
+        DecisionIndex(decisions).inEffect(field, members: members)
     }
 
     /// The title of an activity of `members`, or nil when no title decision
@@ -121,7 +141,7 @@ public struct DecisionRecord: Hashable, Codable, Sendable {
         of members: Set<SourceIdentity>,
         among decisions: some Sequence<DecisionRecord>
     ) -> String? {
-        fatalError("unimplemented")
+        DecisionIndex(decisions).title(of: members)
     }
 
     /// Whether an activity of `members` is hidden by its decisions.
@@ -136,6 +156,124 @@ public struct DecisionRecord: Hashable, Codable, Sendable {
         _ members: Set<SourceIdentity>,
         among decisions: some Sequence<DecisionRecord>
     ) -> Bool {
-        fatalError("unimplemented")
+        DecisionIndex(decisions).isHidden(members)
+    }
+
+    /// Whether this decision wins over `other`.
+    func beats(_ other: DecisionRecord) -> Bool {
+        if time != other.time {
+            return time > other.time
+        }
+        if origin != other.origin {
+            return origin == .direct
+        }
+        if device != other.device {
+            return device > other.device
+        }
+        if name != other.name {
+            return name > other.name
+        }
+        return (value.canonicalText, canonicalMembers) > (other.value.canonicalText, other.canonicalMembers)
+    }
+
+    /// The members in canonical form, in ascending order, joined by commas.
+    private var canonicalMembers: String {
+        members.sorted().map(\.description).joined(separator: ",")
+    }
+}
+
+extension DecisionValue {
+    /// A text form that is the same on every device. It only settles ties
+    /// that the spec's order leaves open.
+    fileprivate var canonicalText: String {
+        switch self {
+        case .title(let title): "title:\(title)"
+        case .hidden(let hidden): "hidden:\(hidden)"
+        case .primary(let identity): "primary:\(identity)"
+        }
+    }
+}
+
+/// Each member's winning decision on each field, worked out in one pass
+/// over the decisions. Resolving a whole library reads it once per
+/// activity instead of reading every decision again.
+struct DecisionIndex {
+    private struct Key: Hashable {
+        let member: SourceIdentity
+        let field: DecisionField
+    }
+
+    private var winners: [Key: DecisionRecord] = [:]
+    /// The time of each identity's latest restore: the latest
+    /// `.hidden(false)` decision that applies to it.
+    private var latestRestores: [SourceIdentity: Date] = [:]
+
+    init(_ decisions: some Sequence<DecisionRecord>) {
+        for decision in decisions {
+            let field = decision.field
+            let isRestore = decision.value == .hidden(false)
+            for member in decision.members {
+                let key = Key(member: member, field: field)
+                if let current = winners[key] {
+                    if decision.beats(current) {
+                        winners[key] = decision
+                    }
+                } else {
+                    winners[key] = decision
+                }
+                if isRestore {
+                    if let latest = latestRestores[member] {
+                        latestRestores[member] = max(latest, decision.time)
+                    } else {
+                        latestRestores[member] = decision.time
+                    }
+                }
+            }
+        }
+    }
+
+    /// The winning decision on `field` among those that apply to `member`.
+    func winner(of field: DecisionField, for member: SourceIdentity) -> DecisionRecord? {
+        winners[Key(member: member, field: field)]
+    }
+
+    /// See `DecisionRecord.inEffect(_:members:among:)`.
+    func inEffect(_ field: DecisionField, members: Set<SourceIdentity>) -> DecisionRecord? {
+        let memberWinners = members.compactMap { winner(of: field, for: $0) }
+        if field == .hidden {
+            let hides = memberWinners.filter { $0.value == .hidden(true) }
+            if !hides.isEmpty {
+                return DecisionRecord.winner(among: hides)
+            }
+        }
+        return DecisionRecord.winner(among: memberWinners)
+    }
+
+    /// See `DecisionRecord.title(of:among:)`.
+    func title(of members: Set<SourceIdentity>) -> String? {
+        guard case .title(let title)? = inEffect(.title, members: members)?.value else {
+            return nil
+        }
+        return title
+    }
+
+    /// See `DecisionRecord.isHidden(_:among:)`.
+    func isHidden(_ members: Set<SourceIdentity>) -> Bool {
+        members.contains { winner(of: .hidden, for: $0)?.value == .hidden(true) }
+    }
+
+    /// The primary choice in effect for an activity of `members`, whether
+    /// or not the chosen record is still a member.
+    func primaryChoice(of members: Set<SourceIdentity>) -> SourceIdentity? {
+        guard case .primary(let identity)? = inEffect(.primary, members: members)?.value else {
+            return nil
+        }
+        return identity
+    }
+
+    /// When the latest restore that applies to `identity` was made, or nil
+    /// when there is none.
+    func latestRestore(of identity: SourceIdentity) -> Date? {
+        latestRestores[identity]
     }
 }

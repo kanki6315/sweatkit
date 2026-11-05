@@ -61,6 +61,26 @@ public struct ResolvedLibrary: Hashable, Codable, Sendable {
         decisions: some Sequence<DecisionRecord>,
         tombstones: some Sequence<Tombstone>
     ) -> ResolvedLibrary {
-        fatalError("unimplemented")
+        let tombstoneIndex = TombstoneIndex(tombstones)
+        let decisionIndex = DecisionIndex(decisions)
+        let formation = ActivityFormation.form(
+            records: tombstoneIndex.surviving(records),
+            links: links
+        )
+        let activities = formation.activities.map { group in
+            let heldHidden = group.members.contains {
+                tombstoneIndex.standing(of: $0, decisions: decisionIndex) == .hidden
+            }
+            return ResolvedActivity(
+                id: group.id,
+                members: group.members,
+                title: decisionIndex.title(of: group.members),
+                isHidden: heldHidden || decisionIndex.isHidden(group.members),
+                // A formed group always has a member, so there is always a
+                // primary. The ID stands in only to avoid unwrapping.
+                primary: PrimaryChoice.primary(of: group.members, index: decisionIndex) ?? group.id
+            )
+        }
+        return ResolvedLibrary(activities: activities, possibleDuplicates: formation.skippedLinks)
     }
 }

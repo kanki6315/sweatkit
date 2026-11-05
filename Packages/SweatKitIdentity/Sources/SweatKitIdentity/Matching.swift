@@ -117,13 +117,62 @@ public enum MatchOutcome: Hashable, Codable, Sendable {
     ///   `start + elapsed`. Spans that only touch do not overlap.
     /// - Overlapping records of different sport families are still flagged,
     ///   because the spec flags every overlapping pair that fails the rule.
-    /// - The rule does not itself require the two spans to overlap.
+    /// - The rule does not itself require the two spans to overlap. Two
+    ///   short records that agree on everything and start within
+    ///   `startDifference` of each other match even when one ends before
+    ///   the other starts.
+    /// - A record whose elapsed time is zero or less covers no time and
+    ///   overlaps nothing.
+    /// - Two records of sport `.other` are of one family, `.other`, by the
+    ///   literal rule, so they can match.
     public static func between(
         _ first: MatchCandidate,
         _ second: MatchCandidate,
         tolerances: MatchTolerances = .standard
     ) -> MatchOutcome {
-        fatalError("unimplemented")
+        if first.linkedIdentities.contains(second.identity)
+            || second.linkedIdentities.contains(first.identity) {
+            return .sameActivity(.sourceIdentifier)
+        }
+        if passesTolerances(first, second, tolerances: tolerances) {
+            return .sameActivity(.tolerances)
+        }
+        return overlapInTime(first, second) ? .possibleDuplicate : .unrelated
+    }
+
+    /// Whether the two records agree on sport family, start, duration and,
+    /// when both are outdoor, distance.
+    private static func passesTolerances(
+        _ first: MatchCandidate,
+        _ second: MatchCandidate,
+        tolerances: MatchTolerances
+    ) -> Bool {
+        guard first.sport.family == second.sport.family else { return false }
+        guard abs(first.start.timeIntervalSince(second.start)) <= tolerances.startDifference else {
+            return false
+        }
+        guard isWithin(tolerances.durationFraction, first.elapsed, second.elapsed) else { return false }
+        if first.isIndoor || second.isIndoor {
+            return true
+        }
+        guard let firstDistance = first.distance, let secondDistance = second.distance else {
+            return false
+        }
+        return isWithin(tolerances.distanceFraction, firstDistance, secondDistance)
+    }
+
+    /// Whether two values differ by no more than `fraction` of the larger.
+    private static func isWithin(_ fraction: Double, _ first: Double, _ second: Double) -> Bool {
+        abs(first - second) <= fraction * max(first, second)
+    }
+
+    /// Whether the half-open spans of the two records share any time. A
+    /// record with no elapsed time covers no time, so it overlaps nothing.
+    private static func overlapInTime(_ first: MatchCandidate, _ second: MatchCandidate) -> Bool {
+        guard first.elapsed > 0, second.elapsed > 0 else { return false }
+        let firstEnd = first.start.addingTimeInterval(first.elapsed)
+        let secondEnd = second.start.addingTimeInterval(second.elapsed)
+        return first.start < secondEnd && second.start < firstEnd
     }
 }
 
@@ -148,13 +197,55 @@ public struct MatchScan: Hashable, Codable, Sendable {
     ///
     /// The scan does not read existing links. A pair the user has already
     /// merged or kept separate is settled by the link in effect, where a
-    /// user-made link beats an automatic one.
+    /// user-made link beats an automatic one. `awaitingReview(given:)`
+    /// leaves such pairs out of the flagged list.
+    ///
+    /// The spec does not say what one identity given twice means. A record
+    /// is never compared with another of the same identity, so no link from
+    /// a record to itself is written. If the two copies differ and one
+    /// matches a third record where the other is only flagged, the pair is
+    /// linked and not flagged.
     public static func scan(
         _ records: [MatchCandidate],
         at time: Date,
         device: DeviceID,
         tolerances: MatchTolerances = .standard
     ) -> MatchScan {
-        fatalError("unimplemented")
+        var linked: Set<IdentityPair> = []
+        var flagged: Set<IdentityPair> = []
+        for (index, first) in records.enumerated() {
+            for second in records[(index + 1)...] where second.identity != first.identity {
+                let pair = IdentityPair(first.identity, second.identity)
+                switch MatchOutcome.between(first, second, tolerances: tolerances) {
+                case .sameActivity:
+                    linked.insert(pair)
+                case .possibleDuplicate:
+                    flagged.insert(pair)
+                case .unrelated:
+                    break
+                }
+            }
+        }
+        // Only reachable when one identity is given twice with different
+        // values. A pair that matched is merged, so it is not also flagged.
+        flagged.subtract(linked)
+        let links = linked
+            .map { LinkRecord.automatic(pair: $0, kind: .sameActivity, time: time, device: device) }
+            .sorted { ($0.name, $0.pair) < ($1.name, $1.pair) }
+        return MatchScan(links: links, possibleDuplicates: flagged.sorted())
+    }
+
+    /// The flagged pairs the user has not yet dealt with, in ascending
+    /// order: `possibleDuplicates` without every pair that has a user-made
+    /// link among `links`.
+    ///
+    /// "The user merges them or keeps both." The spec does not say how the
+    /// flag is then cleared. This takes the literal reading: a user-made
+    /// link of either kind on the pair clears it, and nothing else does. An
+    /// automatic link on the pair does not, because the user has not looked
+    /// at it.
+    public func awaitingReview(given links: some Sequence<LinkRecord>) -> [IdentityPair] {
+        let reviewed = Set(links.lazy.filter { $0.maker == .user }.map(\.pair))
+        return possibleDuplicates.filter { !reviewed.contains($0) }
     }
 }
