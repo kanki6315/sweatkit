@@ -19,12 +19,12 @@ struct RootView: View {
                 }
             }
             Tab("Routes", systemImage: "point.topleft.down.to.point.bottomright.curvepath", value: Destination.routes) {
-                screen("Routes") {
+                screen {
                     RoutesView(libraryModel: library)
                 }
             }
             Tab("Trends", systemImage: "chart.xyaxis.line", value: Destination.trends) {
-                screen("Trends") {
+                screen {
                     TrendsView(model: library)
                 }
             }
@@ -57,10 +57,9 @@ struct RootView: View {
         return .search
     }
 
-    private func screen(_ title: String, @ViewBuilder content: () -> some View) -> some View {
+    private func screen(@ViewBuilder content: () -> some View) -> some View {
         NavigationStack {
             content()
-                .navigationTitle(title)
                 .toolbar {
                     ToolbarItem(placement: .topBarTrailing) {
                         Button("Settings", systemImage: "person.crop.circle") {
