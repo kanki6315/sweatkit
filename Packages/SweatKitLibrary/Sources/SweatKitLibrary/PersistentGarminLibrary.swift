@@ -111,6 +111,7 @@ public actor PersistentGarminLibrary: GarminLibrary {
         var metadata = try read()
         metadata.summaries[identity.description] = summary
         try write(metadata)
+        try await library.recordCloudGarminMetadata(summary)
     }
 
     public func markRemovedAtSource(_ identity: SourceIdentity) async throws {
@@ -149,7 +150,7 @@ public actor PersistentGarminLibrary: GarminLibrary {
         try JSONEncoder().encode(metadata).write(to: metadataURL, options: .atomic)
     }
 
-    private static func utcOffset(_ summary: GarminSummary) -> Int? {
+    static func utcOffset(_ summary: GarminSummary) -> Int? {
         guard let local = summary.startTimeLocal, let utc = summary.startTime else { return nil }
         var localSummary = summary
         localSummary.startTimeGMT = local

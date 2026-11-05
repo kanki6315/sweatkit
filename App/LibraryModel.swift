@@ -7,6 +7,7 @@ import SweatKitStore
 /// Owns the persistent library and the visible page, shared by all app screens.
 @MainActor @Observable
 final class LibraryModel {
+    private(set) var cloud: CloudConnection?
     private(set) var health: HealthConnection?
     private(set) var garmin: GarminConnection?
     private(set) var library: ActivityLibrary?
@@ -42,6 +43,7 @@ final class LibraryModel {
             library = opened
             garmin = GarminConnection(library: opened, root: root)
             health = HealthConnection(library: opened, root: root)
+            cloud = CloudConnection(library: opened, root: root)
             await garmin?.recoverDeletionCleanup()
             await reload()
         } catch { self.error = error.localizedDescription }
@@ -72,6 +74,7 @@ final class LibraryModel {
             error = nil
             resolveLocalities()
             scheduleRouteMatching()
+            cloud?.schedule()
         } catch {
             guard request == generation else { return }
             self.error = error.localizedDescription

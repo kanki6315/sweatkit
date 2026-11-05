@@ -45,6 +45,11 @@ struct SettingsView: View {
                 }
                 if let library = model.library {
                     Section("Sync and storage") {
+                        if let cloud = model.cloud {
+                            NavigationLink { CloudSettingsView(cloud: cloud) } label: {
+                                SettingsSummaryRow(title: "iCloud", symbol: "icloud", detail: cloud.status)
+                            }
+                        }
                         NavigationLink("Review duplicates and hidden activities") { LibraryReviewView(library: library) }
                     }
                 }
@@ -80,6 +85,7 @@ struct SettingsView: View {
             case .failure(let failure): error = failure.localizedDescription
             }
         }
+        .onDisappear { Task { await model.reload() } }
         .interactiveDismissDisabled(saving)
     }
 
