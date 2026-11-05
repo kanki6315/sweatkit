@@ -35,8 +35,8 @@ public enum RouteOverlay: String, Hashable, Sendable, CaseIterable {
     ///
     /// Reading, where the spec is silent: a ride whose power cannot be zoned
     /// falls back to heart rate, as a ride without power does, and anything
-    /// else falls back to plain. The overlay is never coloured from a guessed
-    /// threshold.
+    /// else falls back to plain. Missing personal thresholds use the labelled
+    /// starter zones; custom boundaries take precedence.
     public static func defaultCandidates(sport: Sport, hasPowerMeter: Bool) -> [RouteOverlay] {
         switch tableDefault(sport: sport, hasPowerMeter: hasPowerMeter) {
         case .power: [.power, .heartRate, .plain]

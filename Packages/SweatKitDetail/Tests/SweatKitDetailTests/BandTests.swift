@@ -155,13 +155,13 @@ struct BandTests {
 struct UnavailableOverlayTests {
     @Test func powerWithNoThresholdSet() {
         let stream = makeStream(count: 3, power: run(200, 3))
-        #expect(ColourBanding.bands(for: .power, input: makeInput(stream)).reason == .noThresholdPower)
+        #expect(ColourBanding.bands(for: .power, input: makeInput(stream)).value?.bands == [3, 3, 3])
     }
 
     @Test func powerWithAThresholdSetOnlyAfterTheActivity() {
         let stream = makeStream(count: 3, power: run(200, 3))
         let profile = AthleteProfile(thresholdPowerHistory: [.init(effectiveFrom: testStart.addingTimeInterval(86_400), watts: 250)])
-        #expect(ColourBanding.bands(for: .power, input: makeInput(stream, profile: profile)).reason == .noThresholdPower)
+        #expect(ColourBanding.bands(for: .power, input: makeInput(stream, profile: profile)).value?.bands == [3, 3, 3])
     }
 
     @Test func powerWithAZeroThreshold() {
@@ -181,7 +181,7 @@ struct UnavailableOverlayTests {
 
     @Test func heartRateWithNoThreshold() {
         let stream = makeStream(count: 3, heartRate: run(140, 3))
-        #expect(ColourBanding.bands(for: .heartRate, input: makeInput(stream)).reason == .noThresholdHeartRate)
+        #expect(ColourBanding.bands(for: .heartRate, input: makeInput(stream)).value?.bands == [1, 1, 1])
     }
 
     @Test func missingChannels() {
@@ -210,11 +210,11 @@ struct DefaultOverlayTests {
         #expect(detail.defaultOverlay == .power)
     }
 
-    @Test func aRideWithPowerButNoThresholdFallsBackToHeartRate() {
+    @Test func aRideWithPowerButNoThresholdUsesStarterPower() {
         let stream = makeStream(count: 3, power: run(200, 3), heartRate: run(140, 3))
         let detail = DetailPreparation.prepare(makeInput(stream, profile: makeProfile(thresholdHeartRate: 170)))
-        #expect(detail.defaultOverlay == .heartRate)
-        #expect(detail.bands[.power]?.reason == .noThresholdPower)
+        #expect(detail.defaultOverlay == .power)
+        #expect(detail.bands[.power]?.value?.bands == [3, 3, 3])
     }
 
     @Test func aRideWithoutPowerOpensOnHeartRate() {
@@ -224,7 +224,7 @@ struct DefaultOverlayTests {
     }
 
     @Test func aRideWithNothingToZoneIsPlain() {
-        let stream = makeStream(count: 3, heartRate: run(140, 3))
+        let stream = makeStream(count: 3)
         #expect(DetailPreparation.prepare(makeInput(stream)).defaultOverlay == .plain)
     }
 
@@ -237,5 +237,15 @@ struct DefaultOverlayTests {
     @Test func otherSportsArePlain() {
         let stream = makeStream(count: 3, speed: run(1.4, 3))
         #expect(DetailPreparation.prepare(makeInput(stream, sport: .other)).defaultOverlay == .plain)
+    }
+}
+
+@Suite struct CustomBandTests {
+    @Test func customZonesMatchTotals() throws {
+        let profile = AthleteProfile(powerZoneBounds: [100, 130, 160, 190, 220, 250],
+                                     heartRateZoneBounds: [100, 120, 140, 160])
+        let input = makeInput(makeStream(count: 3, power: run(250, 3), heartRate: run(140, 3)), profile: profile)
+        #expect(ColourBanding.bands(for: .power, input: input).value?.bands == [6, 6, 6])
+        #expect(ColourBanding.bands(for: .heartRate, input: input).value?.bands == [3, 3, 3])
     }
 }

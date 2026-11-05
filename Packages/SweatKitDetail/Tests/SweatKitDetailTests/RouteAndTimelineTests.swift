@@ -30,10 +30,10 @@ struct RouteTests {
         #expect(try #require(detail.route(for: .plain).value).bands == Array(repeating: 0, count: 10))
     }
 
-    @Test func anUnavailableOverlayHasNoRouteButTheOthersDo() {
+    @Test func starterPowerZonesHaveARoute() {
         let stream = makeStream(count: 10, positions: zigzag(10), power: run(200, 10), speed: run(13, 10))
         let detail = DetailPreparation.prepare(makeInput(stream))
-        #expect(detail.route(for: .power).reason == .noThresholdPower)
+        #expect(detail.route(for: .power).value?.bands == Array(repeating: 3, count: 10))
         #expect(detail.route(for: .plain).value != nil)
     }
 
@@ -221,9 +221,9 @@ struct TimelineDataTests {
         #expect(detail.timelineOverlays[.power] == nil)
     }
 
-    @Test func anUnzonedOverlayIsDrawnWithoutBands() {
+    @Test func starterZonesSupplyTimelineBands() {
         let stream = makeStream(count: 3, power: run(200, 3))
-        #expect(DetailPreparation.prepare(makeInput(stream)).timelineOverlays[.power]?.bands == nil)
+        #expect(DetailPreparation.prepare(makeInput(stream)).timelineOverlays[.power]?.bands == [3, 3, 3])
     }
 }
 

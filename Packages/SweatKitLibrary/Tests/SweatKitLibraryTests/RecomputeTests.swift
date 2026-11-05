@@ -19,6 +19,21 @@ private func ids(_ fixtures: [Fixtures.FIT]) throws -> [SourceIdentity] {
 @Suite struct ProfileStalenessTests {
     let temporary = TemporaryLibrary()
 
+    @Test func customZonesPersistAndRecomputeTheAffectedSports() async throws {
+        let library = try await temporary.withFixtures().open()
+        var custom = AthleteProfile()
+        custom.powerZoneBounds = [100, 130, 160, 190, 220, 250]
+        #expect(try await library.saveProfile(custom).map(\.id) == (try ids([.outdoorRide, .zwiftRide])))
+        #expect(try await library.recompute().failures.isEmpty)
+        #expect(try await temporary.open().profile() == custom)
+        custom.heartRateZoneBounds = [100, 120, 140, 160]
+        #expect(try await library.saveProfile(custom).map(\.id) == (try ids(Fixtures.FIT.allCases)))
+        #expect(try await library.recompute().failures.isEmpty)
+        #expect(try await library.staleActivities().isEmpty)
+        custom.powerZoneBounds = nil
+        #expect(try await library.saveProfile(custom).map(\.id) == (try ids([.outdoorRide, .zwiftRide])))
+    }
+
     @Test func theProfileIsEmptyUntilSavedAndSurvivesReopening() async throws {
         do {
             let library = try temporary.open()

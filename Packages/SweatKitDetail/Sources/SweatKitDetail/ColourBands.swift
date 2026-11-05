@@ -43,11 +43,12 @@ public enum ColourBanding {
     /// - Power: the zone of 10-second smoothed power as a share of the
     ///   threshold power in effect on the activity date, by
     ///   `ZoneScheme.power`. Cycling only, like every power metric.
-    ///   Unavailable with `.notDefinedForSport`, `.noPower`,
-    ///   `.noThresholdPower` or `.zeroDenominator`, in that order.
+    ///   Custom boundaries take precedence; absent thresholds use starter zones.
+    ///   Unavailable with `.notDefinedForSport`, `.noPower` or `.zeroDenominator`.
     /// - Heart rate: the zone of each second's heart rate as a share of the
     ///   profile's threshold heart rate, by `ZoneScheme.heartRate`.
-    ///   Unavailable with `.noHeartRate`, `.noThresholdHeartRate` or
+    ///   Custom boundaries take precedence; absent thresholds use starter zones.
+    ///   Unavailable with `.noHeartRate` or
     ///   `.zeroDenominator`.
     /// - Pace or speed: see `paceBands(_:family:)`. Unavailable with
     ///   `.noSpeed`.
@@ -61,19 +62,17 @@ public enum ColourBanding {
         case .power:
             guard input.sport.family == .cycling else { return .unavailable(.notDefinedForSport) }
             guard hasValue(stream.power) else { return .unavailable(.noPower) }
-            guard let threshold = input.profile.thresholdPower(on: input.activityDate) else {
-                return .unavailable(.noThresholdPower)
-            }
+            let zones = ResolvedZones.power(profile: input.profile, on: input.activityDate)
+            let threshold = zones.threshold
             guard threshold > 0 else { return .unavailable(.zeroDenominator) }
             let smoothed = trailingMean(stream.power, seconds: DetailRules.bandSmoothingSeconds)
-            return .available(zoned(.power, smoothed, threshold: threshold, scheme: .power))
+            return .available(zoned(.power, smoothed, threshold: threshold, scheme: zones.scheme))
         case .heartRate:
             guard hasValue(stream.heartRate) else { return .unavailable(.noHeartRate) }
-            guard let threshold = input.profile.thresholdHeartRate else {
-                return .unavailable(.noThresholdHeartRate)
-            }
+            let zones = ResolvedZones.heartRate(profile: input.profile)
+            let threshold = zones.threshold
             guard threshold > 0 else { return .unavailable(.zeroDenominator) }
-            return .available(zoned(.heartRate, values(of: stream.heartRate), threshold: threshold, scheme: .heartRate))
+            return .available(zoned(.heartRate, values(of: stream.heartRate), threshold: threshold, scheme: zones.scheme))
         case .paceOrSpeed:
             guard hasValue(stream.speed) else { return .unavailable(.noSpeed) }
             return .available(paceBands(stream.speed, family: input.sport.family))

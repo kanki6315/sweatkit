@@ -8,18 +8,20 @@ extension StreamAnalysis {
     func timeInPowerZones() -> Metric<TimeInZones> {
         guard sport == .cycling else { return .unavailable(.notDefinedForSport) }
         guard power.hasValues else { return .unavailable(.noPower) }
-        guard let threshold = thresholdPower else { return .unavailable(.noThresholdPower) }
+        let zones = ResolvedZones.power(profile: profile, on: activityDate)
+        let threshold = zones.threshold
         guard threshold != 0 else { return .unavailable(.zeroDenominator) }
-        return .available(timeInZones(power, scheme: .power, threshold: threshold))
+        return .available(timeInZones(power, scheme: zones.scheme, threshold: threshold))
     }
 
     /// Seconds in each of the five heart-rate zones, against the profile's
     /// threshold heart rate.
     func timeInHeartRateZones() -> Metric<TimeInZones> {
         guard heartRate.hasValues else { return .unavailable(.noHeartRate) }
-        guard let threshold = profile.thresholdHeartRate else { return .unavailable(.noThresholdHeartRate) }
+        let zones = ResolvedZones.heartRate(profile: profile)
+        let threshold = zones.threshold
         guard threshold != 0 else { return .unavailable(.zeroDenominator) }
-        return .available(timeInZones(heartRate, scheme: .heartRate, threshold: threshold))
+        return .available(timeInZones(heartRate, scheme: zones.scheme, threshold: threshold))
     }
 
     /// Seconds in each of the five gradient bands.

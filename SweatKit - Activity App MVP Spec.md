@@ -419,6 +419,8 @@ Sensor gaps are not pauses. A missing reading never shortens elapsed, timer or m
 | Heart rate, five zones | Share of threshold heart rate: under 81%, 81 to 90%, 90 to 94%, 94 to 100%, 100% and over |
 | Gradient, five bands | Descent under -2%, flat from -2% to 2%, climbs of 2 to 5%, 5 to 8%, and over 8% |
 | Boundaries | A value exactly on a boundary belongs to the higher zone |
+| Starter zones | When a personal threshold is absent, zone displays use an assumed 200 W power threshold or 170 bpm heart-rate threshold. These assumptions are labelled and never used for intensity or load. |
+| Overrides | Settings allows absolute lower boundaries for power zones 2–7 (watts) and heart-rate zones 2–5 (bpm). Boundaries must be positive, finite and strictly increasing. Custom boundaries override personal thresholds for zone totals and map/timeline colours across all dates. Reset restores automatic threshold-based zones, falling back to starter zones. Saving recalculates affected activities. |
 | Threshold heart rate | Set in the athlete profile. Until the user sets it, it defaults to 90% of max heart rate. |
 
 **Power, cycling only**

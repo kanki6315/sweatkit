@@ -1,5 +1,6 @@
 import SwiftUI
 import SweatKitModel
+import SweatKitAnalysis
 import SweatKitSync
 
 struct SettingsView: View {
@@ -88,7 +89,7 @@ struct SettingsView: View {
                     optionalNumber("Threshold heart rate (bpm)", value: $profile.statedThresholdHeartRate)
                     optionalNumber("Weight (kg)", value: $profile.weight)
                 } header: { Text("Athlete profile") } footer: {
-                    Text("Leave unknown values blank. Without a threshold heart rate, zones use 90% of your maximum heart rate when set.")
+                    Text("Leave unknown values blank. Without a threshold heart rate, zones use 90% of your maximum heart rate when set. Starter zones apply when neither is known.")
                 }
                 Section {
                     ForEach(profile.thresholdPowerHistory.indices, id: \.self) { index in
@@ -107,6 +108,8 @@ struct SettingsView: View {
                 } header: { Text("Threshold power history") } footer: {
                     Text("Each value applies from its date until the next entry. Corrections recalculate the affected activities. Swipe an entry to delete it.")
                 }
+                zoneSettings(power: true)
+                zoneSettings(power: false)
                 if let error { Section { Text(error).foregroundStyle(.red) } }
                 if let status { Section { Text(status) } }
                 Section {
@@ -129,6 +132,45 @@ struct SettingsView: View {
         .interactiveDismissDisabled(saving)
     }
 
+    private func zoneSettings(power: Bool) -> some View {
+        let key: WritableKeyPath<AthleteProfile, [Double]?> = power ? \.powerZoneBounds : \.heartRateZoneBounds
+        let resolved = power ? ResolvedZones.power(profile: profile, on: .now) : ResolvedZones.heartRate(profile: profile)
+        let bounds = profile[keyPath: key] ?? resolved.absoluteBounds
+        let unit = power ? "W" : "bpm"
+        return Section {
+            Toggle("Custom boundaries", isOn: Binding(
+                get: { profile[keyPath: key] != nil },
+                set: { profile[keyPath: key] = $0 ? bounds : nil }
+            ))
+            ForEach(bounds.indices, id: \.self) { index in
+                LabeledContent("Zone \(index + 2) starts at (\(unit))") {
+                    if profile[keyPath: key] != nil {
+                        TextField("Lower boundary", value: Binding(
+                            get: { profile[keyPath: key]?[index] ?? bounds[index] },
+                            set: { profile[keyPath: key]?[index] = $0 }
+                        ), format: .number)
+                        .keyboardType(.decimalPad)
+                        .multilineTextAlignment(.trailing)
+                        .accessibilityLabel("Zone \(index + 2) lower boundary in \(unit)")
+                    } else {
+                        Text(bounds[index], format: .number.precision(.fractionLength(0...1)))
+                    }
+                }
+            }
+            if profile[keyPath: key] != nil {
+                Button("Reset to automatic zones") { profile[keyPath: key] = nil }
+            }
+        } header: {
+            Text(power ? "Power zones" : "Heart-rate zones")
+        } footer: {
+            Text(profile[keyPath: key] != nil
+                 ? "Boundaries must increase. Zone 1 is below the first boundary; the last zone has no upper limit. Custom boundaries apply to all activities and override thresholds for zone colours and totals."
+                 : resolved.isStarter
+                 ? "Starter zones use an assumed \(power ? "200 W" : "170 bpm") threshold. Set your personal threshold above or turn on custom boundaries. Starter values are not used for training load."
+                 : "Automatic zones follow your personal threshold. Power zones follow the threshold in effect on each activity’s date. Values shown are for today.")
+        }
+    }
+
     private func optionalNumber(_ title: String, value: Binding<Double?>) -> some View {
         TextField(title, value: value, format: .number)
             .keyboardType(.decimalPad)
@@ -136,6 +178,12 @@ struct SettingsView: View {
     }
 
     private func save() async {
+        for (bounds, count) in [(profile.powerZoneBounds, 6), (profile.heartRateZoneBounds, 4)] {
+            if let bounds, !AthleteProfile.validZoneBounds(bounds, count: count) {
+                error = "Zone boundaries must be positive and increase from one zone to the next."
+                return
+            }
+        }
         let values = [profile.maxHeartRate, profile.statedThresholdHeartRate, profile.weight].compactMap { $0 }
             + profile.thresholdPowerHistory.map(\.watts)
         guard values.allSatisfy({ $0.isFinite && $0 > 0 }) else {

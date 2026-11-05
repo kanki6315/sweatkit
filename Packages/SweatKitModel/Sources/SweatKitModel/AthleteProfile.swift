@@ -25,6 +25,15 @@ public struct AthleteProfile: Hashable, Codable, Sendable {
     public var statedThresholdHeartRate: Double?
     /// Kilograms.
     public var weight: Double?
+    /// Absolute lower bounds for zones 2 onward. Nil uses threshold-based defaults.
+    public var powerZoneBounds: [Double]?
+    public var heartRateZoneBounds: [Double]?
+
+    public static func validZoneBounds(_ bounds: [Double], count: Int) -> Bool {
+        bounds.count == count && bounds.allSatisfy { $0.isFinite && $0 > 0 }
+            && zip(bounds, bounds.dropFirst()).allSatisfy { $0 < $1 }
+    }
+
     public var units: UnitSystem
 
     public init(
@@ -32,13 +41,17 @@ public struct AthleteProfile: Hashable, Codable, Sendable {
         maxHeartRate: Double? = nil,
         statedThresholdHeartRate: Double? = nil,
         weight: Double? = nil,
-        units: UnitSystem = .metric
+        units: UnitSystem = .metric,
+        powerZoneBounds: [Double]? = nil,
+        heartRateZoneBounds: [Double]? = nil
     ) {
         self.thresholdPowerHistory = thresholdPowerHistory
         self.maxHeartRate = maxHeartRate
         self.statedThresholdHeartRate = statedThresholdHeartRate
         self.weight = weight
         self.units = units
+        self.powerZoneBounds = powerZoneBounds
+        self.heartRateZoneBounds = heartRateZoneBounds
     }
 
     /// The threshold power in effect on `date`, or nil when none was set by then.
@@ -66,8 +79,9 @@ extension AthleteProfile {
             self.rawValue = rawValue
         }
 
-        /// The threshold power in effect on the result's date.
+        /// The threshold power in effect on the result's date and custom power zones.
         public static let thresholdPower = Inputs(rawValue: 1 << 0)
+        /// Threshold heart rate and custom heart-rate zones.
         public static let thresholdHeartRate = Inputs(rawValue: 1 << 1)
         public static let maxHeartRate = Inputs(rawValue: 1 << 2)
         public static let all: Inputs = [.thresholdPower, .thresholdHeartRate, .maxHeartRate]
@@ -88,8 +102,18 @@ extension AthleteProfile {
             // The bit pattern is exact and does not depend on the locale.
             lines.append("\(name)=" + (value.map { String($0.bitPattern, radix: 16) } ?? "none"))
         }
-        if inputs.contains(.thresholdPower) { line("thresholdPower", thresholdPower(on: date)) }
-        if inputs.contains(.thresholdHeartRate) { line("thresholdHeartRate", thresholdHeartRate) }
+        if inputs.contains(.thresholdPower) {
+            line("thresholdPower", thresholdPower(on: date))
+            if let powerZoneBounds {
+                lines.append("powerZones=" + powerZoneBounds.map { String($0.bitPattern, radix: 16) }.joined(separator: ","))
+            }
+        }
+        if inputs.contains(.thresholdHeartRate) {
+            line("thresholdHeartRate", thresholdHeartRate)
+            if let heartRateZoneBounds {
+                lines.append("heartRateZones=" + heartRateZoneBounds.map { String($0.bitPattern, radix: 16) }.joined(separator: ","))
+            }
+        }
         if inputs.contains(.maxHeartRate) { line("maxHeartRate", maxHeartRate) }
         return ContentHash(of: Data(lines.joined(separator: "\n").utf8))
     }

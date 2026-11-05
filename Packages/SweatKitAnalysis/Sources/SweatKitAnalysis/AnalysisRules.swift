@@ -82,7 +82,7 @@ public enum AlgorithmVersion {
     public static let time = 1
     public static let distance = 1
     public static let elevation = 2
-    public static let zones = 2
+    public static let zones = 3
     /// Coverage, average power and work.
     public static let power = 1
     /// Weighted power, intensity and variability.

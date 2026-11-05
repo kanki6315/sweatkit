@@ -49,6 +49,11 @@ struct ActivityAnalysisView: View {
                         zones("Power zones", metric: metrics.timeInPowerZones, colors: EffortPalette.power)
                     }
                     zones("Heart-rate zones", metric: metrics.timeInHeartRateZones, colors: EffortPalette.heartRate)
+                    if ResolvedZones.heartRate(profile: detail.input.profile).isStarter ||
+                        (detail.input.sport.family == .cycling && ResolvedZones.power(profile: detail.input.profile, on: detail.input.activityDate).isStarter) {
+                        Text("Starter zones use assumed thresholds where your profile has none: 200 W for power and 170 bpm for heart rate. Personalize zones in Settings.")
+                            .font(.footnote).foregroundStyle(.secondary)
+                    }
                     zones("Gradient bands", metric: metrics.timeInGradientBands, colors: EffortPalette.gradient)
                 }
                 if !presentation.laps.isEmpty {

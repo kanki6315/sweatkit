@@ -121,14 +121,14 @@ import Testing
         #expect(metrics.timeInPowerZones == .available(TimeInZones(seconds: [0, 0, 0, 0, 1, 0, 0], missing: 0)))
     }
 
-    @Test func powerZonesAreUnavailableWithoutAThresholdOnTheActivityDate() {
+    @Test func powerZonesUseStarterWithoutAThresholdOnTheActivityDate() {
         let stream = makeStream(count: 3, power: [200, 200, 200])
-        #expect(analyse(stream).timeInPowerZones == .unavailable(.noThresholdPower))
+        #expect(analyse(stream).timeInPowerZones == .available(TimeInZones(seconds: [0, 0, 0, 3, 0, 0, 0], missing: 0)))
         // A threshold that takes effect only after the activity does not apply.
         let later = AthleteProfile(thresholdPowerHistory: [
             .init(effectiveFrom: testStart.addingTimeInterval(86_400), watts: 200),
         ])
-        #expect(analyse(stream, profile: later).timeInPowerZones == .unavailable(.noThresholdPower))
+        #expect(analyse(stream, profile: later).timeInPowerZones == .available(TimeInZones(seconds: [0, 0, 0, 3, 0, 0, 0], missing: 0)))
     }
 
     @Test func powerZonesAreUnavailableForAThresholdOfZero() {
@@ -197,9 +197,9 @@ import Testing
         #expect(metrics.timeInHeartRateZones == .available(TimeInZones(seconds: [0, 0, 1, 0, 0], missing: 0)))
     }
 
-    @Test func heartRateZonesAreUnavailableWithoutAThresholdOrMax() {
+    @Test func heartRateZonesUseStarterWithoutAThresholdOrMax() {
         let stream = makeStream(count: 3, heartRate: [150, 150, 150])
-        #expect(analyse(stream).timeInHeartRateZones == .unavailable(.noThresholdHeartRate))
+        #expect(analyse(stream).timeInHeartRateZones == .available(TimeInZones(seconds: [0, 3, 0, 0, 0], missing: 0)))
     }
 
     @Test func heartRateZonesAreUnavailableWithoutHeartRate() {
@@ -250,5 +250,41 @@ import Testing
         )
         let metrics = analyse(stream, profile: makeProfile(thresholdHeartRate: 200))
         #expect(metrics.timeInHeartRateZones == .available(TimeInZones(seconds: [0, 0, 0, 0, 4], missing: 2)))
+    }
+}
+
+@Suite struct CustomZoneTests {
+    @Test func customBoundsWinAndEqualityGoesUp() throws {
+        let profile = AthleteProfile(statedThresholdHeartRate: 200,
+            powerZoneBounds: [100, 130, 160, 190, 220, 250],
+            heartRateZoneBounds: [100, 120, 140, 160])
+        let stream = makeStream(count: 3, power: [99, 100, 250], heartRate: [99, 100, 160])
+        let metrics = analyse(stream, profile: profile)
+        #expect(metrics.timeInPowerZones.value?.seconds == [1, 1, 0, 0, 0, 0, 1])
+        #expect(metrics.timeInHeartRateZones.value?.seconds == [1, 1, 0, 0, 1])
+        let encoded = try JSONEncoder().encode(profile)
+        #expect(try JSONDecoder().decode(AthleteProfile.self, from: encoded) == profile)
+        var reset = profile
+        reset.powerZoneBounds = nil
+        #expect(reset.fingerprint(on: testStart) != profile.fingerprint(on: testStart))
+        #expect(reset.fingerprint(on: testStart, reading: .thresholdHeartRate) == profile.fingerprint(on: testStart, reading: .thresholdHeartRate))
+    }
+
+    @Test func validationRejectsMalformedBounds() {
+        for bounds in [[100, 90, 140, 160], [100, 100, 140, 160], [0, 120, 140, 160], [100, 120], [100, 120, 140, Double.infinity]] {
+            #expect(!AthleteProfile.validZoneBounds(bounds, count: 4))
+        }
+        #expect(AthleteProfile.validZoneBounds([100, 120, 140, 160], count: 4))
+    }
+
+    @Test func oldProfilesDecodeWithoutOverrides() throws {
+        let data = Data(#"{"thresholdPowerHistory":[],"units":"metric"}"#.utf8)
+        let profile = try JSONDecoder().decode(AthleteProfile.self, from: data)
+        #expect(profile.powerZoneBounds == nil)
+        #expect(profile.heartRateZoneBounds == nil)
+        #expect(ResolvedZones.power(profile: profile, on: testStart).isStarter)
+        #expect(ResolvedZones.heartRate(profile: profile).isStarter)
+        #expect(profile.thresholdHeartRate == nil)
+        #expect(profile.thresholdPower(on: testStart) == nil)
     }
 }

@@ -71,8 +71,8 @@ import Testing
         #expect((50...400).contains(expected))
     }
 
-    /// With no threshold power set, everything that divides by it is
-    /// unavailable for that reason, and the headline does not need it.
+    /// With no threshold power set, load and intensity stay unavailable,
+    /// while starter zones and the headline are available.
     @Test func aRideWithNoThresholdPowerKeepsItsHeadlineAndSaysWhatIsMissing() async throws {
         let library = try await temporary.withFixtures().open()
         let id = try fileIdentity(.outdoorRide)
@@ -85,12 +85,12 @@ import Testing
         #expect(metrics.power.average.value != nil)
 
         // Power is on 5,337 of 5,347 records over 89 minutes, so weighted
-        // power is available. Intensity, load from power and the power zones
-        // need the threshold.
+        // power is available. Intensity and load need a personal threshold;
+        // zone displays can use starter values.
         #expect(metrics.power.weighted.value != nil)
         #expect(metrics.power.intensity == .unavailable(.noThresholdPower))
         #expect(metrics.power.load == .unavailable(.noThresholdPower))
-        #expect(metrics.timeInPowerZones == .unavailable(.noThresholdPower))
+        #expect(metrics.timeInPowerZones.value?.seconds.count == 7)
         // "A ride with no threshold power set falls through to heart rate",
         // which has no threshold either, "and prompts the user to set a
         // threshold". Load is unavailable, never estimated and never zero.
