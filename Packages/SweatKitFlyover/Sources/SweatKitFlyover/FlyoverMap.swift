@@ -47,9 +47,10 @@ private struct FlyoverMapRepresentable: UIViewRepresentable {
     var options: FlyoverOptions
     var cameraMode: FlyoverOptions.CameraMode
 
-    func makeCoordinator() -> FlyoverMapCoordinator { FlyoverMapCoordinator() }
+    func makeCoordinator() -> FlyoverMapCoordinator { IdleMapCache.shared.take() ?? FlyoverMapCoordinator() }
 
     func makeUIView(context: Context) -> LayoutReportingMapView {
+        if let mapView = context.coordinator.mapView { return mapView }
         let mapView = LayoutReportingMapView()
         mapView.delegate = context.coordinator
         mapView.showsCompass = true
@@ -73,6 +74,34 @@ private struct FlyoverMapRepresentable: UIViewRepresentable {
 
     static func dismantleUIView(_ mapView: LayoutReportingMapView, coordinator: FlyoverMapCoordinator) {
         coordinator.stop()
+        IdleMapCache.shared.put(coordinator)
+    }
+}
+
+/// Keeps one idle map (including its geometry and renderers) warm briefly.
+/// NSCache may discard it under memory pressure; MapKit owns its tile cache.
+@MainActor
+private final class IdleMapCache {
+    static let shared = IdleMapCache()
+    private let cache = NSCache<NSString, FlyoverMapCoordinator>()
+    private var generation = UUID()
+
+    func take() -> FlyoverMapCoordinator? {
+        let coordinator = cache.object(forKey: "idle")
+        cache.removeAllObjects()
+        generation = UUID()
+        return coordinator
+    }
+
+    func put(_ coordinator: FlyoverMapCoordinator) {
+        cache.countLimit = 1
+        cache.setObject(coordinator, forKey: "idle")
+        let token = UUID()
+        generation = token
+        DispatchQueue.main.asyncAfter(deadline: .now() + 60) { [weak self] in
+            guard let self, self.generation == token else { return }
+            self.cache.removeAllObjects()
+        }
     }
 }
 
@@ -155,7 +184,7 @@ final class FlyoverMapCoordinator: NSObject, MKMapViewDelegate {
         var realisticElevation: Bool
     }
 
-    weak var mapView: MKMapView?
+    var mapView: LayoutReportingMapView?
 
     private var geometry: RouteGeometry?
     private var options = FlyoverOptions()
@@ -173,6 +202,7 @@ final class FlyoverMapCoordinator: NSObject, MKMapViewDelegate {
     private var needsOverviewFit = false
 
     private var smoother = HeadingSmoother()
+    private var pacing = CameraPacing()
     private var headingTarget: Double?
     private var cameraNeedsUpdate = false
     private var displayLink: CADisplayLink?
@@ -230,6 +260,7 @@ final class FlyoverMapCoordinator: NSObject, MKMapViewDelegate {
                 stopDisplayLink()
                 fitOverview()
             case .follow:
+                pacing.reset(to: geometry.distance(at: position))
                 smoother = options.headingSmoothing
                 headingTarget = options.followHeading.target(on: geometry, at: position)
                 smoother.reset(to: headingTarget ?? mapView.camera.heading)
@@ -391,7 +422,7 @@ final class FlyoverMapCoordinator: NSObject, MKMapViewDelegate {
             return
         }
         let link = CADisplayLink(target: self, selector: #selector(stepCamera(_:)))
-        link.preferredFrameRateRange = CAFrameRateRange(minimum: 60, maximum: 120, preferred: 120)
+        link.preferredFrameRateRange = CAFrameRateRange(minimum: 30, maximum: 30, preferred: 30)
         link.add(to: .main, forMode: .common)
         displayLink = link
     }
@@ -407,7 +438,8 @@ final class FlyoverMapCoordinator: NSObject, MKMapViewDelegate {
             stopDisplayLink()
             return
         }
-        guard cameraNeedsUpdate || !smoother.hasSettled(on: headingTarget) else {
+        let targetDistance = geometry.distance(at: position)
+        guard cameraNeedsUpdate || !pacing.hasSettled(on: targetDistance) || !smoother.hasSettled(on: headingTarget) else {
             link.isPaused = true
             lastFrameTimestamp = nil
             return
@@ -416,10 +448,13 @@ final class FlyoverMapCoordinator: NSObject, MKMapViewDelegate {
         let seconds = lastFrameTimestamp.map { min(link.timestamp - $0, 1.0 / 30) } ?? link.duration
         lastFrameTimestamp = link.timestamp
         cameraNeedsUpdate = false
+        let cameraDistance = pacing.step(towards: targetDistance, seconds: seconds)
+        let cameraPosition = geometry.position(atDistance: cameraDistance)
+        headingTarget = options.followHeading.target(on: geometry, at: cameraPosition) ?? headingTarget
         guard let heading = smoother.step(towards: headingTarget, seconds: seconds) else { return }
         mapView.setCamera(
             MKMapCamera(
-                lookingAtCenter: CLLocationCoordinate2D(geometry.coordinate(at: position)),
+                lookingAtCenter: CLLocationCoordinate2D(geometry.coordinate(at: cameraPosition)),
                 fromDistance: options.followDistance,
                 pitch: CGFloat(options.followPitch),
                 heading: heading
