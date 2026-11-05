@@ -28,6 +28,9 @@ final class LibraryModel {
     private var cursor: FeedCursor?
     private(set) var trendsRevision = 0
     private var generation = 0
+    var routeCatalog = RouteCatalog(routes: [], reviews: [])
+    var recordBadges: [SourceIdentity: [TrendRecord]] = [:]
+    var historyRefreshTask: Task<Void, Never>?
     var routeRefreshTask: Task<Void, Never>?
     private var importTask: Task<Void, Never>?
     private let localityResolver = ActivityLocalityResolver()
@@ -44,12 +47,13 @@ final class LibraryModel {
             garmin = GarminConnection(library: opened, root: root)
             health = HealthConnection(library: opened, root: root)
             cloud = CloudConnection(library: opened, root: root)
+            cloud?.didRecover = { [weak self] in await self?.reload(scheduleCloud: false) }
             await garmin?.recoverDeletionCleanup()
             await reload()
         } catch { self.error = error.localizedDescription }
     }
 
-    func reload() async {
+    func reload(scheduleCloud: Bool = true) async {
         generation += 1
         let request = generation
         guard let library else { return }
@@ -74,7 +78,8 @@ final class LibraryModel {
             error = nil
             resolveLocalities()
             scheduleRouteMatching()
-            cloud?.schedule()
+            scheduleRecordBadges()
+            if scheduleCloud { cloud?.schedule() }
         } catch {
             guard request == generation else { return }
             self.error = error.localizedDescription
@@ -93,6 +98,7 @@ final class LibraryModel {
             let existing = Set(activities.compactMap(\.id))
             activities += page.activities.filter { !existing.contains($0.id ?? $0.primary) }
             self.cursor = page.next
+            scheduleRecordBadges()
             resolveLocalities()
         } catch { if request == generation { self.error = error.localizedDescription } }
     }

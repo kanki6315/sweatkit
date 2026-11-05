@@ -16,6 +16,7 @@ final class CloudConnection {
     private(set) var pending = 0
     private var task: Task<Void, Never>?
     private var needsSync = false
+    var didRecover: (@MainActor () async -> Void)?
     private static let preference = "private-cloud-copy-enabled"
 
     init(library: ActivityLibrary, root: URL) {
@@ -64,6 +65,7 @@ final class CloudConnection {
             // or a recoverable download. Replay the inbox even when sending failed.
             status = "Rebuilding recovered activities…"
             try await library.cloudRestore(await copy.records()) { item in try await copy.asset(item) }
+            await didRecover?()
             if let transportError { throw transportError }
             let result = await copy.status()
             pending = result.pending; lastConfirmed = result.lastConfirmed

@@ -12,6 +12,7 @@ import SweatKitPalette
     var loading = false
     var error: String?
     var library: ActivityLibrary?
+    var didDecide: (@MainActor () async -> Void)?
     private var generation = 0
     func reload(_ library: ActivityLibrary?) async {
         guard let library else { return }
@@ -32,7 +33,7 @@ import SweatKitPalette
     }
     func decide(_ id: SourceIdentity, _ value: RouteDecision.Value) async {
         guard let library else { return }
-        do { try await library.decideRoute(id, value: value); await reload(library) }
+        do { try await library.decideRoute(id, value: value); await didDecide?(); await reload(library) }
         catch { self.error = error.localizedDescription }
     }
 }
@@ -103,7 +104,10 @@ struct RoutesView: View {
             }
         } }
         .refreshable { await model.reload(libraryModel.library) }
-        .task(id: "\(libraryModel.revisions.hashValue)-\(libraryModel.activities.hashValue)") { await model.reload(libraryModel.library) }
+        .task(id: libraryModel.trendsRevision) {
+            model.didDecide = { await libraryModel.reload() }
+            await model.reload(libraryModel.library)
+        }
     }
     @ViewBuilder private func reviewButtons(_ review: RouteReview) -> some View {
         Button("Same route") { Task { await model.decide(review.routeID, .membership(activity: review.activity.id!, included: true)) } }.buttonStyle(.borderedProminent)

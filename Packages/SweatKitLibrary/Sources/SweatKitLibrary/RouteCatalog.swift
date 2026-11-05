@@ -69,9 +69,26 @@ extension ActivityLibrary {
     private var routeDecisionURL: URL { store.root.appending(path: "route-decisions-v1.json") }
     private var routeSeedURL: URL { store.root.appending(path: "LocalMetadata/route-groups-v1.json") }
 
+    static let routeCloudNamespace = "sweatkit.route-decisions.v1"
+
+    static func routeDecision(from envelope: CloudDecisionEnvelope) throws -> RouteDecision? {
+        guard envelope.namespace == routeCloudNamespace, envelope.version == 1 else { return nil }
+        let decision = try JSONDecoder().decode(RouteDecision.self, from: envelope.payload)
+        guard decision.id == envelope.id, decision.date == envelope.time else { throw CocoaError(.coderReadCorrupt) }
+        return decision
+    }
+
     public func routeDecisions() throws -> RouteDecisionExport {
-        guard FileManager.default.fileExists(atPath: routeDecisionURL.path) else { return .init(decisions: []) }
-        return try JSONDecoder().decode(RouteDecisionExport.self, from: Data(contentsOf: routeDecisionURL))
+        let local = FileManager.default.fileExists(atPath: routeDecisionURL.path)
+            ? try JSONDecoder().decode(RouteDecisionExport.self, from: Data(contentsOf: routeDecisionURL)) : .init(decisions: [])
+        guard local.version == 1 else { throw CocoaError(.coderReadCorrupt) }
+        var records: [UUID: RouteDecision] = [:]
+        let remote = try cloudDecisions(namespace: Self.routeCloudNamespace).compactMap { try Self.routeDecision(from: $0) }
+        for decision in local.decisions + remote {
+            if let old = records[decision.id], old != decision { throw CocoaError(.coderReadCorrupt) }
+            records[decision.id] = decision
+        }
+        return .init(decisions: records.values.sorted { ($0.date, $0.id.uuidString) < ($1.date, $1.id.uuidString) })
     }
     /// Cloud stores this payload under `sweatkit.route-decisions.v1` without interpreting it.
     public func exportRouteDecisionPayload() throws -> Data {

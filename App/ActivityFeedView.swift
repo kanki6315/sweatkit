@@ -80,9 +80,9 @@ struct ActivityFeedView: View {
                         NavigationLink {
                             ActivityDetailView(activity: activity, library: model.library, deleteActivity: model.permanentlyDelete)
                         } label: {
-                            ActivityFeedRow(activity: activity, units: model.units, library: model.library, revision: model.revisions[activity.primary], removedAtSource: activity.members.contains { model.removedSources.contains($0) }, stale: model.staleIDs.contains(activity.id ?? activity.primary), prominent: activity.id == model.activities.first?.id)
+                            ActivityFeedRow(activity: activity, units: model.units, library: model.library, revision: model.revisions[activity.primary], removedAtSource: activity.members.contains { model.removedSources.contains($0) }, stale: model.staleIDs.contains(activity.id ?? activity.primary), prominent: activity.id == model.activities.first?.id, records: model.recordBadges[activity.id ?? activity.primary] ?? [], route: model.routeCatalog.membership(of: activity.id ?? activity.primary))
                                 .id(thumbnailGeneration)
-                        }
+                        }.accessibilityIdentifier(activity.isIndoor || activity.isVirtual ? "indoor-activity-row" : "outdoor-activity-row")
                     }
                 } header: { weekHeader(week) }
             }
@@ -237,6 +237,8 @@ struct ActivityFeedRow: View {
     var removedAtSource = false
     var stale = false
     var prominent = false
+    var records: [TrendRecord] = []
+    var route: LibraryRoute?
     @Environment(\.dynamicTypeSize) private var typeSize
     var body: some View {
         VStack(alignment: .leading, spacing: prominent ? 12 : 8) {
@@ -273,6 +275,15 @@ struct ActivityFeedRow: View {
                         VStack(alignment: .leading, spacing: 4) { metrics }
                     }.font(.subheadline)
                 }
+            }
+            if !stale, !records.isEmpty {
+                Label(records.count == 1 ? records[0].title + " record" : "\(records.count) personal records", systemImage: "chart.line.uptrend.xyaxis")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            if let route {
+                Label(route.rank(of: activity.id ?? activity.primary).map { "\(route.name) · #\($0) of \(route.ranked.count)" } ?? route.name,
+                      systemImage: "point.topleft.down.to.point.bottomright.curvepath")
+                    .font(.caption).foregroundStyle(.secondary)
             }
             if stale { Label("Results need recalculation", systemImage: "arrow.clockwise").font(.caption) }
             if removedAtSource {

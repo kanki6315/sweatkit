@@ -16,6 +16,7 @@ struct ActivityDetailView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.scenePhase) private var scenePhase
+    @State private var matchedRoute: LibraryRoute?
     @State private var alternatives: [AlternativeOffer] = []
     @State private var presentation: DetailAnalysisPresentation?
     @State private var metrics: ActivityMetrics?
@@ -73,6 +74,14 @@ struct ActivityDetailView: View {
         .toolbar(prepared == nil ? .visible : .hidden, for: .navigationBar)
         .toolbar(.hidden, for: .tabBar)
         .task { await load() }
+        .task(id: record.id) {
+            guard let library, let id = record.id else { return }
+            do {
+                let catalog = try await library.routes()
+                try Task.checkCancellation()
+                matchedRoute = catalog.membership(of: id)
+            } catch { matchedRoute = nil }
+        }
         .onChange(of: overlay) {
             timelineKind = prepared?.timelineKind(for: overlay)
             updateTimelineOverlay()
@@ -172,6 +181,17 @@ struct ActivityDetailView: View {
                     }.padding(.horizontal, 8).padding(.top, 8)
                     StatsPanel(stats: detail.cursorStats(at: Int(scrub)), sport: record.sport, units: units, floating: false)
                         .frame(maxHeight: dynamicTypeSize.isAccessibilitySize ? 240 : nil)
+                    if let route = matchedRoute,
+                       let effort = route.efforts.first(where: { $0.activity.members.contains(record.id ?? record.primary) }) {
+                        NavigationLink {
+                            RouteComparisonView(route: route, subject: effort, library: library, units: units)
+                        } label: {
+                            Label(route.rank(of: effort.id).map { "\(route.name) · #\($0) of \(route.ranked.count) · Compare" } ?? "\(route.name) · Compare",
+                                  systemImage: "point.topleft.down.to.point.bottomright.curvepath")
+                                .font(.footnote).fixedSize(horizontal: false, vertical: true)
+                                .frame(maxWidth: .infinity, minHeight: 44)
+                        }.padding(.horizontal, 12)
+                    }
                     if !alternatives.isEmpty, let library {
                         NavigationLink("Review additional source data") {
                             ActivityManagementView(activity: record, library: library, deleteActivity: deleteActivity)

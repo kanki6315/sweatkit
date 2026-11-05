@@ -12,6 +12,43 @@ struct CloudRecoveryTests {
     let first = TemporaryLibrary()
     let second = TemporaryLibrary()
 
+    @Test func routeDecisionsSurviveCloudRestoreAndReexportWithoutGeometry() async throws {
+        let a = try first.open(); let b = try second.open()
+        let source = SourceIdentity(source: .healthKit, externalID: "route-identity-only")
+        let decision = RouteDecision(route: source, value: .name("River loop"), anchors: [source])
+        try await a.applyRouteDecisions(.init(decisions: [decision]))
+        let records = try await a.cloudExport()
+        let feature = try #require(records.first { $0.kind == .featureDecision })
+        let envelope = try JSONDecoder().decode(CloudDecisionEnvelope.self, from: feature.payload)
+        #expect(envelope.id == decision.id)
+        #expect(envelope.namespace == "sweatkit.route-decisions.v1")
+        #expect(try JSONDecoder().decode(RouteDecision.self, from: envelope.payload) == decision)
+        try await b.cloudRestore(records) { _ in throw CloudFailure.missingAsset }
+        #expect(try await b.routeDecisions().decisions == [decision])
+        try await b.cloudRestore(records) { _ in throw CloudFailure.missingAsset }
+        #expect(try await b.cloudExport().first { $0.name == feature.name } == feature)
+        let conflict = RouteDecision(id: decision.id, route: source, value: .name("Conflicting"), date: decision.date)
+        await #expect(throws: (any Error).self) {
+            try await b.applyRouteDecisions(.init(decisions: [conflict]))
+        }
+        #expect(try await b.routeDecisions().decisions == [decision])
+        let badEnvelope = CloudDecisionEnvelope(id: decision.id, namespace: envelope.namespace,
+            version: 1, time: decision.date, device: envelope.device, payload: try JSONEncoder().encode(conflict))
+        let badRecord = try CloudRecord(key: decision.id.uuidString, kind: .featureDecision,
+            payload: JSONEncoder().encode(badEnvelope))
+        await #expect(throws: (any Error).self) {
+            try await b.cloudRestore([badRecord]) { _ in throw CloudFailure.missingAsset }
+        }
+        #expect(try await b.routeDecisions().decisions == [decision])
+        let future = CloudDecisionEnvelope(namespace: envelope.namespace, version: 2,
+            time: .now, device: "future", payload: Data("opaque future intent".utf8))
+        try await a.appendCloudDecision(future)
+        let updated = try await a.cloudExport()
+        try await b.cloudRestore(updated) { _ in throw CloudFailure.missingAsset }
+        #expect(try await b.routeDecisions().decisions == [decision])
+        #expect(try await b.cloudDecisions(namespace: envelope.namespace).contains(future))
+    }
+
     @Test func wipedDeviceRestoresOriginalsProfileHiddenAndHealthDecisionsWithoutHealthFacts() async throws {
         let a = try first.open(); let b = try second.open()
         let bytes = try Fixtures.FIT.walk.data()

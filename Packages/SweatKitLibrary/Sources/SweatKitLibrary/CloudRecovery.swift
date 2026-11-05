@@ -128,6 +128,15 @@ extension ActivityLibrary {
                 subject: tombstone.identity, permanentlyDeleted: tombstone.kind == .deleted))
         }
         var journal = try cloudJournal()
+        // Export one immutable envelope per action. Replaying a remote action keeps
+        // identical bytes; feature geometry and derived grouping never enter Cloud.
+        for decision in try routeDecisions().decisions {
+            let envelope = CloudDecisionEnvelope(id: decision.id, namespace: Self.routeCloudNamespace,
+                version: 1, time: decision.date, device: "route-decisions-v1", payload: try Self.cloudEncode(decision))
+            let item = try CloudRecord(key: envelope.id.uuidString, kind: .featureDecision, payload: Self.cloudEncode(envelope))
+            if let old = journal.records[item.name], old != item { throw CloudFailure.invalidRecord }
+            journal.records[item.name] = item
+        }
         let deleted = Set(identity.tombstones.filter { $0.kind == .deleted }.map(\.identity))
         // Upgrade the existing app's Garmin cache through a typed, narrow
         // projection. Never copy the sync checkpoint or summary measurements.
@@ -202,7 +211,15 @@ extension ActivityLibrary {
                     let value = try JSONDecoder().decode(Tombstone.self, from: item.payload)
                     guard value.identity == item.subject, (value.kind == .deleted) == item.permanentlyDeleted else { throw CloudFailure.invalidRecord }
                     if !identity.tombstones.contains(value) { identity.tombstones.append(value) }
-                case .sourceMetadata, .garminMetadata, .profile, .featureDecision: journal.records[item.name] = item
+                case .featureDecision:
+                    if let old = journal.records[item.name], old != item { throw CloudFailure.invalidRecord }
+                    let envelope = try JSONDecoder().decode(CloudDecisionEnvelope.self, from: item.payload)
+                    if let route = try Self.routeDecision(from: envelope),
+                       let old = try routeDecisions().decisions.first(where: { $0.id == route.id }), old != route {
+                        throw CloudFailure.invalidRecord
+                    }
+                    journal.records[item.name] = item
+                case .sourceMetadata, .garminMetadata, .profile: journal.records[item.name] = item
                 case .original: break
                 }
             }
