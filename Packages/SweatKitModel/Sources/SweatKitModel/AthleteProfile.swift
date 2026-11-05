@@ -18,8 +18,6 @@ public struct AthleteProfile: Hashable, Codable, Sendable {
         }
     }
 
-    /// Changes whenever the profile does. Derived results record it.
-    public var revision: Int
     public var thresholdPowerHistory: [ThresholdPower]
     /// Beats per minute.
     public var maxHeartRate: Double?
@@ -30,14 +28,12 @@ public struct AthleteProfile: Hashable, Codable, Sendable {
     public var units: UnitSystem
 
     public init(
-        revision: Int = 0,
         thresholdPowerHistory: [ThresholdPower] = [],
         maxHeartRate: Double? = nil,
         statedThresholdHeartRate: Double? = nil,
         weight: Double? = nil,
         units: UnitSystem = .metric
     ) {
-        self.revision = revision
         self.thresholdPowerHistory = thresholdPowerHistory
         self.maxHeartRate = maxHeartRate
         self.statedThresholdHeartRate = statedThresholdHeartRate
@@ -57,5 +53,44 @@ public struct AthleteProfile: Hashable, Codable, Sendable {
     /// heart rate.
     public var thresholdHeartRate: Double? {
         statedThresholdHeartRate ?? maxHeartRate.map { $0 * 0.9 }
+    }
+}
+
+extension AthleteProfile {
+    /// The profile values a derived result can read. Weight and units are not
+    /// among them, because no stored result depends on them.
+    public struct Inputs: OptionSet, Hashable, Codable, Sendable {
+        public let rawValue: Int
+
+        public init(rawValue: Int) {
+            self.rawValue = rawValue
+        }
+
+        /// The threshold power in effect on the result's date.
+        public static let thresholdPower = Inputs(rawValue: 1 << 0)
+        public static let thresholdHeartRate = Inputs(rawValue: 1 << 1)
+        public static let maxHeartRate = Inputs(rawValue: 1 << 2)
+        public static let all: Inputs = [.thresholdPower, .thresholdHeartRate, .maxHeartRate]
+    }
+
+    /// The version of the fingerprint's canonical form. Changing the form
+    /// changes every fingerprint, which stales every result that read the
+    /// profile.
+    private static let fingerprintFormatVersion = 1
+
+    /// A hash of the values in `inputs` as they stand on `date`. Two profiles
+    /// give the same fingerprint for a date exactly when those values match,
+    /// so a threshold corrected for one range of dates changes fingerprints
+    /// in that range only. A derived result records it in its provenance.
+    public func fingerprint(on date: Date, reading inputs: Inputs = .all) -> ContentHash {
+        var lines = ["athlete-profile/\(Self.fingerprintFormatVersion)"]
+        func line(_ name: String, _ value: Double?) {
+            // The bit pattern is exact and does not depend on the locale.
+            lines.append("\(name)=" + (value.map { String($0.bitPattern, radix: 16) } ?? "none"))
+        }
+        if inputs.contains(.thresholdPower) { line("thresholdPower", thresholdPower(on: date)) }
+        if inputs.contains(.thresholdHeartRate) { line("thresholdHeartRate", thresholdHeartRate) }
+        if inputs.contains(.maxHeartRate) { line("maxHeartRate", maxHeartRate) }
+        return ContentHash(of: Data(lines.joined(separator: "\n").utf8))
     }
 }

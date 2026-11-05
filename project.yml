@@ -25,6 +25,8 @@ packages:
     path: Packages/SweatKitGarmin
   SweatKitFlyover:
     path: Packages/SweatKitFlyover
+  SweatKitStore:
+    path: Packages/SweatKitStore
 targets:
   SweatKit:
     type: application
@@ -48,6 +50,7 @@ targets:
       - package: SweatKitRouteMatching
       - package: SweatKitGarmin
       - package: SweatKitFlyover
+      - package: SweatKitStore
 schemes:
   SweatKit:
     build:

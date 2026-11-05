@@ -93,6 +93,67 @@ import Testing
     }
 }
 
+@Suite struct ProfileFingerprintTests {
+    private func day(_ offset: Double) -> Date {
+        Date(timeIntervalSince1970: offset * 86_400)
+    }
+
+    private var base: AthleteProfile {
+        AthleteProfile(
+            thresholdPowerHistory: [
+                .init(effectiveFrom: day(100), watts: 240),
+                .init(effectiveFrom: day(200), watts: 260),
+            ],
+            maxHeartRate: 190
+        )
+    }
+
+    @Test func equalValuesGiveEqualFingerprints() {
+        #expect(base.fingerprint(on: day(150)) == base.fingerprint(on: day(199)))
+        #expect(base.fingerprint(on: day(150)) != base.fingerprint(on: day(250)))
+    }
+
+    @Test func correctingOneRangeLeavesOtherDatesAlone() {
+        var corrected = base
+        corrected.thresholdPowerHistory[0].watts = 250
+        #expect(corrected.fingerprint(on: day(150)) != base.fingerprint(on: day(150)))
+        #expect(corrected.fingerprint(on: day(250)) == base.fingerprint(on: day(250)))
+        #expect(corrected.fingerprint(on: day(50)) == base.fingerprint(on: day(50)))
+    }
+
+    @Test func weightAndUnitsAreNotRead() {
+        var changed = base
+        changed.weight = 72
+        changed.units = .imperial
+        #expect(changed.fingerprint(on: day(150)) == base.fingerprint(on: day(150)))
+    }
+
+    @Test func onlyTheReadValuesCount() {
+        var changed = base
+        changed.maxHeartRate = 185
+        #expect(changed.fingerprint(on: day(150), reading: .thresholdPower) == base.fingerprint(on: day(150), reading: .thresholdPower))
+        #expect(changed.fingerprint(on: day(150), reading: .maxHeartRate) != base.fingerprint(on: day(150), reading: .maxHeartRate))
+        // Threshold heart rate defaults to 90% of max, so it moves with max.
+        #expect(changed.fingerprint(on: day(150), reading: .thresholdHeartRate) != base.fingerprint(on: day(150), reading: .thresholdHeartRate))
+    }
+
+    @Test func aMissingValueDiffersFromAnySetOne() {
+        let empty = AthleteProfile()
+        #expect(empty.fingerprint(on: day(50)) != base.fingerprint(on: day(150)))
+        #expect(empty.fingerprint(on: day(50)) == AthleteProfile().fingerprint(on: day(300)))
+    }
+
+    @Test func provenanceRecordsTheFingerprint() {
+        let provenance = Provenance(
+            inputRevision: ContentHash(of: Data("input".utf8)),
+            profileFingerprint: base.fingerprint(on: day(150)),
+            algorithmVersion: 1
+        )
+        #expect(provenance.profileFingerprint == base.fingerprint(on: day(120)))
+        #expect(Provenance(inputRevision: provenance.inputRevision, algorithmVersion: 1).profileFingerprint == nil)
+    }
+}
+
 @Suite struct FixtureTests {
     @Test(arguments: Fixtures.FIT.allCases)
     func fitFixtureIsPresent(_ fixture: Fixtures.FIT) throws {
