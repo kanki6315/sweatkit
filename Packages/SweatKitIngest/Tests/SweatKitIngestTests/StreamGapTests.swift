@@ -19,6 +19,9 @@ import Testing
         case .power: sample.power = value
         case .cadence: sample.cadence = value
         case .temperature: sample.temperature = value
+        case .runningStrideLength: sample.runningStrideLength = value
+        case .runningGroundContactTime: sample.runningGroundContactTime = value
+        case .runningVerticalOscillation: sample.runningVerticalOscillation = value
         case .latitude, .longitude, .gradient:
             preconditionFailure("\(channel) is not a single recorded channel")
         }

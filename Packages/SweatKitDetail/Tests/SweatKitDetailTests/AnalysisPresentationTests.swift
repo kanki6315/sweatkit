@@ -3,6 +3,25 @@ import SweatKitModel
 import Testing
 
 @Suite struct AnalysisPresentationTests {
+    @Test func runningFormChartsPreserveGapsAndAreAbsentForOtherSports() {
+        var stream = makeStream(count: 3)
+        stream.runningStrideLength = Series([1.1, nil, 1.2])
+        stream.runningGroundContactTime = Series([0.24, nil, 0.25])
+        stream.runningVerticalOscillation = Series([0.08, nil, 0.09])
+        let kinds: Set<DetailChartSeries.Kind> = [.runningStrideLength, .runningGroundContactTime, .runningVerticalOscillation]
+        func charts(_ sport: Sport) -> [DetailChartSeries] {
+            DetailAnalysisPresentation.prepare(DetailPreparation.prepare(DetailInput(stream: stream, sport: sport, activityDate: testStart))).charts.filter { kinds.contains($0.kind) }
+        }
+        #expect(charts(.running).count == 3)
+        #expect(charts(.running).allSatisfy { $0.points.map(\.second) == [0, 2] && $0.points[0].segment != $0.points[1].segment })
+        #expect(charts(.walking).isEmpty)
+        #expect(charts(.cycling).isEmpty)
+        stream.runningStrideLength = Series(missingCount: 3)
+        stream.runningGroundContactTime = Series(missingCount: 3)
+        stream.runningVerticalOscillation = Series(missingCount: 3)
+        #expect(charts(.running).isEmpty)
+    }
+
     @Test func reductionKeepsSpikesAndValleysInTheirOriginalOrder() {
         let values: [Double?] = [10, 11, 1000, 9, -100, 12, 13, 14]
         let points = DetailChartSeries.points(values, budget: 4)

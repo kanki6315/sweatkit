@@ -18,8 +18,8 @@ import Testing
         #expect(StreamRules.gradientMinimumTravel == 5)
     }
 
-    @Test func rulesVersionStartsAtOne() {
-        #expect(StreamRules.version == 1)
+    @Test func runningFormChannelsRequireVersionTwo() {
+        #expect(StreamRules.version == 2)
     }
 
     /// "Position, altitude, distance and heart rate are filled linearly.
@@ -35,7 +35,7 @@ import Testing
 
     /// Reading: the spec names no fill for these, so they have none.
     @Test func channelsTheSpecDoesNotNameAreNotFilled() {
-        for channel in [Channel.speed, .temperature, .gradient] {
+        for channel in [Channel.speed, .temperature, .gradient, .runningStrideLength, .runningGroundContactTime, .runningVerticalOscillation] {
             #expect(StreamRules.gapFill(for: channel) == StreamRules.GapFill.none, "\(channel)")
         }
     }

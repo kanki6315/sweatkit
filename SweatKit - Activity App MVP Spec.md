@@ -109,7 +109,7 @@ Garmin offers no snapshot of its listing. An old ride uploaded during the backfi
 
 **HealthKit sync**
 
-- Read-only access to workouts, workout routes, heart rate, cycling power, cycling cadence, cycling speed, running power and running speed.
+- Read-only access to workouts, workout routes, heart rate, cycling power, cycling cadence, cycling speed, running power, running speed, walking/running distance, cycling distance, step count, running stride length, running ground-contact time and running vertical oscillation. Read individual entries from condensed quantity series. Distance increments accumulate at their recorded interval boundaries; the normal stream gap rules apply, and workout totals are never distributed over the route. On-foot cadence can be derived as steps per minute from short recorded step intervals; long aggregates remain unavailable at the cursor.
 - Anchored queries track additions, changes and deletions, and the anchor is persisted.
 - A route can arrive or change after its workout is saved. A workout is snapshotted again whenever its route or samples change.
 
@@ -251,6 +251,7 @@ These rules sit under almost every metric, so they are fixed here and versioned.
 - A sensor dropout affects only its own channel, and it never shortens the activity. Only timer events create pauses.
 - Paused spans stay in elapsed time and are excluded from timer time.
 - Speed is taken from the recorded speed, then from the change in recorded distance, then from position. It is missing when none of these exists.
+- Running form samples retain stride length and vertical oscillation in metres, and ground-contact time in seconds. These channels are not gap-filled; analysis charts show them for runs when samples exist, with display units converted to m/ft, cm/in and ms respectively.
 - Gradient is altitude change divided by distance over a 30 m window centred on the sample. It is missing, never zero or infinite, when altitude is missing or when the window covers less than 5 m of travel.
 
 **Recomputation**

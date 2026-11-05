@@ -98,6 +98,29 @@ import Testing
         try await reopened.recompute()
         #expect(try await reopened.activity(health.identity)?.distance == 1000)
     }
+    @Test func distanceRefreshUpdatesExistingWorkoutWithoutDuplicatingIt() async throws {
+        let library = try temporary.open()
+        let start = Date(timeIntervalSince1970: 1_700_000_000)
+        var health = snapshot(RecordedActivity(sport: .running,
+            stated: .init(start: start, end: start.addingTimeInterval(61), distance: 120),
+            stream: NativeStream(samples: (0...60).map {
+                NativeSample(timestamp: start.addingTimeInterval(Double($0)), altitude: 200 + Double($0) * 0.1)
+            })))
+        try await library.importHealthSnapshot(health)
+        let distance = HealthQuantityConversion.distance((0..<60).map {
+            HealthQuantityInterval(start: start.addingTimeInterval(Double($0)),
+                end: start.addingTimeInterval(Double($0 + 1)), value: 2)
+        })
+        health.activity.stream.samples += distance
+        health.activity.stream.samples.sort { $0.timestamp < $1.timestamp }
+        try await library.importHealthSnapshot(health)
+        #expect(try await library.feed(limit: 10).activities.count == 1)
+        #expect(try await library.activity(health.identity)?.distance == 120)
+        #expect(try await library.store.sourceRecord(health.identity)?.revisions.count == 2)
+        try await library.importHealthSnapshot(health)
+        #expect(try await library.store.sourceRecord(health.identity)?.revisions.count == 2)
+    }
+
     @Test func checkpointKeepsPendingSnapshotsAcrossRestartAndRetry() throws {
         let url = temporary.root.appendingPathComponent("health-sync.json")
         let workout = UUID()

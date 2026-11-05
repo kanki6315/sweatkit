@@ -14,6 +14,7 @@ public struct DetailChartPoint: Sendable, Hashable, Identifiable {
 public struct DetailChartSeries: Sendable, Identifiable {
     public enum Kind: String, CaseIterable, Sendable {
         case power, heartRate, speed, cadence, elevation
+        case runningStrideLength, runningGroundContactTime, runningVerticalOscillation
     }
     public let kind: Kind
     public let points: [DetailChartPoint]
@@ -66,6 +67,11 @@ public struct DetailAnalysisPresentation: Sendable {
             (.cadence, stream.cadence), (.elevation, stream.altitude)
         ]
         if detail.input.sport.family == .cycling { sources.insert((.power, stream.power), at: 0) }
+        if detail.input.sport == .running {
+            sources += [(.runningStrideLength, stream.runningStrideLength),
+                        (.runningGroundContactTime, stream.runningGroundContactTime),
+                        (.runningVerticalOscillation, stream.runningVerticalOscillation)]
+        }
         let charts = sources.compactMap { kind, series -> DetailChartSeries? in
             let points = DetailChartSeries.points((0..<series.count).map { index -> Double? in
                 guard let value = series[index] else { return nil }
