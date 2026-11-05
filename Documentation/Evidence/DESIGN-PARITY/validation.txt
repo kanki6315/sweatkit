@@ -1,0 +1,7 @@
+5 November 2026 · iPhone 18 Pro Max simulator · iOS 27.2
+35 captures, downscaled to maximum dimension1320; originals retained in xcresult bundles.
+Light/dark integrated flows: /tmp/sweatkit-design-captures.xcresult — passed.
+Large text with fixed playback speed: /tmp/sweatkit-design-large-final.xcresult — passed.
+Historical axes, light/dark: /tmp/sweatkit-design-axis.xcresult — passed.
+See ../../DESIGN-PARITY.md for source revisions, fixture provenance and exact scope.
+Physical device, live sync/cloud, performance and comprehensive accessibility acceptance remain deferred.
