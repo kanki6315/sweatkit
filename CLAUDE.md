@@ -17,6 +17,7 @@ A native iOS app for viewing one person's own rides and walks. Local-first, no s
 | `Packages/SweatKitRouteMatching` | Route detection, alignment, comparison | Model |
 | `Packages/SweatKitGarmin` | Garmin Personal API client: token exchange, activity listing, original-file download. No sync logic. | Nothing |
 | `Packages/SweatKitStore` | On-device persistence: originals by content hash, source records and revisions, activities and the feed query, stream files, derived results with provenance, the athlete profile. Persistence only: it never decodes, computes or merges. | Model |
+| `Packages/SweatKitTrackCleanup` | Turns a stream's positions into a cleaned track for route matching and a simplified line for the flyover, each point keeping its sample index. | Model |
 | `Packages/SweatKitFlyover` | The MapKit flyover view and its camera and drawing logic. Takes an already-prepared route. | Model |
 | `Spikes/` | The M0 probe tool and device harness, with their gate results in `RESULTS.md`. Throwaway: nothing depends on them. | |
 | `Fixtures/` | Real FIT files shared by every package's tests | |

@@ -27,6 +27,8 @@ packages:
     path: Packages/SweatKitFlyover
   SweatKitStore:
     path: Packages/SweatKitStore
+  SweatKitTrackCleanup:
+    path: Packages/SweatKitTrackCleanup
 targets:
   SweatKit:
     type: application
@@ -51,6 +53,7 @@ targets:
       - package: SweatKitGarmin
       - package: SweatKitFlyover
       - package: SweatKitStore
+      - package: SweatKitTrackCleanup
 schemes:
   SweatKit:
     build:
