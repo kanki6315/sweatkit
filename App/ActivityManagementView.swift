@@ -96,6 +96,7 @@ struct ActivityManagementView: View {
 
 struct LibraryReviewView: View {
     let library: ActivityLibrary
+    @State private var units = UnitSystem.metric
     @State private var pairs: [IdentityPair] = []
     @State private var rows: [SourceIdentity: ActivityRecord] = [:]
     @State private var hidden: [ActivityRecord] = []
@@ -142,9 +143,25 @@ struct LibraryReviewView: View {
         VStack(alignment: .leading, spacing: 4) {
             Text(rows[source]?.title ?? "Recording").font(.headline)
             if let row = rows[source] {
-                Text(row.start, format: .dateTime.month().day().hour().minute()).font(.subheadline)
-                Text("\(Int(row.elapsedTime / 60)) min · \(source.source.rawValue)").font(.caption).foregroundStyle(.secondary)
+                Text(row.start, format: .dateTime.month(.abbreviated).day().year().hour().minute())
+                    .font(.subheadline)
+                Text("\(Duration.seconds(row.elapsedTime).formatted(.time(pattern: .hourMinuteSecond))) elapsed · \(distance(row.distance))")
+                    .font(.subheadline).monospacedDigit()
+                Text("\(row.sport.rawValue.capitalized) · \(sourceName(source))")
+                    .font(.caption).foregroundStyle(.secondary)
             }
+        }
+        .fixedSize(horizontal: false, vertical: true)
+    }
+    private func distance(_ metres: Double?) -> String {
+        guard let metres else { return "No distance" }
+        return String(format: "%.1f %@", metres / (units == .metric ? 1000 : 1609.344), units == .metric ? "km" : "mi")
+    }
+    private func sourceName(_ source: SourceIdentity) -> String {
+        switch source.source {
+        case .garmin: "Garmin"
+        case .healthKit: "Apple Health"
+        case .file: "FIT file"
         }
     }
     private func decide(_ pair: IdentityPair, _ kind: LinkKind) {
@@ -160,6 +177,7 @@ struct LibraryReviewView: View {
     }
     private func load() async {
         do {
+            units = try await library.profile().units
             pairs = try await library.possibleDuplicates()
             hidden = try await library.hiddenActivities()
             for pair in pairs {
