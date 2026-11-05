@@ -49,19 +49,20 @@ Three sources feed one library. Each source's original data is preserved, and on
 
 | Source | Provides | How it syncs | Limits |
 | --- | --- | --- | --- |
-| Garmin Personal API | Activity summaries as JSON, and each activity file in its original format | Foreground pull on launch and on pull-to-refresh; background refresh when iOS allows it | Pull-only with no change feed; access tokens last 24 hours with no refresh token; keys expire after 30, 90 or 180 days or 1 year; rate limits and history depth are not documented |
+| Garmin Personal API | Activity summaries as JSON, and each activity's original file inside a zip | Foreground pull on launch and on pull-to-refresh; background refresh when iOS allows it | Pull-only with no change feed; access tokens last 24 hours or until the key expires or is deleted, with no refresh token; keys expire after 30, 90 or 180 days or 1 year; rate limits are not documented |
 | Apple HealthKit | Workouts, GPS routes, heart rate, cycling power, cadence and speed | Anchored queries, with background delivery when iOS allows it | Quality depends on the app that wrote the data; many workouts have no route or power |
 | FIT file import | Anything exported from Zwift, a Garmin device or a Garmin data export | Share sheet, Files picker, or a folder or zip for bulk import | Manual |
 
 **What is preserved**
 
-- Garmin downloads and imported files are kept byte for byte.
+- Garmin delivers each activity's original file inside a zip. The file inside is the original: it is kept byte for byte, and its hash is the revision hash. The zip is only a container and is not kept.
+- Imported files are kept byte for byte.
 - HealthKit has no raw file, and its data can change or be deleted later. Each import stores a versioned snapshot of the workout, its samples, its route, its metadata and its source identifiers.
 - The normalised stream is derived from either kind of original and can always be rebuilt.
 
 **Garmin sync as reconciliation**
 
-Garmin's activity search filters only by activity start date and pages by offset. It has no "changed since" filter, so sync is a reconciliation that runs at three depths. The endpoint behaviour described here is from Garmin's published endpoint reference and has not been exercised with a live key, so M0 confirms it.
+Garmin's activity search filters only by the activity's local start date and pages by offset. Its date range includes both end dates. It has no "changed since" filter, so sync is a reconciliation that runs at three depths. M0 exercised the listing, paging, sorting and download endpoints with a live key and confirmed the behaviour described here.
 
 | Depth | Runs | Covers |
 | --- | --- | --- |
@@ -75,7 +76,7 @@ A ride uploaded a week late is caught by a quick sync. One uploaded months late,
 
 | Source | Stable identity | A new revision is |
 | --- | --- | --- |
-| Garmin | Garmin plus the activity ID | A changed summary or file, by content hash |
+| Garmin | Garmin plus the activity ID | A changed summary, or a changed file by the hash of the original inside the download |
 | HealthKit | The workout's UUID | A changed route or sample set, by snapshot version |
 | Imported file | The hash of the file's bytes, because there is no external ID | Not applicable; an edited file is a different record |
 
@@ -83,23 +84,23 @@ A ride uploaded a week late is caught by a quick sync. One uploaded months late,
 - Imports are idempotent. Repeating one changes nothing.
 - An imported file that is byte-for-byte identical to a stored original is recognised as that record and adds nothing.
 - A changed Garmin summary updates the metadata. The file is downloaded again when the summary's start, duration or distance changed, or when the user asks.
-- Known limit: a file that changes at Garmin while its summary stays identical is not noticed until a full reconciliation downloads it again.
+- Known limit: a file that changes at Garmin while its summary stays identical is not noticed until a full reconciliation downloads it again. Garmin's per-activity summary carries a last-update date that the listing does not. If that date moves when an activity is edited, a deep scan could check it at one request per activity and narrow this limit. M0 did not test that, so it is an open question for M3.
 
 **Sync steps**
 
-1. The user creates a Personal API key in Garmin Connect settings and pastes it into the app. The key is stored in the Keychain.
-2. The app exchanges the key for a 24-hour access token and requests a new one when it expires.
+1. The user creates a Personal API key in Garmin Connect settings and pastes it into the app, with the expiry period they chose. The key is stored in the Keychain.
+2. The app exchanges the key for an access token. Garmin's response states no lifetime, so the app treats the token as valid for the documented 24 hours, requests a new one 5 minutes before that, and requests one more if Garmin refuses the token early. A token also ends when its key expires or is deleted. A refused key therefore asks the user for a new key and is not retried.
 3. The app lists the range for the chosen depth and compares each entry with the local record of the same identity.
 4. New activities are downloaded and changed ones get a new revision.
 5. Each activity succeeds or fails on its own. Failures are retried on the next sync, and the sync status says how many are outstanding.
-6. Garmin emails a week before a key expires. The app also warns 7 days ahead and asks for a new key.
+6. Garmin emails a week before a key expires. The app cannot read a key's expiry from Garmin, so it counts from the period entered with the key, warns 7 days ahead and asks for a new key.
 
 **First-sync backfill**
 
 Garmin offers no snapshot of its listing. An old ride uploaded during the backfill, or a deletion, can shift offset pages, so the backfill does not rely on one long offset walk and does not claim snapshot consistency.
 
 - One request with ascending sort finds the start date of the earliest activity.
-- History is then walked in bounded ranges of one calendar month of start dates, newest first. A month rarely exceeds one page of 99, so most ranges need no offset paging.
+- History is then walked in bounded ranges of one calendar month of start dates, newest first. The months are local-time months, because Garmin's date filter matches each activity's local start date. A month rarely exceeds one page of 99, so most ranges need no offset paging.
 - A range is complete only when two listings of it in a row return the same set of identities. If they differ, the range is listed again, up to three times, and is then left for the next deep scan.
 - A month that needs more than one page is paged with a 10-entry overlap and still has to pass the two-listing check.
 - Completed ranges are checkpointed, so the backfill resumes at the first incomplete range.
@@ -648,7 +649,7 @@ Analysis results are cached in the database and recomputed from the preserved or
 | Concern | Choice | Reason |
 | --- | --- | --- |
 | Interface | SwiftUI on iOS 26 | Liquid Glass and system components |
-| Map | MapKit, with a wrapped map view for the flyover | Gradient polylines and direct camera control; the first spike confirms this |
+| Map | MapKit, with a wrapped map view for the flyover. The route is drawn as one line per run of the same colour band. | Direct camera control. M0 confirmed terrain placement and frame rate. Band runs put every colour edge exactly where the data says, and held the same frame rate as a single gradient line. |
 | Charts | Swift Charts, with a custom canvas for the timeline | The timeline must redraw at 60 frames per second while scrubbing |
 | FIT parsing | Garmin's FIT SDK for Swift | The official decoder, added as a Swift package; its licence limits redistribution |
 | Local storage | SwiftData for metadata, files for originals and streams | Small database, cheap recompute |
@@ -667,7 +668,7 @@ The build starts with two spikes that settle the biggest unknowns, each with a p
 
 | Milestone | Delivers | Done when |
 | --- | --- | --- |
-| M0 Spikes | A throwaway Garmin pull and a throwaway flyover | Every gate below has a recorded result and a decision |
+| M0 Spikes | A Garmin client with a throwaway probe, and the flyover map component with a throwaway device harness | Every gate below has a recorded result and a decision. Complete: all five passed on 4 November 2026. |
 | M1 Library | File import, handling of corrupt and unreadable files, preserved originals, native and analysis streams, a minimal athlete profile, revision tracking, feed | 500 imported files browse smoothly and survive a relaunch; the stream-rule fixtures pass; correcting a threshold marks the right results stale; a corrupt or truncated file is rejected with a clear message and leaves the library unchanged. The feed headline for rides is average power for now. |
 | M2 Activity detail | Flyover, timeline, zone calculations for the overlays, charts, laps | Cached data for a 5-hour ride appears within 1 second on the reference device; scrubbing is smooth once imagery has loaded; a Zwift ride opens on charts |
 | M3 Sync | Garmin reconciliation, HealthKit, de-duplication, deletions, and recovery from denied Health permission, an expired key or token, and failed requests | A new ride appears once after a refresh; a ride uploaded a week late is caught by a quick sync and one uploaded months late by a deep scan; a backfill that is interrupted, or disturbed by uploads and deletions at Garmin, settles with no gaps or duplicates; a partial recording inside a longer ride is flagged, not merged; two records kept separate are not joined through a third; an offline split concurrent with a rename or a hide settles the same way on both devices; denied Health access, an expired key and a failed sync each say what happened and how to recover, and sync resumes afterwards without a reinstall or data loss |
@@ -680,34 +681,36 @@ The build starts with two spikes that settle the biggest unknowns, each with a p
 
 **M0 decision gates**
 
-The flyover gates run on the iPhone 18 Pro Max with three representative routes: a long hilly ride, a short urban ride and a walk under tree cover.
+All five gates passed on 4 November 2026. The evidence, and what was left unmeasured, is in `Spikes/GarminPull/RESULTS.md` and `Spikes/Flyover/RESULTS.md`.
 
-| Question | Passes when | If it fails |
-| --- | --- | --- |
-| Does the Personal API return the original file with per-second power, heart rate and GPS? | A ride from the Garmin computer downloads with all three channels intact | File import becomes the main path for rides; the API is used for listing and summaries |
-| How deep is the history, and what are the rate limits? | Full history lists and downloads, or the limits are measured and written down | Backfill from a Garmin data export; throttle sync to the measured limit |
-| Do Zwift rides appear in the Personal API? | A Zwift ride is listed and its file downloads | Zwift rides come from file import or Apple Health |
-| Does a coloured route sit correctly on realistic 3D terrain? | The line follows the ground on the hilly and urban routes, with no floating or buried stretches | Use a pitched camera over satellite imagery without realistic elevation. If that reads poorly, evaluate another map renderer before M2 starts. |
-| Does the coloured route hold frame rate while scrubbing? | 60 frames per second on the long ride, with imagery loaded | One line per zone band and stronger simplification, then fewer drawn vertices until it holds |
+The flyover gates ran on the iPhone 18 Pro Max. They call for three representative routes: a long hilly ride, a short urban ride and a walk under tree cover. The routes to hand were a 1.6-hour rolling ride, a 10-hour walk beside buildings and a short walk in the open, so the terrain result is weaker than intended.
 
-Splitting the line into zone bands is a fix for colour and speed only. It does nothing for terrain placement, which is why the two are separate gates.
+| Question | Passes when | If it fails | Result |
+| --- | --- | --- | --- |
+| Does the Personal API return the original file with per-second power, heart rate and GPS? | A ride from the Garmin computer downloads with all three channels intact | File import becomes the main path for rides; the API is used for listing and summaries | Passed. The download is the original file, byte for byte, with every channel. |
+| How deep is the history, and what are the rate limits? | Full history lists and downloads, or the limits are measured and written down | Backfill from a Garmin data export; throttle sync to the measured limit | Passed. History listed back to 7 September 2019, the earliest activity Garmin returned, and that file downloaded. No limit was signalled at 11 requests 3 seconds apart, so the real limit is still unknown and sync stays paced. |
+| Do Zwift rides appear in the Personal API? | A Zwift ride is listed and its file downloads | Zwift rides come from file import or Apple Health | Passed. Zwift rides are listed as virtual rides and download as the original file. |
+| Does a coloured route sit correctly on realistic 3D terrain? | The line follows the ground on the hilly and urban routes, with no floating or buried stretches | Use a pitched camera over satellite imagery without realistic elevation. If that reads poorly, evaluate another map renderer before M2 starts. | Passed by eye on the rolling ride and beside buildings. Not yet checked on steep ground. |
+| Does the coloured route hold frame rate while scrubbing? | 60 frames per second on the long ride, with imagery loaded | One line per zone band and stronger simplification, then fewer drawn vertices until it holds | Passed. 60 frames per second on the ride and on the 10-hour walk at 2 m simplification, up to 1,548 drawn vertices. A 5-hour ride and dimming ahead of the marker are not yet measured. |
+
+One line per zone band was the fallback for frame rate, and it is now the default for a different reason. Both drawings held 60 frames per second, and band runs put every colour edge exactly where the data says. Stronger simplification and fewer drawn vertices remain the fallback if a longer ride misses the target. None of this affects terrain placement, which is why the two are separate gates.
 
 ## Risks and open questions
 
-The two largest risks are what Garmin's Personal tier really returns and how well MapKit draws a coloured route on 3D terrain. Both are tested in M0, and FIT import keeps the app useful if Garmin disappoints.
+The two largest risks were what Garmin's Personal tier really returns and how well MapKit draws a coloured route on 3D terrain. Both were tested in M0 and passed, with the limits noted in the table. FIT import keeps the app useful if Garmin changes.
 
 | Risk | Effect | Mitigation |
 | --- | --- | --- |
-| Garmin documents the download as the original file, but press reports say some fields are stripped | Missing channels in synced rides | First M0 gate; fall back to file import from the device or a Garmin data export |
-| Garmin does not document Personal-tier rate limits or history depth | Slow or shallow first sync; deep scans throttled | Second M0 gate; resumable backfill; bulk import of a Garmin data export |
-| Garmin's endpoints behave differently from the published reference | Sync rules need rework | Confirmed with a live key in M0 before M3 is built |
+| Garmin starts stripping fields from downloads, as press reports said it might | Missing channels in synced rides | M0 found the download identical to the original, with every channel; fall back to file import from the device or a Garmin data export if that changes |
+| Garmin does not document Personal-tier rate limits, and M0 met none at a low request rate | A backfill or deep scan is throttled part-way | Paced requests that stop on the first refusal and wait as long as Garmin says; resumable backfill; bulk import of a Garmin data export |
+| Garmin's endpoints behave differently from the published reference | Sync rules need rework | M0 confirmed listing, paging, sorting and download with a live key, and the differences it found are in this spec. Behaviour when activities are edited or deleted at Garmin is first seen in M3. |
 | Garmin changes terms or adds fees | Sync stops | Sources sit behind one protocol; import always works; originals are already stored |
 | Keys expire and tokens last 24 hours | Sync silently stops | Expiry warning and a clear re-entry flow |
 | The Garmin FIT SDK licence grants use for internal purposes and limits redistribution | A blocker if the app is ever distributed | Fine for personal use; read the licence in full, or write a decoder, before distributing |
 | Apple's App Review rules bar storing personal health information in iCloud | A blocker for iCloud storage if the app is ever distributed | Not enforced on a personal build; Health data is kept out of iCloud; decide how Garmin heart-rate data is treated before distributing |
 | iCloud storage is full or unreachable | Originals exist on one device only | The app works offline; sync status shows what is not yet copied |
-| A coloured route does not sit correctly on realistic terrain | Flyover looks wrong | Fourth M0 gate, with its fallback |
-| A coloured route is slow on long rides | Flyover stutters | Fifth M0 gate, with its fallback |
+| A coloured route does not sit correctly on steep terrain | Flyover looks wrong | Passed in M0 on rolling ground and beside buildings; check a steep route in M2; the fourth gate's fallback still applies |
+| A coloured route is slow on long rides, or when the part ahead of the marker is dimmed | Flyover stutters | Held 60 frames per second in M0 up to 1,548 drawn vertices; measure a 5-hour ride and dimming in M2; the fifth gate's fallback still applies |
 | Detailed 3D imagery covers only some regions | Flat-looking flyover elsewhere | Terrain elevation still applies; standard map toggle |
 | Health workouts from other apps lack routes or power | Thin detail screens | Show what exists; never invent data |
 | Duplicate detection merges records that are not the same activity | Lost or distorted activities | Strict automatic rule; anything ambiguous waits for review; originals are always preserved |
@@ -718,6 +721,8 @@ The two largest risks are what Garmin's Personal tier really returns and how wel
 
 - [ ] What do Garmin's Personal API terms, shown when a key is created, say about storage, including iCloud, and about AI processing?
 - [ ] How much walking and running detail matters compared with cycling?
+- [ ] Is 7 September 2019 the first activity on the Garmin account? It is the earliest one the API returned.
+- [ ] Does Garmin's last-update date on an activity move when the activity is edited? If it does, a deep scan can use it to catch a changed file whose summary is unchanged.
 
 Settled by the assumptions and removed from this list: personal use only, iPhone first, iOS 26, metric units by default, iCloud storage through CloudKit, the iPhone 18 Pro Max as the reference device, and SweatKit as the app name.
 
@@ -737,7 +742,7 @@ These are deliberately outside the MVP. The architecture leaves room for each.
 
 ## Sources
 
-Garmin's key, token, endpoint and tier details are from its official pages, opened on 4 November 2026. Tier pricing and the reports of stripped fields are from press coverage of the 21 October 2026 relaunch.
+Garmin's key, token, endpoint and tier details are from its official pages, opened on 4 November 2026, and were checked against a live key in M0 the same day. Tier pricing and the reports of stripped fields are from press coverage of the 21 October 2026 relaunch.
 
 **Garmin, official**
 
