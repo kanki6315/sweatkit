@@ -17,6 +17,17 @@ final class IntegratedScreens: XCTestCase {
         XCTAssertTrue(app.sliders["Shared comparison clock"].waitForExistence(timeout: 20))
         capture("detail-to-comparison-large")
     }
+    @MainActor private func alignNearTop(_ element: XCUIElement, in app: XCUIApplication) {
+        let target: CGFloat = 190
+        for _ in 0..<3 {
+            let delta = element.frame.minY - target
+            if abs(delta) < 30 { return }
+            let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.65))
+            let distance = max(-250, min(400, delta))
+            start.press(forDuration: 0.1, thenDragTo: start.withOffset(CGVector(dx: 0, dy: -distance)),
+                        withVelocity: .slow, thenHoldForDuration: 0.3)
+        }
+    }
     @MainActor private func capture(_ name: String) {
         let a = XCTAttachment(screenshot: XCUIScreen.main.screenshot()); a.name = name; a.lifetime = .keepAlways; add(a)
     }
@@ -50,9 +61,8 @@ final class IntegratedScreens: XCTestCase {
         let splits = app.staticTexts["Kilometre splits"].firstMatch
         for _ in 0..<6 { if splits.isHittable { break }; app.swipeUp() }
         XCTAssertTrue(splits.exists)
+        alignNearTop(splits, in: app)
         capture("analysis-content-" + suffix)
-        app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.70)).press(forDuration: 0.05,
-            thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.45)))
         capture("splits-table-" + suffix)
         app.buttons["Done"].tap(); app.buttons["Back"].tap()
         XCTAssertTrue(app.tabBars.buttons["Activities"].waitForExistence(timeout: 10))
@@ -65,6 +75,7 @@ final class IntegratedScreens: XCTestCase {
         for _ in 0..<8 { if history.isHittable { break }; app.swipeUp() }
         XCTAssertTrue(history.exists)
         XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label BEGINSWITH 'Historical sources:'")).firstMatch.waitForExistence(timeout: 30))
+        alignNearTop(history, in: app)
         capture("historical-curve-" + suffix)
         history.tap(); app.buttons["All time"].firstMatch.tap()
         capture("historical-all-time-" + suffix)

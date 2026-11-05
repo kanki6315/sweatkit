@@ -120,7 +120,7 @@ struct ActivityDetailView: View {
                         .safeAreaInset(edge: .bottom) {
                             if expandsAnalysisTimeline {
                                 VStack(spacing: 0) {
-                                    Button("Compact timeline", systemImage: "chevron.down") { expandsAnalysisTimeline = false }.font(.caption)
+                                    Button("Compact timeline", systemImage: "chevron.down") { expandsAnalysisTimeline = false }.font(.caption).frame(minHeight: 44)
                                     timeline(prepared)
                                 }.background(Color(uiColor: .systemBackground))
                             } else { compactPlayback(prepared) }
