@@ -184,7 +184,7 @@ struct FixtureFacts: Sendable, CustomTestStringConvertible {
         FixtureFacts(
             fixture: .outdoorRide, sport: .cycling, isIndoor: false, isVirtual: false,
             elapsed: 5755.7, timer: 5335.7, distanceKilometres: 37.53, records: 5347,
-            start: 1_787_747_441, utcOffset: edt, title: "Morning ride", headlineKind: "averagePower"
+            start: 1_787_747_441, utcOffset: edt, title: "Morning ride", headlineKind: "weightedPower"
         ),
         // 30 October 2026, 14:43:25 UTC. Zwift states no offset, so the title
         // has no time of day. A virtual ride is ridden indoors, so Ingest
@@ -192,7 +192,7 @@ struct FixtureFacts: Sendable, CustomTestStringConvertible {
         FixtureFacts(
             fixture: .zwiftRide, sport: .cycling, isIndoor: true, isVirtual: true,
             elapsed: 2408.0, timer: 2409.0, distanceKilometres: 18.74, records: 2409,
-            start: 1_793_371_405, utcOffset: nil, title: "Virtual ride", headlineKind: "averagePower"
+            start: 1_793_371_405, utcOffset: nil, title: "Virtual ride", headlineKind: "weightedPower"
         ),
         // 24 October 2026, 01:00:50 UTC, which is 21:00 the evening before on
         // its own clock: the first hour of the night.

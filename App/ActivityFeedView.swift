@@ -303,11 +303,12 @@ struct ActivityFeedRow: View {
         .monospacedDigit()
     }
     @ViewBuilder private var headline: some View {
-        if let headline = activity.headline, let value = headline.value.value {
+        if let headline = activity.headline {
+            let isPower = headline.kind == "averagePower" || headline.kind == "weightedPower"
             VStack(alignment: .trailing, spacing: 2) {
-                Text(headline.kind == "averagePower" ? String(format: "%.0f W", value) : pace(value))
+                Text(headline.value.value.map { isPower ? String(format: "%.0f W", $0) : pace($0) } ?? "—")
                     .font(.title3.weight(.semibold)).fixedSize()
-                Text(headline.kind == "averagePower" ? "average" : "pace")
+                Text(headline.kind == "weightedPower" ? "weighted power" : isPower ? "average power" : "pace")
                     .font(.caption).foregroundStyle(.secondary)
             }
         }

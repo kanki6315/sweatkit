@@ -82,6 +82,9 @@ struct ActivityAnalysisView: View {
                         }.font(.subheadline)
                     }.padding(16).background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 18))
                 }
+                if !chartsOnly, detail.input.sport.family == .onFoot, let metrics {
+                    ActivitySplitsView(splits: metrics.splits, units: units)
+                }
                 if !chartsOnly, !presentation.laps.isEmpty {
                     VStack(alignment: .leading, spacing: 12) {
                         Text("Laps").font(.headline)
@@ -211,6 +214,8 @@ struct ActivityAnalysisView: View {
         VStack(alignment: .leading, spacing: 16) {
             Text("Summary").font(.headline)
             LazyVGrid(columns: [GridItem(.adaptive(minimum: summaryColumnWidth), alignment: .topLeading)], alignment: .leading, spacing: 14) {
+                summaryValue("Elapsed time", text: duration(metrics.time.elapsed.value), reason: metrics.time.elapsed.reason)
+                summaryValue(metrics.time.timerIsSummaryOnly ? "Timer time (reported)" : "Timer time", text: duration(metrics.time.timer.value), reason: metrics.time.timer.reason)
                 summaryValue("Moving time", text: duration(metrics.time.moving.value), reason: metrics.time.moving.reason)
                 summaryValue("Distance", text: distance(metrics.distance.value), reason: metrics.distance.reason)
                 summaryValue("Ascent", text: number(metrics.ascent.value.map { $0 * (units == .metric ? 1 : 3.28084) }, suffix: units == .metric ? " m" : " ft"), reason: metrics.ascent.reason)

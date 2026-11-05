@@ -30,6 +30,21 @@ struct ActivityDetailView: View {
     @State private var playbackSpeed = 1.0
     @State private var timelineKind: TimelineOverlay.Kind?
     @State private var current: ActivityRecord?
+    private func routeContext(_ route: LibraryRoute, effort: RouteEffort) -> String {
+        let ordinal = NumberFormatter()
+        ordinal.numberStyle = .ordinal
+        func position(_ number: Int) -> String { ordinal.string(from: NSNumber(value: number)) ?? "\(number)" }
+        var parts = [route.name]
+        if let occurrence = route.occurrence(of: effort.id) { parts.append("\(position(occurrence)) time on this route") }
+        if let rank = route.rank(of: effort.id) {
+            parts.append("\(position(rank)) fastest")
+            if let gap = route.secondsBehindBest(of: effort.id), gap >= 0.5 {
+                parts.append("\(Duration.seconds(gap).formatted(.time(pattern: .minuteSecond))) behind best")
+            }
+        } else { parts.append("Moving time unavailable") }
+        return parts.joined(separator: " · ") + " · Compare"
+    }
+
     private var record: ActivityRecord { current ?? activity }
     @State private var summaryOnly = false
     @State private var prepared: PreparedDetail?
@@ -242,7 +257,7 @@ struct ActivityDetailView: View {
                         NavigationLink {
                             RouteComparisonView(route: route, subject: effort, library: library, units: units)
                         } label: {
-                            Label(route.rank(of: effort.id).map { "\(route.name) · #\($0) of \(route.ranked.count) · Compare" } ?? "\(route.name) · Compare",
+                            Label(routeContext(route, effort: effort),
                                   systemImage: "point.topleft.down.to.point.bottomright.curvepath")
                                 .font(.footnote).fixedSize(horizontal: false, vertical: true)
                                 .frame(maxWidth: .infinity, minHeight: 44)

@@ -29,7 +29,7 @@ import Testing
         #expect(feed.map(\.id) == (try expected.map { try fileIdentity($0.fixture) }))
         #expect(feed.map(\.start) == expected.map { Date(timeIntervalSince1970: $0.start) })
         #expect(feed.map(\.title) == ["Virtual ride", "Night walk", "Afternoon walk", "Morning ride"])
-        #expect(feed.map { $0.headline?.kind } == ["averagePower", "averagePace", "averagePace", "averagePower"])
+        #expect(feed.map { $0.headline?.kind } == ["weightedPower", "averagePace", "averagePace", "weightedPower"])
         // Each headline has a value: every ride here has power, and every
         // walk has a moving time and a distance.
         #expect(feed.allSatisfy { $0.headline?.value.value != nil })
@@ -56,16 +56,15 @@ import Testing
 @Suite struct HeadlineTests {
     let temporary = TemporaryLibrary()
 
-    /// "Average power: sum of power divided by the number of seconds that
-    /// have power; zeros included." Worked out here from the stored stream.
+    /// M5 routes the independently tested weighted metric into the feed.
     @Test(arguments: [Fixtures.FIT.outdoorRide, .zwiftRide])
-    func aRidesHeadlineIsItsAveragePower(_ fixture: Fixtures.FIT) async throws {
+    func aRidesHeadlineIsItsWeightedPower(_ fixture: Fixtures.FIT) async throws {
         let library = try await temporary.withFixtures().open()
         let id = try fileIdentity(fixture)
         let row = try #require(try await library.activity(id))
-        let expected = try #require(averagePower(of: try await library.analysisStream(for: id)))
+        let expected = try #require(try await library.metrics(for: id)?.power.weighted.value)
 
-        #expect(row.headline?.kind == FeedRules.averagePowerHeadline)
+        #expect(row.headline?.kind == FeedRules.weightedPowerHeadline)
         #expect(close(row.headline?.value.value, expected))
         // A plausible figure for an hour or two on a bike, and never a zero.
         #expect((50...400).contains(expected))
@@ -80,8 +79,8 @@ import Testing
         let row = try #require(try await library.activity(id))
         let metrics = try #require(try await library.metrics(for: id))
 
-        #expect(row.headline?.kind == FeedRules.averagePowerHeadline)
-        #expect(row.headline?.value == metrics.power.average)
+        #expect(row.headline?.kind == FeedRules.weightedPowerHeadline)
+        #expect(row.headline?.value == metrics.power.weighted)
         #expect(metrics.power.average.value != nil)
 
         // Power is on 5,337 of 5,347 records over 89 minutes, so weighted
