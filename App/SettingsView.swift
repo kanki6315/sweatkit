@@ -214,7 +214,8 @@ struct SettingsView: View {
     private var thresholdHistorySummary: String {
         let entries = profile.thresholdPowerHistory.filter { $0.effectiveFrom <= Date() }.sorted { $0.effectiveFrom < $1.effectiveFrom }
         guard let latest = entries.last else { return "Set a value or review an estimate from your rides" }
-        return "Since \(latest.effectiveFrom.formatted(.dateTime.day().month(.abbreviated))) · \(max(0, entries.count - 1)) earlier values"
+        let earlier = max(0, entries.count - 1)
+        return "Since \(latest.effectiveFrom.formatted(.dateTime.day().month(.abbreviated))) · \(earlier) earlier \(earlier == 1 ? "value" : "values")"
     }
 
     private func profileRow(_ title: String, symbol: String, value: String, detail: String? = nil) -> some View {
