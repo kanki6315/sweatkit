@@ -23,6 +23,8 @@ Updated 5 November 2026. The goal is the complete daily-use core defined in the 
 
 - Full regression for the feed/detail and Health cancellation checkpoint: **1,478 tests across all 14 packages passed** (`Scripts/test-packages.sh`, `/tmp/sweatkit-m123-regression.log`). No required interactive checks are inferred from this result.
 
+- Synthetic scale regression: **500 distinct Health snapshot imports**, reopen from disk, complete cursor pagination, sport-filtered weekly totals and source retention passed in 69.6 seconds on the development host (`swift test --package-path Packages/SweatKitLibrary --filter LibraryScaleTests`, `/tmp/sweatkit-scale-tests.log`). This covers persistence at 500 activities; it does **not** prove representative FIT import throughput or smooth device browsing.
+
 ## Implementation and remaining acceptance
 
 | Requirement | Current evidence / remaining work |
