@@ -348,7 +348,7 @@ struct ActivityDetailView: View {
                     .frame(minWidth: 44, minHeight: 44)
                 Picker("Playback speed", selection: $playbackSpeed) {
                     ForEach([0.5, 1.0, 2.0, 4.0], id: \.self) { speed in Text("\(speed, specifier: "%g")×").tag(speed) }
-                }.pickerStyle(.menu)
+                }.pickerStyle(.menu).fixedSize(horizontal: true, vertical: false)
                 Spacer()
                 VStack(alignment: .trailing, spacing: 2) {
                     Text(Duration.seconds(scrub.rounded(.down)).formatted(.time(pattern: .hourMinuteSecond)))
