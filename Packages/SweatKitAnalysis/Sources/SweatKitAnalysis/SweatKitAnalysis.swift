@@ -22,10 +22,19 @@ import SweatKitModel
 /// stream, not defined for the sport, pause positions unknown, the channel
 /// has no values, then the metric's own conditions in the order its
 /// documentation lists them.
+///
+/// A stream is read defensively. Paused spans are cut to the grid and merged
+/// where they overlap, a channel shorter than the stream is missing past its
+/// end, and a channel longer than the stream is cut to it.
 public enum ActivityAnalysis {
     /// Every metric of one activity.
     public static func metrics(for input: ActivityInput) -> ActivityMetrics {
-        fatalError("unimplemented")
+        switch input.recording {
+        case .stream(let stream):
+            StreamAnalysis(input: input, stream: stream).metrics()
+        case .summaryOnly(let stated):
+            summaryMetrics(stated)
+        }
     }
 
     /// The best mean power for each duration, in the order given.
@@ -43,6 +52,11 @@ public enum ActivityAnalysis {
     /// `.noValidWindow` when no valid window of that duration exists. A
     /// duration below one second has no window.
     public static func powerCurve(for input: ActivityInput, durations: [Int]) -> [PowerCurvePoint] {
-        fatalError("unimplemented")
+        switch input.recording {
+        case .stream(let stream):
+            StreamAnalysis(input: input, stream: stream).powerCurve(durations: durations)
+        case .summaryOnly:
+            durations.map { PowerCurvePoint(duration: $0, power: .unavailable(.noStream)) }
+        }
     }
 }

@@ -114,7 +114,9 @@ public struct ActivityMetrics: Hashable, Codable, Sendable {
 /// The three times, in seconds.
 public struct TimeMetrics: Hashable, Codable, Sendable {
     /// With a stream, the length of the stream. With no stream, the stated
-    /// end minus the stated start, or `.notStated` when either is absent.
+    /// end minus the stated start, or `.notStated` when either is absent. A
+    /// stated end before the stated start is also `.notStated`: the spec does
+    /// not cover it, and a negative time is not a time.
     public var elapsed: Metric<TimeInterval>
     /// With known pause positions, elapsed time minus the paused spans. With
     /// unknown pause positions or no stream, the stated timer time, or
@@ -218,6 +220,8 @@ public struct Work: Hashable, Codable, Sendable {
     public var kilojoules: Double
     /// Whether to label it "recorded work": true when pause positions are
     /// unknown or coverage is under `AnalysisRules.recordedWorkCoverageBelow`.
+    /// When timer time is zero, coverage is unavailable rather than under
+    /// that share, so by the literal reading the label is off.
     public var isRecordedOnly: Bool
 
     public init(kilojoules: Double, isRecordedOnly: Bool) {
@@ -300,7 +304,9 @@ public struct Split: Hashable, Codable, Sendable {
     /// Timer seconds in the split. Paused seconds are not counted.
     public var duration: TimeInterval
     /// Seconds per kilometre: the duration divided by the distance in
-    /// kilometres. Unavailable with `.zeroDenominator` when the distance is zero.
+    /// kilometres. Unavailable with `.zeroDenominator` when the distance is
+    /// zero. A split covered wholly while paused has a duration of zero and
+    /// so, by the literal reading, a pace of zero.
     public var pace: Metric<Double>
     /// Beats per minute over the split's timer seconds that have heart rate.
     /// Unavailable with `.noHeartRate` when none does.

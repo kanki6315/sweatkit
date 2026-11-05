@@ -20,7 +20,7 @@ public struct ZoneScheme: Hashable, Sendable {
     /// division and compared with the bound as it is, so 110 W at a 200 W
     /// threshold is exactly 55% and lands in the second zone.
     public func index(of value: Double) -> Int {
-        fatalError("unimplemented")
+        lowerBounds.firstIndex { value < $0 } ?? lowerBounds.count
     }
 
     /// Seven zones by share of threshold power.
