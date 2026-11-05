@@ -58,7 +58,9 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.arjunakankipati.sweatkit
         GENERATE_INFOPLIST_FILE: YES
+        ASSETCATALOG_COMPILER_APPICON_NAME: SweatKit
         CODE_SIGN_ENTITLEMENTS: App/SweatKit.entitlements
+        INFOPLIST_KEY_NSHealthUpdateUsageDescription: SweatKit does not write Health data. It uses read-only access to show your workouts.
         INFOPLIST_KEY_NSHealthShareUsageDescription: SweatKit reads your workouts, routes and activity samples to show your activities in one private library.
         INFOPLIST_KEY_CFBundleDisplayName: SweatKit
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
