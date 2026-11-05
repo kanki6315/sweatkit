@@ -829,10 +829,18 @@ public actor ActivityLibrary {
             guard let primary = byIdentity[group.primary] else { continue }
             let existing = old[group.id]
             let members = group.members.sorted()
+            let locality = ActivityLocalityCache.entry(root: store.root, revision: primary.currentRevision)?.name
+            let expectedTitle = group.title ?? existing.map { FeedRules.generatedTitle(for: $0, locality: locality) }
             if let existing, existing.members.sorted() == members, existing.primary == group.primary,
                existing.isHidden == group.isHidden,
-               group.title == nil || existing.title == group.title,
-               try await store.derivedResult(owner: .activity(group.id), kind: Self.metricsKind) != nil {
+               let cached = try await store.derivedResult(owner: .activity(group.id), kind: Self.metricsKind) {
+                if let expectedTitle, existing.title != expectedTitle {
+                    var renamed = existing
+                    renamed.title = expectedTitle
+                    replacements.append(renamed)
+                    results.append(cached)
+                    removing.insert(group.id)
+                }
                 continue
             }
             let found = try await materials(for: primary.currentRevision, renormalise: false, needsRecorded: true)
@@ -843,7 +851,7 @@ public actor ActivityLibrary {
                     revision: primary.currentRevision, existing: nil), at: Date(),
                 summaryOnly: recorded.stream.samples.isEmpty ? recorded.stated : nil,
                 sourceDistance: primary.source == .healthKit ? recorded.stated.distance : nil)
-            if let title = group.title { derived.row.title = title }
+            derived.row.title = group.title ?? FeedRules.generatedTitle(for: derived.row, locality: locality)
             derived.row.isHidden = group.isHidden
             replacements.append(derived.row)
             results.append(derived.result)
@@ -945,6 +953,24 @@ public actor ActivityLibrary {
         journal.tombstones += Tombstone.written(.deleted, for: Set(row.members), at: date)
         try writeIdentityJournal(journal)
         try await reconcileIdentity()
+    }
+
+    /// Saves a successful geocoding result (nil means no locality found).
+    /// Network failure is not a result: the app leaves it uncached for retry.
+    /// Explicit title decisions always win, even if written while geocoding.
+    @discardableResult
+    public func setLocality(_ locality: String?, for request: ActivityLocalityRequest) async throws -> Bool {
+        await begin(request.source)
+        defer { end(request.source) }
+        // Recover pending identity/deletion intent and migrate legacy titles
+        // before checking the source or adding a generated locality.
+        if identityNeedsRecovery { try await reconcileIdentity() }
+        guard let source = try await store.sourceRecord(request.source),
+              source.state != .deleted, source.currentRevision == request.revision else { return false }
+        try ActivityLocalityCache.save(locality, root: store.root, revision: request.revision)
+        identityNeedsRecovery = true
+        try await reconcileIdentity()
+        return true
     }
 
     /// User decisions apply to every current member, independent of primary.

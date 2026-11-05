@@ -27,6 +27,7 @@ final class LibraryModel {
     private var cursor: FeedCursor?
     private var generation = 0
     private var importTask: Task<Void, Never>?
+    private let localityResolver = ActivityLocalityResolver()
     var hasMore: Bool { cursor != nil }
 
     func open() async {
@@ -65,6 +66,7 @@ final class LibraryModel {
             removedSources = Set(sources.filter { $0.state == .removedAtSource }.map(\.identity))
             cursor = page.next
             error = nil
+            resolveLocalities()
         } catch {
             guard request == generation else { return }
             self.error = error.localizedDescription
@@ -83,6 +85,7 @@ final class LibraryModel {
             let existing = Set(activities.compactMap(\.id))
             activities += page.activities.filter { !existing.contains($0.id ?? $0.primary) }
             self.cursor = page.next
+            resolveLocalities()
         } catch { if request == generation { self.error = error.localizedDescription } }
     }
 
@@ -116,6 +119,13 @@ final class LibraryModel {
                 error = "\(report.failures.count) activities couldn't be recalculated. Their originals are kept; try recalculating again."
             }
         } catch { self.error = error.localizedDescription }
+    }
+
+    private func resolveLocalities() {
+        guard let library else { return }
+        localityResolver.enqueue(activities.compactMap(\.id), library: library) { [weak self] in
+            await self?.reload()
+        }
     }
 
     func cancelImport() { importTask?.cancel() }

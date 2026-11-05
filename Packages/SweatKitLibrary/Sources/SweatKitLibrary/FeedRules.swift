@@ -115,9 +115,8 @@ public enum FeedRules {
     /// - The sport is "ride", "walk", "run" or "hike", and "activity" for
     ///   any other. A virtual activity is a "virtual ride", and an indoor
     ///   one that is not virtual an "indoor ride".
-    /// - The spec adds the locality: "Morning ride, Richmond Park". Finding
-    ///   it needs geocoding, which is not built. `locality` is where it goes:
-    ///   pass the place name and it is appended after a comma.
+    /// - The spec adds the locality: "Morning ride, Richmond Park". The app resolves
+    ///   and caches the locality separately, so offline imports remain usable.
     public static func title(
         sport: Sport,
         isIndoor: Bool = false,
@@ -153,9 +152,9 @@ public enum FeedRules {
     }
 
     /// The title `title(...)` gives a stored row from its own fields, with
-    /// no locality.
-    static func generatedTitle(for row: ActivityRecord) -> String {
-        title(sport: row.sport, isIndoor: row.isIndoor, isVirtual: row.isVirtual, start: row.start, utcOffset: row.utcOffset)
+    /// an optional cached locality.
+    static func generatedTitle(for row: ActivityRecord, locality: String? = nil) -> String {
+        title(sport: row.sport, isIndoor: row.isIndoor, isVirtual: row.isVirtual, start: row.start, utcOffset: row.utcOffset, locality: locality)
     }
 }
 
@@ -207,8 +206,8 @@ extension FeedRules {
         metrics: ActivityMetrics,
         existing: ActivityRecord?
     ) -> ActivityRecord {
-        // Geocoding is not built, so no locality is passed. When it is, the
-        // place name found for the activity goes in here.
+        // Identity reconciliation applies cached locality and explicit title
+        // decisions after the source facts have been derived.
         var title = FeedRules.title(
             sport: facts.sport,
             isIndoor: facts.isIndoor,
