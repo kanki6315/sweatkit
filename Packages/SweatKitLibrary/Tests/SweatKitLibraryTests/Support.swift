@@ -31,7 +31,16 @@ final class TemporaryLibrary: Sendable {
     /// fixtures. Call it before the first `open()`.
     @discardableResult
     func withFixtures() async throws -> TemporaryLibrary {
-        try FileManager.default.copyItem(at: try await FixtureLibrary.imported().root, to: root)
+        let template = try await FixtureLibrary.imported().root
+        let manager = FileManager.default
+        try manager.createDirectory(at: root, withIntermediateDirectories: true)
+        for item in try manager.contentsOfDirectory(at: template, includingPropertiesForKeys: nil) {
+            // The database's shared-memory index belongs to the template's
+            // open connection. SQLite builds a new one from the write-ahead
+            // log when the copy is opened.
+            if item.lastPathComponent.hasSuffix(FixtureLibrary.sharedMemorySuffix) { continue }
+            try manager.copyItem(at: item, to: root.appending(path: item.lastPathComponent))
+        }
         return self
     }
 
@@ -94,6 +103,12 @@ func revision(_ fixture: Fixtures.FIT) throws -> ContentHash {
 enum FixtureLibrary {
     struct Template: Sendable {
         var root: URL
+        /// The template's own library, held open for the whole test run and
+        /// never used again. A database that is closing rewrites its file
+        /// from its write-ahead log, and a copy taken meanwhile can lose the
+        /// last imports. One that stays open and idle changes nothing, so
+        /// its file and its log can be copied together at any time.
+        var library: ActivityLibrary
         /// What the batch import reported for each fixture.
         var outcomes: [Fixtures.FIT: ImportFileOutcome]
         /// Every progress report of the batch, in the order it arrived.
@@ -108,24 +123,24 @@ enum FixtureLibrary {
 
         let fixtures = Fixtures.FIT.allCases
         let reports = Mutex<[ImportProgress]>([])
-        let outcomes: [ImportFileOutcome]
-        do {
-            // A scope of its own, so the store is closed before any copy.
-            let library = try ActivityLibrary(root: root)
-            outcomes = await library.importFiles(
-                fixtures.map { ImportFile(url: $0.url()) },
-                at: firstImport,
-                progress: { report in reports.withLock { $0.append(report) } }
-            )
-        }
+        let library = try ActivityLibrary(root: root)
+        let outcomes = await library.importFiles(
+            fixtures.map { ImportFile(url: $0.url()) },
+            at: firstImport,
+            progress: { report in reports.withLock { $0.append(report) } }
+        )
         return Template(
             root: root,
+            library: library,
             outcomes: Dictionary(uniqueKeysWithValues: zip(fixtures, outcomes)),
             progress: reports.withLock { $0 }
         )
     }
 
     private static let templateRoot = Mutex<String>("")
+
+    /// The suffix of the file SQLite keeps its shared-memory index in.
+    static let sharedMemorySuffix = "-shm"
 
     /// The template, and what importing the four fixtures into it reported.
     static func imported() async throws -> Template {
