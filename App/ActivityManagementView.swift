@@ -103,23 +103,37 @@ struct LibraryReviewView: View {
     @State private var error: String?
     @State private var busy = false
 
+    @State private var selectedPairs: Set<IdentityPair> = []
+    @State private var editMode = EditMode.inactive
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
+    private var selecting: Bool { editMode.isEditing }
+
     var body: some View {
-        List {
+        List(selection: selecting ? $selectedPairs : nil) {
             if let error { Section { Text(error); Button("Try again") { Task { await load() } } } }
             Section {
                 if pairs.isEmpty { Text("No recordings need review.").foregroundStyle(.secondary) }
                 ForEach(pairs, id: \.self) { pair in
-                    VStack(alignment: .leading, spacing: 12) {
-                        recording(pair.lower)
-                        recording(pair.upper)
-                        HStack {
-                            Button("Merge") { decide(pair, .sameActivity) }.buttonStyle(.bordered)
-                            Button("Keep separate") { decide(pair, .keepSeparate) }.buttonStyle(.bordered)
+                    comparison(pair)
+                        .tag(pair)
+                        .swipeActions(edge: .leading, allowsFullSwipe: true) {
+                            if !selecting {
+                                Button("Merge", systemImage: "arrow.triangle.merge") { decide([pair], .sameActivity) }
+                                    .tint(.accentColor)
+                            }
                         }
-                    }.padding(.vertical, 8)
+                        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                            if !selecting {
+                                Button("Keep separate", systemImage: "arrow.triangle.branch") { decide([pair], .keepSeparate) }
+                                    .tint(.gray)
+                            }
+                        }
+                        .accessibilityAction(named: "Merge") { decide([pair], .sameActivity) }
+                        .accessibilityAction(named: "Keep separate") { decide([pair], .keepSeparate) }
                 }
             } header: { Text("Possible duplicates") } footer: {
-                Text("Overlapping recordings that don't meet the automatic matching rules stay separate until you decide.")
+                Text("Swipe right to merge, or left to keep separate. Tap Select to review several pairs at once.")
             }
             Section("Hidden activities") {
                 if hidden.isEmpty { Text("No hidden activities.").foregroundStyle(.secondary) }
@@ -131,6 +145,43 @@ struct LibraryReviewView: View {
                             run { try await library.decide(.hidden(false), for: row.id ?? row.primary) }
                         }
                     }
+                    .selectionDisabled(true)
+                }
+            }
+        }
+        .environment(\.editMode, $editMode)
+        .safeAreaInset(edge: .bottom) {
+            if selecting {
+                VStack(spacing: 8) {
+                    if busy {
+                        ProgressView("Applying decisions…")
+                    } else {
+                        Text("\(selectedPairs.count) selected").font(.subheadline).foregroundStyle(.secondary)
+                    }
+                    ViewThatFits(in: .horizontal) {
+                        HStack { batchActions }
+                        VStack { batchActions }
+                    }
+                }
+                .padding()
+                .frame(maxWidth: .infinity)
+                .background(.bar)
+            }
+        }
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                if !pairs.isEmpty || selecting {
+                    Button(selecting ? "Done" : "Select") {
+                        selectedPairs.removeAll()
+                        editMode = selecting ? .inactive : .active
+                    }
+                }
+            }
+            ToolbarItem(placement: .topBarLeading) {
+                if selecting && !pairs.isEmpty {
+                    Button(selectedPairs.count == pairs.count ? "Deselect all" : "Select all") {
+                        selectedPairs = selectedPairs.count == pairs.count ? [] : Set(pairs)
+                    }
                 }
             }
         }
@@ -139,19 +190,49 @@ struct LibraryReviewView: View {
         .task { await load() }
     }
 
+    @ViewBuilder private var batchActions: some View {
+        Button("Merge selected", systemImage: "arrow.triangle.merge") {
+            decide(pairs.filter { selectedPairs.contains($0) }, .sameActivity)
+        }
+        .buttonStyle(.borderedProminent)
+        .disabled(selectedPairs.isEmpty)
+        Button("Keep separate", systemImage: "arrow.triangle.branch") {
+            decide(pairs.filter { selectedPairs.contains($0) }, .keepSeparate)
+        }
+        .buttonStyle(.bordered)
+        .disabled(selectedPairs.isEmpty)
+    }
+
+    private func comparison(_ pair: IdentityPair) -> some View {
+        // Accessibility sizes retain complete text instead of squeezing two columns.
+        let layout = dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 12))
+            : AnyLayout(HStackLayout(alignment: .top, spacing: 16))
+        return layout {
+            recording(pair.lower)
+            recording(pair.upper)
+        }
+        .padding(.vertical, 4)
+    }
+
     @ViewBuilder private func recording(_ source: SourceIdentity) -> some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(rows[source]?.title ?? "Recording").font(.headline)
+            Text(sourceName(source)).font(.caption).foregroundStyle(.secondary)
+            Text(rows[source]?.title ?? "Recording").font(.subheadline.weight(.semibold))
             if let row = rows[source] {
-                Text(row.start, format: .dateTime.month(.abbreviated).day().year().hour().minute())
-                    .font(.subheadline)
-                Text("\(Duration.seconds(row.elapsedTime).formatted(.time(pattern: .hourMinuteSecond))) elapsed · \(distance(row.distance))")
-                    .font(.subheadline).monospacedDigit()
-                Text("\(row.sport.rawValue.capitalized) · \(sourceName(source))")
+                Text(row.start, format: .dateTime.month(.abbreviated).day().year())
+                    .font(.caption)
+                Text(row.start, format: .dateTime.hour().minute()).font(.caption)
+                Text("\(Duration.seconds(row.elapsedTime).formatted(.time(pattern: .hourMinuteSecond))) elapsed")
+                    .font(.caption).monospacedDigit()
+                Text(distance(row.distance)).font(.caption).monospacedDigit()
+                Text(row.sport.rawValue.capitalized)
                     .font(.caption).foregroundStyle(.secondary)
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .fixedSize(horizontal: false, vertical: true)
+        .accessibilityElement(children: .combine)
     }
     private func distance(_ metres: Double?) -> String {
         guard let metres else { return "No distance" }
@@ -164,8 +245,26 @@ struct LibraryReviewView: View {
         case .file: "FIT file"
         }
     }
-    private func decide(_ pair: IdentityPair, _ kind: LinkKind) {
-        run { try await library.link(pair, kind: kind) }
+    private func decide(_ decisions: [IdentityPair], _ kind: LinkKind) {
+        guard !busy, !decisions.isEmpty else { return }
+        busy = true
+        error = nil
+        Task {
+            defer { busy = false }
+            do {
+                for pair in decisions {
+                    try await library.link(pair, kind: kind)
+                    selectedPairs.remove(pair)
+                    pairs.removeAll { $0 == pair }
+                }
+                await load()
+            } catch {
+                let failure = error.localizedDescription
+                // Refresh even after partial success; never retry completed pairs.
+                await load()
+                self.error = failure
+            }
+        }
     }
     private func run(_ operation: @escaping @MainActor () async throws -> Void) {
         busy = true
@@ -179,6 +278,9 @@ struct LibraryReviewView: View {
         do {
             units = try await library.profile().units
             pairs = try await library.possibleDuplicates()
+            selectedPairs.formIntersection(Set(pairs))
+            if pairs.isEmpty { editMode = .inactive }
+            rows.removeAll()
             hidden = try await library.hiddenActivities()
             for pair in pairs {
                 rows[pair.lower] = try await library.activityContaining(pair.lower)
