@@ -99,7 +99,7 @@ enum StatSlots {
         let time = StatSlot(
             label: "Time", spokenLabel: "Elapsed time",
             stat: StatFormatter.elapsedTime(stats.elapsedTime),
-            template: "8:88:88"
+            template: "88:88:88"
         )
         let speed = StatSlot(
             label: "Speed", spokenLabel: "Speed",
@@ -109,7 +109,7 @@ enum StatSlots {
         let pace = StatSlot(
             label: "Pace", spokenLabel: "Pace",
             stat: StatFormatter.pace(stats.speed, units: units),
-            template: "88:88"
+            template: "888:88"
         )
         let power = StatSlot(
             label: "3 s power", spokenLabel: "3-second power",
@@ -150,7 +150,7 @@ enum StatSlots {
             StatSlot(
                 label: "Time", spokenLabel: "Time",
                 stat: StatFormatter.elapsedTime(stats?.time),
-                template: "8:88:88"
+                template: "88:88:88"
             ),
             StatSlot(
                 label: "Distance", spokenLabel: "Distance",

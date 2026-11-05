@@ -14,6 +14,7 @@ struct ActivityDetailView: View {
     let library: ActivityLibrary?
     var deleteActivity: (@MainActor (SourceIdentity) async throws -> Void)? = nil
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.scenePhase) private var scenePhase
     @State private var alternatives: [AlternativeOffer] = []
     @State private var presentation: DetailAnalysisPresentation?
@@ -58,46 +59,6 @@ struct ActivityDetailView: View {
                 }.monospacedDigit()
             } else if let prepared {
                 detailSurface(prepared)
-                .toolbar {
-                    ToolbarItem(placement: .topBarTrailing) {
-                        Menu {
-                            if prepared.line.value != nil {
-                                Button("Charts, laps and zones") { showsAnalysis = true }
-                            }
-                            if let library {
-                                NavigationLink("Activity info and sources") {
-                                    ActivityManagementView(activity: record, library: library, deleteActivity: deleteActivity)
-                                }
-                            }
-                            Picker("Overlay", selection: $overlay) {
-                                ForEach(RouteOverlay.allCases, id: \.self) { item in
-                                    Text(item.label).tag(item).disabled(prepared.bands[item]?.value == nil)
-                                }
-                            }
-                            Picker("Timeline series", selection: $timelineKind) {
-                                Text("None").tag(nil as TimelineOverlay.Kind?)
-                                ForEach(TimelineOverlay.Kind.allCases, id: \.self) { kind in
-                                    if prepared.timelineOverlays[kind] != nil {
-                                        Text(kind.rawValue.capitalized).tag(Optional(kind))
-                                    }
-                                }
-                            }
-                            Picker("Timeline axis", selection: $axis) {
-                                Text("Distance").tag(TimelineAxisMode.distance)
-                                Text("Time").tag(TimelineAxisMode.time)
-                            }
-                            Toggle("Collapse stops", isOn: $collapsesStops)
-                            Picker("Map", selection: $options.mapStyle) {
-                                Text("Satellite").tag(FlyoverOptions.MapStyle.satellite)
-                                Text("Standard").tag(FlyoverOptions.MapStyle.standard)
-                            }
-                            Picker("Camera", selection: $options.cameraMode) {
-                                Text("Overview").tag(FlyoverOptions.CameraMode.overview)
-                                Text("Follow").tag(FlyoverOptions.CameraMode.follow)
-                            }
-                        } label: { Label(overlay.label, systemImage: "slider.horizontal.3") }
-                    }
-                }
             } else if let error {
                 ContentUnavailableView {
                     Label("Couldn't open activity", systemImage: "exclamationmark.triangle")
@@ -106,8 +67,11 @@ struct ActivityDetailView: View {
                 }
             } else { ProgressView("Preparing activity") }
         }
+        .background { if prepared != nil { DetailBackGesture() } }
         .navigationTitle(record.title)
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar(prepared == nil ? .visible : .hidden, for: .navigationBar)
+        .toolbar(.hidden, for: .tabBar)
         .task { await load() }
         .onChange(of: overlay) {
             timelineKind = prepared?.timelineKind(for: overlay)
@@ -123,11 +87,11 @@ struct ActivityDetailView: View {
                 NavigationStack {
                     analysis(presentation, prepared)
                         .safeAreaInset(edge: .bottom) { timeline(prepared) }
-                        .navigationTitle("Analysis")
+                        .navigationTitle(record.title)
                         .navigationBarTitleDisplayMode(.inline)
                         .toolbar { Button("Done") { showsAnalysis = false } }
                 }
-                .presentationDetents([.medium, .large])
+                .presentationDetents(dynamicTypeSize.isAccessibilitySize ? [.large] : [.medium, .large])
                 .presentationDragIndicator(.visible)
             }
         }
@@ -153,26 +117,69 @@ struct ActivityDetailView: View {
         Group {
             if let route = detail.route(for: overlay).value {
                 FlyoverMap(route: route, bandColors: colors, scrubSample: manualScrub, options: options)
-                    .ignoresSafeArea(edges: .bottom)
+                    .ignoresSafeArea()
             } else if let presentation {
-                analysis(presentation, detail)
+                ActivityAnalysisView(presentation: presentation, detail: detail, metrics: metrics, units: units, scrub: manualScrub, selection: $selection, chartsOnly: true)
             }
         }
         .safeAreaInset(edge: .top) {
             if !showsAnalysis {
-                VStack(spacing: 8) {
+                VStack(spacing: 0) {
+                    HStack(spacing: 8) {
+                        Button { dismiss() } label: {
+                            Image(systemName: "chevron.left").frame(width: 44, height: 44)
+                        }.accessibilityLabel("Back")
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(record.title).font(.headline).lineLimit(2)
+                            Text("\(record.start.formatted(.dateTime.month(.abbreviated).day().hour().minute())) · \(record.sport.rawValue.capitalized)")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }.frame(maxWidth: .infinity, alignment: .leading)
+                        Menu {
+                            Button("Analysis") { showsAnalysis = true }
+                            if let library {
+                                NavigationLink("Activity info and sources") {
+                                    ActivityManagementView(activity: record, library: library, deleteActivity: deleteActivity)
+                                }
+                            }
+                            Picker("Overlay", selection: $overlay) {
+                                ForEach(RouteOverlay.allCases, id: \.self) { item in
+                                    Text(item.label).tag(item).disabled(detail.bands[item]?.value == nil)
+                                }
+                            }
+                            Picker("Timeline series", selection: $timelineKind) {
+                                Text("None").tag(nil as TimelineOverlay.Kind?)
+                                ForEach(TimelineOverlay.Kind.allCases, id: \.self) { kind in
+                                    if detail.timelineOverlays[kind] != nil {
+                                        Text(kind.rawValue.capitalized).tag(Optional(kind))
+                                    }
+                                }
+                            }
+                            Picker("Timeline axis", selection: $axis) {
+                                Text("Distance").tag(TimelineAxisMode.distance)
+                                Text("Time").tag(TimelineAxisMode.time)
+                            }
+                            Toggle("Collapse stops", isOn: $collapsesStops)
+                            Picker("Map", selection: $options.mapStyle) {
+                                Text("Satellite").tag(FlyoverOptions.MapStyle.satellite)
+                                Text("Standard").tag(FlyoverOptions.MapStyle.standard)
+                            }
+                            Picker("Camera", selection: $options.cameraMode) {
+                                Text("Overview").tag(FlyoverOptions.CameraMode.overview)
+                                Text("Follow").tag(FlyoverOptions.CameraMode.follow)
+                            }
+                        } label: { Image(systemName: "ellipsis").frame(width: 44, height: 44) }
+                        .accessibilityLabel("Activity options")
+                    }.padding(.horizontal, 8).padding(.top, 8)
+                    StatsPanel(stats: detail.cursorStats(at: Int(scrub)), sport: record.sport, units: units, floating: false)
+                        .frame(maxHeight: dynamicTypeSize.isAccessibilitySize ? 240 : nil)
                     if !alternatives.isEmpty, let library {
-                        NavigationLink {
+                        NavigationLink("Review additional source data") {
                             ActivityManagementView(activity: record, library: library, deleteActivity: deleteActivity)
-                        } label: {
-                            Label("Another recording has additional data. Review sources", systemImage: "square.stack")
-                                .font(.subheadline)
-                        }.buttonStyle(.bordered).padding(.horizontal)
+                        }.font(.footnote).padding(.bottom, 12)
                     }
-                    if detail.line.value != nil {
-                        StatsPanel(stats: detail.cursorStats(at: Int(scrub)), sport: record.sport, units: units).padding(.horizontal)
-                    }
-                }.padding(.top, 8)
+                }
+                .modifier(FloatingPanel())
+                .padding(.horizontal, 12).padding(.top, 4)
             }
         }
         .safeAreaInset(edge: .bottom) {
@@ -186,29 +193,80 @@ struct ActivityDetailView: View {
     }
 
     @ViewBuilder private func timeline(_ detail: PreparedDetail) -> some View {
-        VStack(spacing: 8) {
+        VStack(spacing: 4) {
+            if !showsAnalysis {
+                Capsule().fill(.secondary.opacity(0.5)).frame(width: 36, height: 4)
+                    .frame(maxWidth: .infinity).padding(.vertical, 5)
+                    .contentShape(Rectangle())
+                    .gesture(DragGesture(minimumDistance: 10).onEnded { value in
+                        if value.translation.height < -20 { showsAnalysis = true }
+                    })
+                    .accessibilityHidden(true)
+            }
+            HStack {
+                Picker("Timeline series", selection: $timelineKind) {
+                    Text("Elevation").tag(nil as TimelineOverlay.Kind?)
+                    ForEach(TimelineOverlay.Kind.allCases, id: \.self) { kind in
+                        if detail.timelineOverlays[kind] != nil {
+                            Text(kind.rawValue.capitalized).tag(Optional(kind))
+                        }
+                    }
+                }.pickerStyle(.menu)
+                Spacer()
+                Picker("Timeline axis", selection: $axis) {
+                    Text(units == .metric ? "km" : "mi").tag(TimelineAxisMode.distance)
+                    Text("Time").tag(TimelineAxisMode.time)
+                }.pickerStyle(.segmented).frame(width: 130)
+                    .disabled(detail.timeline?.distance == nil)
+            }.padding(.horizontal, 14)
+            if detail.line.value != nil {
+                HStack(spacing: 4) {
+                    Text("Route: \(overlay.label)")
+                    ForEach(colors.indices, id: \.self) { index in
+                        Capsule().fill(colors[index]).frame(width: 12, height: 6)
+                            .overlay { Capsule().stroke(.primary.opacity(0.5), lineWidth: 0.5) }
+                    }
+                    Spacer()
+                }.font(.caption2).foregroundStyle(.secondary).padding(.horizontal, 14)
+            }
+            if let data = detail.timeline {
+                ActivityTimeline(data: data, overlay: timelineOverlay, scrubSample: manualScrub,
+                    selection: $selection, selectionStats: selectionStats, axisMode: axis,
+                    collapsesStops: collapsesStops, sport: record.sport, units: units, floating: false)
+            }
             HStack {
                 Button(playing ? "Pause" : "Play", systemImage: playing ? "pause.fill" : "play.fill") {
                     if scrub >= Double(detail.input.stream.count - 1) { scrub = 0 }
                     playing.toggle()
-                }
+                }.labelStyle(.iconOnly).frame(minWidth: 44, minHeight: 44)
                 Picker("Playback speed", selection: $playbackSpeed) {
                     ForEach([0.5, 1.0, 2.0, 4.0], id: \.self) { speed in Text("\(speed, specifier: "%g")×").tag(speed) }
                 }.pickerStyle(.menu)
                 Spacer()
-                Text(overlay.label).font(.caption).accessibilityLabel("Route overlay: \(overlay.label)")
-                if detail.line.value != nil {
-                    Button("Analysis", systemImage: "chart.xyaxis.line") { showsAnalysis = true }
+                VStack(alignment: .trailing, spacing: 2) {
+                    Text(Duration.seconds(scrub.rounded(.down)).formatted(.time(pattern: .hourMinuteSecond)))
+                        .font(.subheadline.monospacedDigit())
+                    Text("of \(Duration.seconds(Double(max(0, detail.input.stream.count - 1))).formatted(.time(pattern: .hourMinuteSecond)))")
+                        .font(.caption2.monospacedDigit()).foregroundStyle(.secondary)
+                }.frame(minWidth: 88, alignment: .trailing)
+                if !showsAnalysis {
+                    Button { showsAnalysis = true } label: {
+                        if dynamicTypeSize.isAccessibilitySize { Image(systemName: "chart.xyaxis.line") }
+                        else { Label("Analysis", systemImage: "chevron.up") }
+                    }.accessibilityLabel("Analysis")
+                        .font(.subheadline).frame(minWidth: 44, minHeight: 44)
                 }
+            }.padding(.horizontal, 14)
+            if detail.line.value == nil && !showsAnalysis {
+                Text(record.isVirtual ? "Virtual activity · no map" : record.isIndoor ? "Indoor activity · no map" : "No usable route · recorded charts")
+                    .font(.caption).foregroundStyle(.secondary).padding(.bottom, 8)
             }
-            .padding(10)
-            .background(.regularMaterial, in: Capsule())
-            if let data = detail.timeline {
-                ActivityTimeline(data: data, overlay: timelineOverlay, scrubSample: manualScrub,
-                    selection: $selection, selectionStats: selectionStats, axisMode: axis,
-                    collapsesStops: collapsesStops, sport: record.sport, units: units)
-            }
-        }.padding()
+        }
+        .padding(.top, 8)
+        .modifier(FloatingPanel(enabled: !showsAnalysis))
+        .background(showsAnalysis ? Color(uiColor: .systemBackground) : .clear)
+        .padding(.horizontal, showsAnalysis ? 0 : 12)
+        .padding(.bottom, showsAnalysis ? 0 : 8)
     }
 
     private var timelineColors: [Color] {
@@ -301,6 +359,83 @@ private extension RouteOverlay {
         case .paceOrSpeed: "Pace / speed"
         case .gradient: "Gradient"
         case .plain: "No overlay"
+        }
+    }
+}
+
+/// A hidden system bar must not remove the navigation stack's native edge pop.
+/// Borrow its recognizer only while this detail is visible, then restore it.
+private struct DetailBackGesture: UIViewControllerRepresentable {
+    func makeUIViewController(context: Context) -> Controller { Controller() }
+    func updateUIViewController(_ controller: Controller, context: Context) {}
+    static func dismantleUIViewController(_ controller: Controller, coordinator: ()) { controller.restore() }
+
+    final class Controller: UIViewController, UIGestureRecognizerDelegate {
+        private weak var recognizer: UIGestureRecognizer?
+        private weak var popNavigation: UINavigationController?
+        private weak var previousDelegate: (any UIGestureRecognizerDelegate)?
+        private var previousEnabled = false
+
+        override func viewDidAppear(_ animated: Bool) {
+            super.viewDidAppear(animated)
+            // SwiftUI may finish hiding the bar after the child appears.
+            DispatchQueue.main.async { [weak self] in self?.enableNativePop() }
+        }
+
+        override func viewDidLayoutSubviews() {
+            super.viewDidLayoutSubviews()
+            enableNativePop()
+        }
+
+        private func enableNativePop() {
+            guard view.window != nil else { return }
+            func enclosingNavigation(_ controller: UIViewController) -> UINavigationController? {
+                if let navigation = controller as? UINavigationController,
+                   let top = navigation.topViewController, view.isDescendant(of: top.view) { return navigation }
+                for child in controller.children {
+                    if let navigation = enclosingNavigation(child) { return navigation }
+                }
+                return nil
+            }
+            guard let root = view.window?.rootViewController,
+                  let navigation = navigationController ?? enclosingNavigation(root),
+                  navigation.viewControllers.count > 1,
+                  let gesture = navigation.interactivePopGestureRecognizer else { return }
+            popNavigation = navigation
+            if recognizer == nil {
+                recognizer = gesture
+                previousDelegate = gesture.delegate
+                previousEnabled = gesture.isEnabled
+            }
+            gesture.delegate = self
+            if !gesture.isEnabled { gesture.isEnabled = true }
+        }
+
+        func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+            guard let navigationController = popNavigation else { return false }
+            return navigationController.viewControllers.count > 1 && navigationController.transitionCoordinator == nil
+        }
+
+        func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
+                               shouldBeRequiredToFailBy otherGestureRecognizer: UIGestureRecognizer) -> Bool {
+            // MapKit's pan must yield at the screen edge. Away from the edge
+            // the native recognizer fails immediately and the map stays free.
+            true
+        }
+
+        override func viewDidDisappear(_ animated: Bool) {
+            super.viewDidDisappear(animated)
+            restore()
+        }
+
+        func restore() {
+            if let recognizer, recognizer.delegate === self {
+                recognizer.delegate = previousDelegate
+                recognizer.isEnabled = previousEnabled
+            }
+            recognizer = nil
+            popNavigation = nil
+            previousDelegate = nil
         }
     }
 }
