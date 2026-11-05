@@ -24,6 +24,7 @@ struct ActivityDetailView: View {
     @State private var historicalCurveError: String?
     @State private var historyWindow = 90
     @State private var historicalCurveLoading = false
+    @State private var historicalSources: [SourceKind] = []
     @State private var expandsAnalysisTimeline = false
     @State private var showsAnalysis = false
     @State private var playing = false
@@ -64,6 +65,7 @@ struct ActivityDetailView: View {
             if summaryOnly {
                 List {
                     Section {
+                        SourceAttributionView(sources: record.members.map(\.source))
                         LabeledContent("Elapsed time", value: Duration.seconds(record.elapsedTime).formatted(.time(pattern: .hourMinuteSecond)))
                         if let timer = record.timerTime {
                             LabeledContent("Timer time", value: Duration.seconds(timer).formatted(.time(pattern: .hourMinuteSecond)))
@@ -134,6 +136,7 @@ struct ActivityDetailView: View {
         .task(id: "\(showsAnalysis)-\(historyWindow)") {
             guard showsAnalysis, record.sport.family == .cycling, let library else { return }
             historicalCurve = []
+            historicalSources = []
             historicalCurveError = nil
             historicalCurveLoading = true
             do {
@@ -147,14 +150,17 @@ struct ActivityDetailView: View {
                     let eligible = history.activities.filter {
                         !$0.isStale && $0.activity.start >= start && $0.activity.start < end
                             && $0.activity.sport.family == .cycling
-                    }.flatMap(\.curve)
-                    let groups = Dictionary(grouping: eligible, by: \.duration)
-                    return groups.keys.sorted().compactMap { duration in
-                        groups[duration]?.filter { $0.power.value != nil }.max { ($0.power.value ?? -.infinity) < ($1.power.value ?? -.infinity) }
                     }
+                    let entries = eligible.flatMap { row in row.curve.map { (point: $0, source: row.activity.primary.source) } }
+                    let groups = Dictionary(grouping: entries, by: { $0.point.duration })
+                    let winners = groups.keys.sorted().compactMap { duration in
+                        groups[duration]?.filter { $0.point.power.value != nil }.max { ($0.point.power.value ?? -.infinity) < ($1.point.power.value ?? -.infinity) }
+                    }
+                    return (winners.map(\.point), Array(Set(winners.map(\.source))))
                 }.value
                 try Task.checkCancellation()
-                historicalCurve = points
+                historicalCurve = points.0
+                historicalSources = points.1
                 historicalCurveLoading = false
                 historicalCurveError = nil
             } catch is CancellationError { }
@@ -207,7 +213,8 @@ struct ActivityDetailView: View {
                 VStack(spacing: 0) {
                     HStack(spacing: 8) {
                         Button { dismiss() } label: {
-                            Image(systemName: "chevron.left").frame(width: 44, height: 44)
+                            Image(systemName: "chevron.left").foregroundStyle(.primary).frame(width: 36, height: 36)
+                                .background(Color(uiColor: .quaternarySystemFill), in: Circle()).frame(width: 44, height: 44)
                         }.accessibilityLabel("Back")
                         VStack(alignment: .leading, spacing: 3) {
                             Text(record.title).font(.headline).lineLimit(2)
@@ -252,17 +259,7 @@ struct ActivityDetailView: View {
                     }.padding(.horizontal, 8).padding(.top, 8)
                     StatsPanel(stats: detail.cursorStats(at: Int(scrub)), sport: record.sport, units: units, floating: false)
                         .frame(maxHeight: dynamicTypeSize.isAccessibilitySize ? 240 : nil)
-                    if let route = matchedRoute,
-                       let effort = route.efforts.first(where: { $0.activity.members.contains(record.id ?? record.primary) }) {
-                        NavigationLink {
-                            RouteComparisonView(route: route, subject: effort, library: library, units: units)
-                        } label: {
-                            Label(routeContext(route, effort: effort),
-                                  systemImage: "point.topleft.down.to.point.bottomright.curvepath")
-                                .font(.footnote).fixedSize(horizontal: false, vertical: true)
-                                .frame(maxWidth: .infinity, minHeight: 44)
-                        }.padding(.horizontal, 12)
-                    }
+                    routeComparisonLink
                     if !alternatives.isEmpty, let library {
                         NavigationLink("Review additional source data") {
                             ActivityManagementView(activity: record, library: library, deleteActivity: deleteActivity)
@@ -278,9 +275,27 @@ struct ActivityDetailView: View {
         }
     }
 
+    @ViewBuilder private var routeComparisonLink: some View {
+                    if let route = matchedRoute,
+                       let effort = route.efforts.first(where: { $0.activity.members.contains(record.id ?? record.primary) }) {
+                        NavigationLink {
+                            RouteComparisonView(route: route, subject: effort, library: library, units: units)
+                        } label: {
+                            Label(routeContext(route, effort: effort),
+                                  systemImage: "point.topleft.down.to.point.bottomright.curvepath")
+                                .font(.footnote).fixedSize(horizontal: false, vertical: true)
+                                .frame(maxWidth: .infinity, minHeight: 44)
+                        }.padding(.horizontal, 12)
+                    }
+    }
+
     private func analysis(_ presentation: DetailAnalysisPresentation, _ detail: PreparedDetail) -> some View {
         ActivityAnalysisView(presentation: presentation, detail: detail, metrics: metrics, units: units,
-                             scrub: manualScrub, selection: $selection, historicalCurve: historicalCurve, historicalCurveError: historicalCurveError, historicalCurveLoading: historicalCurveLoading, historyWindow: $historyWindow)
+                             scrub: manualScrub, selection: $selection, historicalCurve: historicalCurve, historicalCurveError: historicalCurveError, routeHeader: AnyView(VStack(alignment: .leading, spacing: 8) {
+                                 Text(record.start, format: .dateTime.month(.abbreviated).day().hour().minute()).font(.caption).foregroundStyle(.secondary)
+                                 SourceAttributionView(sources: record.members.map(\.source))
+                                 routeComparisonLink
+                             }), historicalSources: historicalSources, historicalCurveLoading: historicalCurveLoading, historyWindow: $historyWindow)
     }
 
     @ViewBuilder private func timeline(_ detail: PreparedDetail) -> some View {
@@ -329,7 +344,8 @@ struct ActivityDetailView: View {
                 Button(playing ? "Pause" : "Play", systemImage: playing ? "pause.fill" : "play.fill") {
                     if scrub >= Double(detail.input.stream.count - 1) { scrub = 0 }
                     playing.toggle()
-                }.labelStyle(.iconOnly).frame(minWidth: 44, minHeight: 44)
+                }.labelStyle(.iconOnly).buttonStyle(.borderedProminent).buttonBorderShape(.circle)
+                    .frame(minWidth: 44, minHeight: 44)
                 Picker("Playback speed", selection: $playbackSpeed) {
                     ForEach([0.5, 1.0, 2.0, 4.0], id: \.self) { speed in Text("\(speed, specifier: "%g")×").tag(speed) }
                 }.pickerStyle(.menu)
@@ -340,6 +356,13 @@ struct ActivityDetailView: View {
                     Text("of \(Duration.seconds(Double(max(0, detail.input.stream.count - 1))).formatted(.time(pattern: .hourMinuteSecond)))")
                         .font(.caption2.monospacedDigit()).foregroundStyle(.secondary)
                 }.frame(minWidth: 88, alignment: .trailing)
+                if !showsAnalysis, detail.line.value != nil {
+                    Button {
+                        options.cameraMode = options.cameraMode == .follow ? .overview : .follow
+                    } label: { Image(systemName: options.cameraMode == .follow ? "location.fill" : "location") }
+                        .tint(.primary).frame(minWidth: 44, minHeight: 44)
+                        .accessibilityLabel(options.cameraMode == .follow ? "Show whole route" : "Follow current position")
+                }
                 if !showsAnalysis {
                     Button { showsAnalysis = true } label: {
                         if dynamicTypeSize.isAccessibilitySize { Image(systemName: "chart.xyaxis.line") }

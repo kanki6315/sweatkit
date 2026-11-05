@@ -205,15 +205,24 @@ struct ActivityFeedView: View {
     }
     @ViewBuilder private func weekHeader(_ week: Date) -> some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(weekTitle(week)).font(.title3.bold()).foregroundStyle(Color.primary)
-            if let summary = model.weekSummaries[week] {
-                Text("\(summary.count) \(summary.count == 1 ? "activity" : "activities") · \(weekDistance(summary)) · \(summary.missingMovingTime == summary.count ? "No moving time" : Duration.seconds(summary.movingTime).formatted(.time(pattern: .hourMinute))) · \(summary.missingAscent == summary.count ? "No ascent" : String(format: "%.0f %@ ascent", summary.ascent * (model.units == .metric ? 1 : 3.28084), model.units == .metric ? "m" : "ft"))")
-                    .font(.caption).monospacedDigit()
-                if summary.missingDistance > 0 || summary.missingMovingTime > 0 || summary.missingAscent > 0 {
-                    Text("Totals include recorded values only; some figures are missing.").font(.caption)
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text(weekTitle(week)).font(.headline).foregroundStyle(Color.primary)
+                    Spacer(minLength: 8)
+                    if let summary = model.weekSummaries[week] { Text(weekTotals(summary)).font(.caption2).monospacedDigit() }
+                }
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(weekTitle(week)).font(.headline).foregroundStyle(Color.primary)
+                    if let summary = model.weekSummaries[week] { Text(weekTotals(summary)).font(.caption).monospacedDigit() }
                 }
             }
+            if let summary = model.weekSummaries[week], summary.missingDistance > 0 || summary.missingMovingTime > 0 || summary.missingAscent > 0 {
+                Text("Totals include recorded values only; some figures are missing.").font(.caption)
+            }
         }.textCase(nil)
+    }
+    private func weekTotals(_ summary: FeedWeekSummary) -> String {
+        "\(weekDistance(summary)) · \(summary.missingMovingTime == summary.count ? "No moving time" : Duration.seconds(summary.movingTime).formatted(.time(pattern: .hourMinute))) · \(summary.missingAscent == summary.count ? "No ascent" : String(format: "%.0f %@", summary.ascent * (model.units == .metric ? 1 : 3.28084), model.units == .metric ? "m" : "ft"))"
     }
     private func weekTitle(_ week: Date) -> String {
         let calendar = Calendar.current

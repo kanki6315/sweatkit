@@ -24,6 +24,9 @@ final class IntegratedScreens: XCTestCase {
         let app = XCUIApplication(); app.launchArguments = dark ? ["dark"] : []; app.launch()
         let suffix = dark ? "dark" : "light"
         XCTAssertTrue(app.tabBars.buttons["Activities"].waitForExistence(timeout: 120))
+        // Wait for asynchronous thumbnail preparation before recording visual evidence.
+        _ = app.images.firstMatch.waitForExistence(timeout: 5)
+        Thread.sleep(forTimeInterval: 2)
         capture("01-feed-" + suffix)
         app.tabBars.buttons["Routes"].tap()
         let route = app.buttons["route-row"].firstMatch
@@ -44,7 +47,13 @@ final class IntegratedScreens: XCTestCase {
         XCTAssertTrue(first.waitForExistence(timeout: 20)); first.tap()
         XCTAssertTrue(app.buttons["Analysis"].waitForExistence(timeout: 60)); capture("02-detail-" + suffix)
         app.buttons["Analysis"].tap(); XCTAssertTrue(app.buttons["Done"].waitForExistence(timeout: 10)); capture("03-analysis-" + suffix)
-        app.swipeUp(); capture("analysis-content-" + suffix)
+        let splits = app.staticTexts["Kilometre splits"].firstMatch
+        for _ in 0..<6 { if splits.isHittable { break }; app.swipeUp() }
+        XCTAssertTrue(splits.exists)
+        capture("analysis-content-" + suffix)
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.70)).press(forDuration: 0.05,
+            thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.45)))
+        capture("splits-table-" + suffix)
         app.buttons["Done"].tap(); app.buttons["Back"].tap()
         XCTAssertTrue(app.tabBars.buttons["Activities"].waitForExistence(timeout: 10))
         let indoor = app.buttons["indoor-activity-row"].firstMatch
@@ -54,17 +63,29 @@ final class IntegratedScreens: XCTestCase {
         app.buttons["Analysis"].tap()
         let history = app.buttons.containing(NSPredicate(format: "label BEGINSWITH 'Historical power window'")).firstMatch
         for _ in 0..<8 { if history.isHittable { break }; app.swipeUp() }
-        XCTAssertTrue(history.exists); capture("historical-curve-" + suffix)
+        XCTAssertTrue(history.exists)
+        XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label BEGINSWITH 'Historical sources:'")).firstMatch.waitForExistence(timeout: 30))
+        capture("historical-curve-" + suffix)
         history.tap(); app.buttons["All time"].firstMatch.tap()
         capture("historical-all-time-" + suffix)
         app.buttons["Done"].tap(); app.buttons["Back"].tap()
         app.buttons["Settings"].tap(); XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: 10)); capture("09-settings-" + suffix)
         let review = app.buttons["Review"].firstMatch
         for _ in 0..<3 { if review.isHittable { break }; app.swipeUp() }
+        XCTAssertTrue(review.waitForExistence(timeout: 30))
         if review.exists {
             review.tap(); XCTAssertTrue(app.navigationBars["Review threshold"].waitForExistence(timeout: 10))
             capture("threshold-review-" + suffix)
-            app.buttons["Cancel"].tap()
+            XCTAssertTrue(app.buttons["Apply threshold"].isEnabled)
+            app.buttons["Apply threshold"].tap()
+            XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: 30))
+            XCTAssertTrue(app.navigationBars["Review threshold"].waitForNonExistence(timeout: 30))
+            XCTAssertFalse(app.buttons["Review"].exists)
+            capture("threshold-applied-" + suffix)
+            app.buttons["Done"].tap(); app.buttons["Settings"].tap()
+            XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: 10))
+            XCTAssertTrue(app.staticTexts["155 W"].waitForExistence(timeout: 30))
+            XCTAssertFalse(app.buttons["Review"].exists)
         }
         app.swipeUp(); app.buttons.containing(NSPredicate(format: "label BEGINSWITH 'iCloud'")).firstMatch.tap()
         capture("cloud-" + suffix)

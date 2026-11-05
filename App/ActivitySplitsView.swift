@@ -10,7 +10,7 @@ struct ActivitySplitsView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Kilometre splits").font(.title2.bold())
+            Text("Kilometre splits").font(.headline)
             Text("Pace uses timer time, excluding recorded pauses.")
                 .font(.caption).foregroundStyle(.secondary)
             if let values = splits.value {
@@ -36,7 +36,8 @@ struct ActivitySplitsView: View {
                 Text(splits.reason == .pausePositionsUnknown ? "Splits need reliable pause timing." : "No distance samples for splits.")
                     .font(.subheadline).foregroundStyle(.secondary)
             }
-        }.monospacedDigit()
+        }.monospacedDigit().padding(14)
+            .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 18))
     }
 
     @ViewBuilder private func values(_ split: Split) -> some View {

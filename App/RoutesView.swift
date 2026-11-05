@@ -84,6 +84,7 @@ struct RoutesView: View {
                                 Text(route.name).font(.headline)
                                 Text(routeMetadata(route, units: model.units)).font(.caption).foregroundStyle(Color.secondary)
                                 Text("\(route.efforts.count) efforts · best \(routeTime(route.best))").font(.caption).monospacedDigit()
+                                SourceAttributionView(sources: route.efforts.map { $0.activity.primary.source })
                                 RouteDotChart(route: route, metric: .time, compact: true).frame(height: 20)
                             }
                         }.padding(.vertical, 4)

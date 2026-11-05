@@ -17,12 +17,14 @@ struct ActivityAnalysisView: View {
     var historicalCurve: [PowerCurvePoint] = []
     var historicalCurveError: String?
     var historicalCurveLoading = false
+    var routeHeader: AnyView?
+    var historicalSources: [SourceKind] = []
     @Binding var historyWindow: Int
 
-    init(presentation: DetailAnalysisPresentation, detail: PreparedDetail, metrics: ActivityMetrics?, units: UnitSystem, scrub: Binding<Double>, selection: Binding<ClosedRange<Int>?>, chartsOnly: Bool = false, historicalCurve: [PowerCurvePoint] = [], historicalCurveError: String? = nil, historicalCurveLoading: Bool = false, historyWindow: Binding<Int> = .constant(90)) {
+    init(presentation: DetailAnalysisPresentation, detail: PreparedDetail, metrics: ActivityMetrics?, units: UnitSystem, scrub: Binding<Double>, selection: Binding<ClosedRange<Int>?>, chartsOnly: Bool = false, historicalCurve: [PowerCurvePoint] = [], historicalCurveError: String? = nil, routeHeader: AnyView? = nil, historicalSources: [SourceKind] = [], historicalCurveLoading: Bool = false, historyWindow: Binding<Int> = .constant(90)) {
         self.presentation = presentation; self.detail = detail; self.metrics = metrics; self.units = units
         self._scrub = scrub; self._selection = selection; self.chartsOnly = chartsOnly
-        self.historicalCurve = historicalCurve; self.historicalCurveError = historicalCurveError; self.historicalCurveLoading = historicalCurveLoading; self._historyWindow = historyWindow
+        self.historicalSources = historicalSources; self.routeHeader = routeHeader; self.historicalCurve = historicalCurve; self.historicalCurveError = historicalCurveError; self.historicalCurveLoading = historicalCurveLoading; self._historyWindow = historyWindow
     }
     @Environment(\.dynamicTypeSize) private var typeSize
     @State private var fullPaceRange = false
@@ -30,7 +32,8 @@ struct ActivityAnalysisView: View {
 
     var body: some View {
         ScrollView {
-            LazyVStack(alignment: .leading, spacing: 20) {
+            LazyVStack(alignment: .leading, spacing: chartsOnly ? 12 : 20) {
+                if !chartsOnly, let routeHeader { routeHeader }
                 if !chartsOnly, let metrics { summary(metrics) }
                 if presentation.charts.isEmpty {
                     ContentUnavailableView("No chart samples", systemImage: "chart.xyaxis.line",
@@ -61,6 +64,9 @@ struct ActivityAnalysisView: View {
                         }
                         Text(historicalCurveLoading ? "Loading historical comparison…" : historicalCurve.isEmpty ? (historicalCurveError ?? "No earlier power curve in this window") : "This activity — · Historical best – –")
                             .font(.caption).foregroundStyle(.secondary)
+                        if !historicalSources.isEmpty {
+                            Text("Historical sources: " + SourceAttributionView.names(historicalSources)).font(.caption2).foregroundStyle(.secondary)
+                        }
                         Chart {
                             ForEach(historicalCurve.filter { $0.power.value != nil }, id: \.duration) { point in
                                 LineMark(x: .value("Duration, seconds", point.duration), y: .value("Power, W", point.power.value!), series: .value("Curve", "Historical best"))
@@ -112,7 +118,7 @@ struct ActivityAnalysisView: View {
                             }.tint(.primary)
                             Divider()
                         }
-                    }
+                    }.padding(14).background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 18))
                 }
                 if !chartsOnly, let metrics, detail.input.sport == .walking || detail.input.sport == .running {
                     VStack(alignment: .leading, spacing: 12) {
@@ -125,7 +131,7 @@ struct ActivityAnalysisView: View {
                         }
                     }
                 }
-                ForEach(presentation.charts) { chart in
+                ForEach(displayedCharts) { chart in
                     VStack(alignment: .leading, spacing: 8) {
                         HStack(alignment: .firstTextBaseline) {
                             Text(label(chart.kind)).font(.headline)
@@ -161,11 +167,11 @@ struct ActivityAnalysisView: View {
                             RuleMark(x: .value("Cursor", scrub / 60)).foregroundStyle(Color.secondary)
                         }
                         .chartXScale(domain: 0...max(1, Double(detail.input.stream.count - 1) / 60))
-                        .chartXAxisLabel("Elapsed minutes")
+                        .chartXAxisLabel(chartsOnly ? "" : "Elapsed minutes")
                         .chartXSelection(value: Binding<Double?>(get: { scrub / 60 }, set: {
                             if let minutes = $0 { scrub = max(0, min(Double(detail.input.stream.count - 1), minutes * 60)) }
                         }))
-                        .frame(height: chartsOnly ? 140 : 180)
+                        .frame(height: chartsOnly ? 100 : 180)
                         .accessibilityLabel(label(chart.kind))
                         .accessibilityHint("Chart of recorded values over elapsed time. Gaps mean no data.")
                     }
@@ -177,6 +183,12 @@ struct ActivityAnalysisView: View {
         }
         .monospacedDigit()
         .background(Color(uiColor: chartsOnly ? .systemBackground : .systemGroupedBackground))
+    }
+
+    private var displayedCharts: [DetailChartSeries] {
+        guard chartsOnly else { return presentation.charts }
+        let order: [DetailChartSeries.Kind] = [.power, .heartRate, .cadence, .speed, .elevation, .runningStrideLength, .runningGroundContactTime, .runningVerticalOscillation]
+        return presentation.charts.sorted { (order.firstIndex(of: $0.kind) ?? 99) < (order.firstIndex(of: $1.kind) ?? 99) }
     }
 
     private func powerColor(at second: Int) -> Color {
@@ -232,7 +244,7 @@ struct ActivityAnalysisView: View {
             if metrics.power.averageShowsCoverage, let coverage = metrics.power.coverage.value {
                 Text("Power coverage: \(coverage * 100, specifier: "%.0f")% of timer time.").font(.footnote).foregroundStyle(.secondary)
             }
-        }.padding(16).background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 18))
+        }.padding(16).background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 18))
     }
     private func summaryValue(_ label: String, text: String, reason: UnavailableReason?) -> some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -291,7 +303,7 @@ struct ActivityAnalysisView: View {
             } else {
                 Text(unavailable(metric.reason)).font(.subheadline).foregroundStyle(.secondary)
             }
-        }
+        }.padding(14).background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 18))
     }
 
     private func unavailable(_ reason: UnavailableReason?) -> String {

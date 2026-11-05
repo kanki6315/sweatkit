@@ -22,8 +22,6 @@ struct SettingsView: View {
     @State private var thresholdEstimate: Double?
     @State private var estimateError: String?
     @State private var showsThresholdReview = false
-    @State private var suggestedWatts = 0.0
-    @State private var thresholdDate = Date()
 
     var body: some View {
         NavigationStack {
@@ -40,7 +38,7 @@ struct SettingsView: View {
                     }.disabled(model.library == nil || model.isImporting)
                 }
                 Section("Athlete profile") {
-                    if let estimate = thresholdEstimate, estimate > (profile.thresholdPower(on: .now) ?? 0) {
+                    if let estimate = thresholdEstimate, estimate.rounded() > (profile.thresholdPower(on: .now) ?? 0) {
                         thresholdSuggestion(estimate)
                             .listRowBackground(Color.accentColor.opacity(0.12))
                     }
@@ -97,7 +95,11 @@ struct SettingsView: View {
                 } catch { self.error = error.localizedDescription }
             }
         }
-        .sheet(isPresented: $showsThresholdReview) { thresholdReview }
+        .sheet(isPresented: $showsThresholdReview) {
+            ThresholdSuggestionReview(profile: profile, estimate: thresholdEstimate ?? 0, saving: $saving, error: $error) { watts, date in
+                await applyThresholdSuggestion(watts, effectiveFrom: date)
+            }
+        }
         .tint((AppTheme(rawValue: accent) ?? .cyan).color)
         .fileImporter(isPresented: $showsImporter, allowedContentTypes: [.data], allowsMultipleSelection: true) { result in
             switch result {
@@ -234,42 +236,9 @@ struct SettingsView: View {
             Text("Your best 20 minutes in the last 90 days suggests a threshold of **\(Int(estimate.rounded())) W**.")
                 .fixedSize(horizontal: false, vertical: true)
             Button("Review") {
-                suggestedWatts = estimate.rounded()
-                thresholdDate = Date()
                 showsThresholdReview = true
             }.buttonStyle(.borderedProminent)
         }.padding(.vertical, 8)
-    }
-
-    private var thresholdReview: some View {
-        NavigationStack {
-            Form {
-                Section {
-                    LabeledContent("Current threshold", value: profile.thresholdPower(on: thresholdDate).map { "\(Int($0)) W" } ?? "Not set")
-                    LabeledContent("Suggested threshold") {
-                        TextField("Watts", value: $suggestedWatts, format: .number)
-                            .keyboardType(.decimalPad).multilineTextAlignment(.trailing)
-                            .accessibilityLabel("Suggested threshold in watts")
-                    }
-                    DatePicker("Effective from", selection: $thresholdDate, in: ...Date(), displayedComponents: .date)
-                    if profile.thresholdPowerHistory.contains(where: { Calendar.current.isDate($0.effectiveFrom, inSameDayAs: thresholdDate) }) {
-                        Text("This replaces the threshold already set for this date.").font(.footnote).foregroundStyle(.secondary)
-                    }
-                } footer: {
-                    Text("The estimate is 95% of your best valid 20-minute power in the last 90 days. Review it against your own knowledge before applying. Activities from the effective date will be recalculated; earlier history is preserved.")
-                }
-                if let error { Section { Text(error).foregroundStyle(.red) } }
-                Section {
-                    Button(saving ? "Applying and recalculating…" : "Apply threshold") {
-                        Task { await applyThresholdSuggestion() }
-                    }.disabled(saving || !suggestedWatts.isFinite || suggestedWatts <= 0)
-                }
-            }
-            .disabled(saving)
-            .navigationTitle("Review threshold")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { showsThresholdReview = false }.disabled(saving) } }
-        }.interactiveDismissDisabled(saving)
     }
 
     private func loadThresholdEstimate() async {
@@ -283,12 +252,12 @@ struct SettingsView: View {
         } catch { estimateError = "Threshold estimate could not load. Your saved profile is unchanged." }
     }
 
-    private func applyThresholdSuggestion() async {
-        guard suggestedWatts.isFinite, suggestedWatts > 0 else { return }
+    private func applyThresholdSuggestion(_ watts: Double, effectiveFrom date: Date) async {
+        guard watts.isFinite, watts > 0 else { return }
         let previous = profile
-        let day = Calendar.current.startOfDay(for: thresholdDate)
+        let day = Calendar.current.startOfDay(for: date)
         profile.thresholdPowerHistory.removeAll { Calendar.current.isDate($0.effectiveFrom, inSameDayAs: day) }
-        profile.thresholdPowerHistory.append(.init(effectiveFrom: day, watts: suggestedWatts))
+        profile.thresholdPowerHistory.append(.init(effectiveFrom: day, watts: watts))
         if await save() { showsThresholdReview = false }
         else { profile = previous }
     }
