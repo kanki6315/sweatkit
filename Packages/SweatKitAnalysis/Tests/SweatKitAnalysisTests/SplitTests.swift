@@ -93,6 +93,21 @@ import Testing
         expectClose(splits[0].averageHeartRate, 150)
     }
 
+    @Test func stoppingWithoutPausingStaysInSplitTimerPace() throws {
+        // 10 stationary seconds with the timer running are not an auto-pause.
+        // Summary moving time excludes them; the kilometre split includes them.
+        let stream = makeStream(count: 260,
+            speed: run(4, 250) + run(0, 10),
+            distance: ramp(250, perSecond: 4) + run(996, 10))
+        let metrics = analyse(stream, sport: .running)
+        #expect(metrics.time.elapsed == .available(260))
+        #expect(metrics.time.timer == .available(260))
+        #expect(metrics.time.moving == .available(250))
+        let splits = try #require(metrics.splits.value)
+        #expect(splits.map(\.duration) == [260])
+        expectClose(splits[0].pace, 260 / 0.996)
+    }
+
     @Test func aSecondWithMissingDistanceTakesTheLastDistanceBeforeIt() throws {
         // The steady run with distance missing for seconds 240...259.
         // Second 239 holds 956 m, so the 20 missing seconds stay in split 0.

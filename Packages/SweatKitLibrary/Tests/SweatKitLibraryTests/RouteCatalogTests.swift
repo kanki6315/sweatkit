@@ -28,9 +28,29 @@ import SweatKitTestSupport
         #expect(route.efforts.count == 2)
         #expect(route.rank(of: a.row.id!) == 1)
         #expect(route.rank(of: b.row.id!) == 1)
+        #expect(route.occurrence(of: a.row.id!) == 1)
+        #expect(route.occurrence(of: b.row.id!) == 2)
+        #expect(route.secondsBehindBest(of: b.row.id!) == 0)
         #expect(catalog.membership(of: c.row.id!) == nil)
         #expect(try #require(route.best) < 100)
     }
+    @Test func routeContextSeparatesChronologyFromSpeedAndKeepsTiesStable() async throws {
+        let first = input("a")
+        var fastTrack = input("b").track
+        fastTrack.points = fastTrack.points.map {
+            TrackPoint(coordinate: $0.coordinate, elapsedTime: $0.elapsedTime * 0.8, movingTime: $0.movingTime * 0.8)
+        }
+        var sameDate = input("b").row
+        sameDate.start = first.row.start
+        let faster = RouteInput(row: sameDate, track: fastTrack, metrics: nil)
+        let route = try #require(await ActivityLibrary.assembleRoutes([faster, first], seeds: [], decisions: []).routes.first)
+        #expect(route.occurrence(of: first.row.id!) == 1)
+        #expect(route.occurrence(of: faster.row.id!) == 2)
+        #expect(route.rank(of: first.row.id!) == 2)
+        #expect(route.rank(of: faster.row.id!) == 1)
+        #expect(abs(try #require(route.secondsBehindBest(of: first.row.id!)) - 19.5) < 0.01)
+    }
+
     @Test func parallelRoadNeedsExplicitDecisionAndRemovalPersists() async throws {
         let a = input("a"), b = input("b", offset: 14)
         let review = await ActivityLibrary.assembleRoutes([a,b], seeds: [], decisions: [])
@@ -49,6 +69,8 @@ import SweatKitTestSupport
         let route = try #require(await ActivityLibrary.assembleRoutes([a,b], seeds: [], decisions: []).routes.first)
         #expect(route.ranked.count == 1)
         #expect(route.rank(of: b.row.id!) == nil)
+        #expect(route.occurrence(of: b.row.id!) == 2)
+        #expect(route.secondsBehindBest(of: b.row.id!) == nil)
         let comparison = try #require(RouteComparison.compare(route.efforts[0].alignment, against: route.efforts[1].alignment).value)
         #expect(comparison.clock == .elapsed)
         #expect(!comparison.movingTimeIsAvailable)

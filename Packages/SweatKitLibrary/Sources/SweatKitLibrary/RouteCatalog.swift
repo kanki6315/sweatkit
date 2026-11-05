@@ -31,6 +31,22 @@ public struct LibraryRoute: Sendable, Identifiable {
         guard !times.isEmpty else { return nil }
         return (times[(times.count - 1) / 2] + times[times.count / 2]) / 2
     }
+    /// Chronological occurrence, independent of speed ranking. Identity breaks
+    /// equal start-time ties deterministically, including recovered libraries.
+    public func occurrence(of id: SourceIdentity) -> Int? {
+        let chronological = efforts.sorted {
+            $0.activity.start == $1.activity.start ? $0.id < $1.id : $0.activity.start < $1.activity.start
+        }
+        return chronological.firstIndex { $0.activity.members.contains(id) }.map { $0 + 1 }
+    }
+
+    /// Comparable aligned moving time only; unreliable pauses never receive a gap.
+    public func secondsBehindBest(of id: SourceIdentity) -> Double? {
+        guard let effort = efforts.first(where: { $0.activity.members.contains(id) }),
+              let time = effort.movingTime, let best else { return nil }
+        return max(0, time - best)
+    }
+
     public func rank(of id: SourceIdentity) -> Int? {
         guard let time = efforts.first(where: { $0.activity.members.contains(id) })?.movingTime else { return nil }
         return 1 + ranked.filter { $0.movingTime! < time }.count
