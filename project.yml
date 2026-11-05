@@ -50,6 +50,8 @@ targets:
       properties:
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        # System HTTPS/Keychain only; SHA-256 is used for content integrity.
+        ITSAppUsesNonExemptEncryption: false
         BGTaskSchedulerPermittedIdentifiers:
           - com.arjunakankipati.sweatkit.refresh
         UIBackgroundModes:
