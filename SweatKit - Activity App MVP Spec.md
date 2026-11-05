@@ -110,6 +110,7 @@ Garmin offers no snapshot of its listing. An old ride uploaded during the backfi
 **HealthKit sync**
 
 - Read-only access to workouts, workout routes, heart rate, cycling power, cycling cadence, cycling speed, running power, running speed, walking/running distance, cycling distance, step count, running stride length, running ground-contact time and running vertical oscillation. Read individual entries from condensed quantity series. Distance increments accumulate at their recorded interval boundaries; the normal stream gap rules apply, and workout totals are never distributed over the route. On-foot cadence can be derived as steps per minute from short recorded step intervals; long aggregates remain unavailable at the cursor.
+- Shared distance interval boundaries are represented once before per-second averaging. Preserve Health lap intervals (legacy zero-duration lap markers end the lap begun at the previous marker or workout start) and source segment intervals separately; explicit gaps remain gaps, and segments do not redefine kilometre splits. Adapter upgrades queue existing workouts for fresh snapshots without resetting read authorization.
 - Anchored queries track additions, changes and deletions, and the anchor is persisted.
 - A route can arrive or change after its workout is saved. A workout is snapshotted again whenever its route or samples change.
 

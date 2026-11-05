@@ -26,7 +26,11 @@ public enum HealthQuantityConversion {
         var total = 0.0
         var output: [NativeSample] = []
         for interval in ordered {
-            output.append(NativeSample(timestamp: interval.start, distance: total))
+            // Adjacent intervals share one boundary. Emitting it twice would
+            // overweight it when the normaliser averages subsecond samples.
+            if output.last?.timestamp != interval.start {
+                output.append(NativeSample(timestamp: interval.start, distance: total))
+            }
             total += interval.value
             output.append(NativeSample(timestamp: interval.end, distance: total))
         }

@@ -60,6 +60,34 @@ import SweatKitIngest
     }
 
 
+    @Test func sharedSubsecondBoundariesHaveOneVoteInGridAverage() throws {
+        let points = HealthQuantityConversion.distance([interval(0, 0.25, 1), interval(0.25, 1, 3)])
+        #expect(points.count == 3)
+        let activity = RecordedActivity(sport: .running,
+            stated: .init(start: start, end: start.addingTimeInterval(2)),
+            stream: NativeStream(samples: points))
+        let stream = try #require(StreamNormaliser.analysisStream(from: activity))
+        // Unique observations in second 0 are 0 m and 1 m, hence 0.5 m.
+        // The shared 1 m boundary must not be counted twice (giving 2/3 m).
+        #expect(stream.distance[0] == 0.5)
+        #expect(stream.distance[1] == 4)
+    }
+
+    @Test func sparseHeartRateFillsOnlyFiveMissingSeconds() throws {
+        let points = [0.0, 6, 13].map {
+            NativeSample(timestamp: start.addingTimeInterval($0), heartRate: 120 + $0)
+        }
+        let activity = RecordedActivity(sport: .running,
+            stated: .init(start: start, end: start.addingTimeInterval(15), timerTime: 15),
+            stream: NativeStream(samples: points))
+        let stream = try #require(StreamNormaliser.analysisStream(from: activity))
+        #expect(stream.heartRate[3] == 123)
+        #expect(stream.heartRate.quality[3] == .interpolated)
+        #expect((7..<13).allSatisfy { stream.heartRate[$0] == nil })
+        #expect(stream.heartRate[14] == nil)
+        #expect(stream.pauses == .known(paused: []))
+    }
+
     @Test func cadenceUsesIntervalDurationAndRejectsLongAggregates() {
         let points = HealthQuantityConversion.cadence([interval(0, 2, 4), interval(5, 65, 100)])
         #expect(points.count == 2)

@@ -106,6 +106,8 @@ final class HealthConnection {
         status = "Reading Apple Health workouts and changes…"
         do {
             var state = try readState()
+            state.refreshSnapshots(forAdapterVersion: 1)
+            try save(state)
             for type in Self.observedTypes {
                 var count: Int
                 repeat {
@@ -264,12 +266,20 @@ final class HealthConnection {
             }
         }.sorted { $0.timestamp < $1.timestamp }
         let timezone = (workout.metadata?[HKMetadataKeyTimeZone] as? String).flatMap(TimeZone.init(identifier:))
+        let workoutSpan = DateInterval(start: workout.startDate, end: workout.endDate)
+        let laps = HealthWorkoutIntervals.laps(
+            (workout.workoutEvents ?? []).filter { $0.type == .lap }.map(\.dateInterval),
+            within: workoutSpan)
+        let segments = HealthWorkoutIntervals.segments(
+            (workout.workoutEvents ?? []).filter { $0.type == .segment }.map(\.dateInterval),
+            within: workoutSpan)
         let activity = RecordedActivity(sport: sport,
             isIndoor: (workout.metadata?[HKMetadataKeyIndoorWorkout] as? Bool) ?? false,
             stated: StatedSummary(start: workout.startDate, end: workout.endDate, timerTime: workout.duration,
                 distance: workout.totalDistance?.doubleValue(for: .meter()),
                 utcOffset: timezone?.secondsFromGMT(for: workout.startDate)),
-            timerEvents: events, stream: NativeStream(samples: native))
+            timerEvents: events, laps: laps, segments: segments.isEmpty ? nil : segments,
+            stream: NativeStream(samples: native))
         var links: Set<SourceIdentity> = []
         // Only an explicitly namespaced identifier is treated as a link.
         // A bare external UUID or numeric ID is not assumed to be Garmin's.

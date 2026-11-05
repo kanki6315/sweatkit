@@ -24,7 +24,7 @@ import SweatKitModel
 /// truncation and corruption that decompression lets through.
 enum StreamFileFormat {
     static let magic = Data("SKST".utf8)
-    static let currentVersion: UInt16 = 2
+    static let currentVersion: UInt16 = 3
     static let lzfse: UInt8 = 1
     static let digestLength = 32
 
@@ -221,6 +221,14 @@ enum StreamFileFormat {
             writer.writeByteElements(samples.map { $0[keyPath: channel] == nil ? 0 : 1 })
             writer.writeElements(samples.compactMap { $0[keyPath: channel] })
         }
+        writer.write(activity.segments != nil)
+        if let segments = activity.segments {
+            writer.write(UInt64(segments.count))
+            for segment in segments {
+                writer.write(segment.start)
+                writer.write(segment.end)
+            }
+        }
         return try wrap(writer.data, content: .recordedActivity, producerVersion: decoderVersion)
     }
 
@@ -277,6 +285,14 @@ enum StreamFileFormat {
                     next += 1
                 }
             }
+            var segments: [RecordedLap]?
+            if formatVersion >= 3, try reader.readBool() {
+                let segmentCount = try reader.readCount(elementSize: 2 * MemoryLayout<Double>.size)
+                segments = []
+                for _ in 0..<segmentCount {
+                    segments?.append(RecordedLap(start: try reader.readDate(), end: try reader.readDate()))
+                }
+            }
             guard reader.isAtEnd else { throw MalformedStreamFile() }
 
             let activity = RecordedActivity(
@@ -286,6 +302,7 @@ enum StreamFileFormat {
                 stated: stated,
                 timerEvents: events,
                 laps: laps,
+                segments: segments,
                 stream: NativeStream(samples: samples)
             )
             return (decoderVersion, activity)

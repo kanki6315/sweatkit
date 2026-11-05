@@ -24,8 +24,8 @@ import Testing
         let activity = RecordedActivity(sport: .walking, stream: NativeStream(samples: [NativeSample(timestamp: start, distance: 123)]))
         let encoded = try StreamFileFormat.encode(activity, decoderVersion: 1)
         // Version 1 has seven optional sample columns. Remove the three new
-        // absent-column presence bytes to recreate its original binary layout.
-        let body = try StreamFileFormat.unwrap(encoded, content: .recordedActivity).body.dropLast(3)
+        // absent-column presence bytes and v3 segment flag to recreate the layout.
+        let body = try StreamFileFormat.unwrap(encoded, content: .recordedActivity).body.dropLast(4)
         var legacy = try StreamFileFormat.wrap(Data(body), content: .recordedActivity, producerVersion: 1)
         legacy[4] = 1
         #expect(try StreamFileFormat.decodeRecordedActivity(legacy).activity == activity)
@@ -35,6 +35,19 @@ import Testing
         var oldAnalysis = try StreamFileFormat.wrap(Data(oldBody), content: .analysisStream, producerVersion: 1)
         oldAnalysis[4] = 1
         #expect(try StreamFileFormat.decodeAnalysisStream(oldAnalysis) == stream)
+    }
+
+    @Test func segmentsSurviveBinaryCacheAndVersionTwoRemainsReadable() throws {
+        var activity = RecordedActivity(sport: .running,
+            stream: NativeStream(samples: [NativeSample(timestamp: start, runningStrideLength: 1.1)]))
+        let current = try StreamFileFormat.encode(activity, decoderVersion: 1)
+        let body = try StreamFileFormat.unwrap(current, content: .recordedActivity).body.dropLast(1)
+        var versionTwo = try StreamFileFormat.wrap(Data(body), content: .recordedActivity, producerVersion: 1)
+        versionTwo[4] = 2
+        #expect(try StreamFileFormat.decodeRecordedActivity(versionTwo).activity == activity)
+        activity.segments = [RecordedLap(start: start, end: start.addingTimeInterval(30))]
+        let encoded = try StreamFileFormat.encode(activity, decoderVersion: 1)
+        #expect(try StreamFileFormat.decodeRecordedActivity(encoded).activity == activity)
     }
 
     @Test func legacyJSONDecodesMissingOptionalFields() throws {
