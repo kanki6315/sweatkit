@@ -18,7 +18,7 @@ struct ActivityThumbnail: View {
 
     var body: some View {
         Group {
-            if let preview { Image(uiImage: preview).resizable().scaledToFit()
+            if let preview { Image(uiImage: preview).resizable().scaledToFill()
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .background(Color(uiColor: .secondarySystemBackground)) }
             else if finished {

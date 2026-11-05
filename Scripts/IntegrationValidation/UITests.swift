@@ -1,5 +1,34 @@
 import XCTest
 final class IntegratedScreens: XCTestCase {
+    @MainActor func testBottomSearch() {
+        for mode in ["dark", "light", "large"] {
+            let app = XCUIApplication()
+            app.launchArguments = mode == "dark" ? ["dark"] : mode == "large" ? ["dark", "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityM"] : []
+            app.launch()
+            XCTAssertTrue(app.buttons["indoor-activity-row"].firstMatch.waitForExistence(timeout: 120))
+            let search = app.tabBars.buttons["Search"]
+            XCTAssertTrue(search.exists)
+            XCTAssertGreaterThan(search.frame.midY, app.frame.height * 0.8)
+            XCTAssertFalse(app.navigationBars.buttons["Search"].exists)
+            XCTAssertFalse(app.searchFields.firstMatch.exists)
+            capture("bottom-search-" + mode)
+            search.tap()
+            let field = app.searchFields.firstMatch
+            XCTAssertTrue(field.waitForExistence(timeout: 10))
+            field.tap(); field.typeText("NoSuchActivity123")
+            XCTAssertTrue(app.staticTexts["No matching activities"].waitForExistence(timeout: 20))
+            capture("search-active-" + mode)
+            app.buttons["Clear filters"].tap()
+            XCTAssertTrue(app.buttons["indoor-activity-row"].firstMatch.waitForExistence(timeout: 20))
+            if app.buttons["Close"].exists { app.buttons["Close"].tap() }
+            app.tabBars.buttons["Activities"].tap()
+            XCTAssertTrue(app.buttons["indoor-activity-row"].firstMatch.waitForExistence(timeout: 20))
+            XCTAssertFalse(app.searchFields.firstMatch.exists)
+            XCTAssertTrue(app.buttons["Settings"].isHittable)
+            app.terminate()
+        }
+    }
+
     @MainActor func testLight() { flow(dark: false) }
     @MainActor func testDark() { flow(dark: true) }
     @MainActor func testHistoricalCurveLabels() {

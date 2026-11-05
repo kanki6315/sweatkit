@@ -4,18 +4,26 @@ import SweatKitLibrary
 import SweatKitModel
 import SweatKitStore
 
+/// Shared by the Activities and native Search tabs so filters stay consistent.
+@MainActor @Observable final class ActivityFeedFilters {
+    var search = ""
+    var sport: Sport?
+    var limitsDates = false
+    var from = Calendar.current.date(byAdding: .month, value: -1, to: Date()) ?? Date()
+    var through = Date()
+    var setting: FeedFilter.Setting?
+}
+
 struct ActivityFeedView: View {
     @Bindable var model: LibraryModel
+    @Bindable var filters: ActivityFeedFilters
+    var showSettings: () -> Void
+    @State private var selectedActivity: ActivityRecord?
+    @ScaledMetric(relativeTo: .subheadline) private var statusIconSize = 20.0
     @State private var thumbnailGeneration = 0
     @State private var showsImporter = false
     @State private var showsResults = false
-    @State private var search = ""
-    @State private var sport: Sport?
-    @State private var limitsDates = false
-    @State private var from = Calendar.current.date(byAdding: .month, value: -1, to: Date()) ?? Date()
-    @State private var through = Date()
     @State private var showsDates = false
-    @State private var setting: FeedFilter.Setting?
 
     var body: some View {
         List {
@@ -25,39 +33,11 @@ struct ActivityFeedView: View {
                         Label(filterDescription, systemImage: "line.3.horizontal.decrease.circle.fill")
                             .font(.subheadline)
                         Spacer()
-                        Button("Clear") { sport = nil; setting = nil; limitsDates = false; search = "" }
+                        Button("Clear") { filters.sport = nil; filters.setting = nil; filters.limitsDates = false; filters.search = "" }
                     }
                 }
             }
-            if !model.staleIDs.isEmpty || model.isRecomputing {
-                Section {
-                    Text("\(model.staleIDs.count) activities need recalculation. Displayed results may be out of date.")
-                    if model.isRecomputing { ProgressView("Recalculating activities") }
-                    else { Button("Recalculate activities") { Task { await model.recompute() } } }
-                }
-            }
-            if let health = model.health, health.enabled {
-                Section {
-                    Label(health.status, systemImage: "heart").font(.footnote).foregroundStyle(.secondary)
-                    Button("Review Health access") { Task { await health.connect(); await model.reload() } }
-                        .disabled(health.running)
-                    if health.running { Button("Pause Health refresh") { health.pause() } }
-                }
-            }
-            if model.possibleDuplicateCount > 0, let library = model.library {
-                NavigationLink {
-                    LibraryReviewView(library: library)
-                } label: {
-                    Label("Review \(model.possibleDuplicateCount) possible duplicates", systemImage: "square.on.square")
-                }
-            }
-            if let garmin = model.garmin, garmin.connected {
-                Section {
-                    Label(garmin.status, systemImage: "arrow.triangle.2.circlepath").font(.footnote).foregroundStyle(.secondary)
-                    if let notice = garmin.expiryNotice() { Text(notice).font(.subheadline) }
-                    if garmin.running { Button("Pause sync") { garmin.pause() } }
-                }
-            }
+            libraryStatus
             if model.isImporting {
                 Section {
                     ProgressView("Importing files", value: Double(model.importProgress?.completed ?? 0),
@@ -77,12 +57,15 @@ struct ActivityFeedView: View {
             ForEach(weekStarts, id: \.self) { week in
                 Section {
                     ForEach(activities(in: week), id: \.id) { activity in
-                        NavigationLink {
-                            ActivityDetailView(activity: activity, library: model.library, deleteActivity: model.permanentlyDelete)
+                        Button {
+                            selectedActivity = activity
                         } label: {
                             ActivityFeedRow(activity: activity, units: model.units, library: model.library, revision: model.revisions[activity.primary], removedAtSource: activity.members.contains { model.removedSources.contains($0) }, stale: model.staleIDs.contains(activity.id ?? activity.primary), prominent: activity.id == model.activities.first?.id, records: model.recordBadges[activity.id ?? activity.primary] ?? [], route: model.routeCatalog.membership(of: activity.id ?? activity.primary))
                                 .id(thumbnailGeneration)
-                        }.accessibilityIdentifier(activity.isIndoor || activity.isVirtual ? "indoor-activity-row" : "outdoor-activity-row")
+                        }
+                        .buttonStyle(.plain)
+                        .listRowSeparator(model.activities.first?.id == activity.id ? .hidden : .visible)
+                        .accessibilityIdentifier(activity.isIndoor || activity.isVirtual ? "indoor-activity-row" : "outdoor-activity-row")
                     }
                 } header: { weekHeader(week) }
             }
@@ -97,11 +80,11 @@ struct ActivityFeedView: View {
         .overlay {
             if model.activities.isEmpty && !model.isImporting && model.error == nil && model.staleIDs.isEmpty {
                 if model.isLoading { ProgressView("Opening library") }
-                else if !search.isEmpty || sport != nil || setting != nil || limitsDates {
+                else if !filters.search.isEmpty || filters.sport != nil || filters.setting != nil || filters.limitsDates {
                     ContentUnavailableView {
                         Label("No matching activities", systemImage: "line.3.horizontal.decrease.circle")
                     } description: { Text("Try another title, sport or date range.") } actions: {
-                        Button("Clear filters") { sport = nil; setting = nil; limitsDates = false; search = "" }
+                        Button("Clear filters") { filters.sport = nil; filters.setting = nil; filters.limitsDates = false; filters.search = "" }
                     }
                 } else {
                     ContentUnavailableView {
@@ -115,25 +98,31 @@ struct ActivityFeedView: View {
             }
         }
         .navigationTitle("Activities")
-        .searchable(text: $search, placement: .toolbar, prompt: "Search activity titles")
+        .toolbarTitleDisplayMode(.inlineLarge)
+        .navigationDestination(item: $selectedActivity) { activity in
+            ActivityDetailView(activity: activity, library: model.library, deleteActivity: model.permanentlyDelete)
+        }
         .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
+            ToolbarItemGroup(placement: .topBarTrailing) {
                 Menu {
                     Button("Import FIT files", systemImage: "plus") { showsImporter = true }
                         .disabled(model.isImporting || model.library == nil)
                     Divider()
-                    Button(limitsDates ? "Change date range" : "Filter by date") { showsDates = true }
-                    if limitsDates { Button("Show all dates") { limitsDates = false } }
-                    Picker("Sport", selection: $sport) {
+                    Button(filters.limitsDates ? "Change date range" : "Filter by date") { showsDates = true }
+                    if filters.limitsDates { Button("Show all dates") { filters.limitsDates = false } }
+                    Picker("Sport", selection: $filters.sport) {
                         Text("All sports").tag(nil as Sport?)
                         ForEach(Sport.allCases, id: \.self) { Text($0.rawValue.capitalized).tag(Optional($0)) }
                     }
-                    Picker("Setting", selection: $setting) {
+                    Picker("Setting", selection: $filters.setting) {
                         Text("Indoor and outdoor").tag(nil as FeedFilter.Setting?)
                         Text("Indoor").tag(Optional(FeedFilter.Setting.indoor))
                         Text("Outdoor").tag(Optional(FeedFilter.Setting.outdoor))
                     }
                 } label: { Label(filtersActive ? "Filters active" : "Filter activities", systemImage: filtersActive ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease") }
+                .tint(.primary)
+                Button("Settings", systemImage: "person", action: showSettings)
+                    .tint(.primary)
             }
 
         }
@@ -146,9 +135,9 @@ struct ActivityFeedView: View {
         .sheet(isPresented: $showsDates) {
             NavigationStack {
                 Form {
-                    Toggle("Limit date range", isOn: $limitsDates)
-                    DatePicker("From", selection: $from, in: ...through, displayedComponents: .date)
-                    DatePicker("Through", selection: $through, in: from..., displayedComponents: .date)
+                    Toggle("Limit date range", isOn: $filters.limitsDates)
+                    DatePicker("From", selection: $filters.from, in: ...filters.through, displayedComponents: .date)
+                    DatePicker("Through", selection: $filters.through, in: filters.from..., displayedComponents: .date)
                 }
                 .navigationTitle("Activity dates")
                 .toolbar { Button("Done") { showsDates = false } }
@@ -186,16 +175,109 @@ struct ActivityFeedView: View {
             await model.reload()
         }
     }
-    private var filtersActive: Bool { sport != nil || setting != nil || limitsDates || !search.isEmpty }
+    // Keep background work together so the activity feed remains the focus.
+    @ViewBuilder private var libraryStatus: some View {
+        Section {
+            if !model.staleIDs.isEmpty || model.isRecomputing {
+                HStack(alignment: .top, spacing: 12) {
+                    statusIcon("arrow.clockwise", busy: model.isRecomputing)
+                    VStack(alignment: .leading, spacing: 4) {
+                        if model.isRecomputing {
+                            Text("Recalculating activities").font(.subheadline.weight(.medium))
+                        } else {
+                            Button("Recalculate activities") { Task { await model.recompute() } }
+                                .font(.subheadline.weight(.medium))
+                                .buttonStyle(.borderless)
+                                .frame(minHeight: 44, alignment: .topLeading)
+                        }
+                        Text("\(model.staleIDs.count) activities need recalculation. Displayed results may be out of date.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .padding(.vertical, 4)
+                .listRowSeparator(.hidden)
+            }
+            if let health = model.health, health.enabled {
+                DisclosureGroup {
+                    Button("Review Health access") { Task { await health.connect(); await model.reload() } }
+                        .disabled(health.running)
+                    if health.running { Button("Pause Health refresh") { health.pause() } }
+                } label: {
+                    statusLabel(health.status, icon: "heart", busy: health.running)
+                        .foregroundStyle(.secondary)
+                }
+                .font(.subheadline)
+                .listRowSeparator(.hidden)
+            }
+            if let garmin = model.garmin, garmin.connected {
+                if garmin.running {
+                    DisclosureGroup {
+                        Button("Pause sync") { garmin.pause() }
+                    } label: {
+                        statusLabel(garmin.status, icon: "arrow.triangle.2.circlepath", busy: true)
+                            .foregroundStyle(.secondary)
+                    }
+                    .font(.subheadline)
+                    .listRowSeparator(.hidden)
+                } else {
+                    statusLabel(garmin.status, icon: "arrow.triangle.2.circlepath", busy: false)
+                        .foregroundStyle(.secondary)
+                        .listRowSeparator(.hidden)
+                }
+                // Keep expiry notices visible alongside sync status.
+                if let notice = garmin.expiryNotice() {
+                    Text(notice).font(.footnote).foregroundStyle(.secondary)
+                }
+            }
+            if model.possibleDuplicateCount > 0, let library = model.library {
+                NavigationLink {
+                    LibraryReviewView(library: library)
+                } label: {
+                    statusLabel("Review \(model.possibleDuplicateCount) possible duplicates",
+                                icon: "square.on.square", busy: false)
+                }
+                .listRowSeparator(.hidden)
+            }
+        }
+    }
+
+    private func statusLabel(_ text: String, icon: String, busy: Bool) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            statusIcon(icon, busy: busy)
+            Text(text)
+                .font(.subheadline)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.vertical, 4)
+    }
+
+    private func statusIcon(_ symbol: String, busy: Bool) -> some View {
+        ZStack {
+            if busy {
+                ProgressView()
+                    .controlSize(.small)
+            } else {
+                Image(systemName: symbol)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .frame(width: statusIconSize, height: statusIconSize)
+        .accessibilityHidden(true)
+    }
+
+    private var filtersActive: Bool { filters.sport != nil || filters.setting != nil || filters.limitsDates || !filters.search.isEmpty }
     private var filterDescription: String {
-        [sport?.rawValue.capitalized, setting.map { $0 == .indoor ? "Indoor" : "Outdoor" },
-         limitsDates ? "Selected dates" : nil, search.isEmpty ? nil : "Title search"].compactMap { $0 }.joined(separator: " · ")
+        [filters.sport?.rawValue.capitalized, filters.setting.map { $0 == .indoor ? "Indoor" : "Outdoor" },
+         filters.limitsDates ? "Selected dates" : nil, filters.search.isEmpty ? nil : "Title search"].compactMap { $0 }.joined(separator: " · ")
     }
     private var feedFilter: FeedFilter {
-        let start = Calendar.current.startOfDay(for: from)
-        let end = Calendar.current.date(byAdding: .day, value: 1, to: Calendar.current.startOfDay(for: through)) ?? through
-        return FeedFilter(sports: sport.map { [$0] }, dates: limitsDates ? start..<max(start.addingTimeInterval(1), end) : nil,
-                          setting: setting, titleContains: search)
+        let start = Calendar.current.startOfDay(for: filters.from)
+        let end = Calendar.current.date(byAdding: .day, value: 1, to: Calendar.current.startOfDay(for: filters.through)) ?? filters.through
+        return FeedFilter(sports: filters.sport.map { [$0] }, dates: filters.limitsDates ? start..<max(start.addingTimeInterval(1), end) : nil,
+                          setting: filters.setting, titleContains: filters.search)
     }
     private var weekStarts: [Date] {
         Set(model.activities.compactMap { Calendar.current.dateInterval(of: .weekOfYear, for: $0.start)?.start }).sorted(by: >)
@@ -207,12 +289,12 @@ struct ActivityFeedView: View {
         VStack(alignment: .leading, spacing: 4) {
             ViewThatFits(in: .horizontal) {
                 HStack(alignment: .firstTextBaseline) {
-                    Text(weekTitle(week)).font(.headline).foregroundStyle(Color.primary)
+                    Text(weekTitle(week)).font(.title3.bold()).foregroundStyle(Color.primary)
                     Spacer(minLength: 8)
-                    if let summary = model.weekSummaries[week] { Text(weekTotals(summary)).font(.caption2).monospacedDigit() }
+                    if let summary = model.weekSummaries[week] { Text(weekTotals(summary)).font(.subheadline).monospacedDigit() }
                 }
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(weekTitle(week)).font(.headline).foregroundStyle(Color.primary)
+                    Text(weekTitle(week)).font(.title3.bold()).foregroundStyle(Color.primary)
                     if let summary = model.weekSummaries[week] { Text(weekTotals(summary)).font(.caption).monospacedDigit() }
                 }
             }
@@ -250,94 +332,130 @@ struct ActivityFeedRow: View {
     var route: LibraryRoute?
     @Environment(\.dynamicTypeSize) private var typeSize
     var body: some View {
-        VStack(alignment: .leading, spacing: prominent ? 8 : 5) {
+        VStack(alignment: .leading, spacing: 12) {
             if prominent, let library {
                 ActivityThumbnail(activity: activity, library: library, revision: revision)
-                    .frame(height: 164)
-                    .clipShape(RoundedRectangle(cornerRadius: 18))
+                    .aspectRatio(2, contentMode: .fit)
+                    .overlay(alignment: .topLeading) {
+                        Text(featureDate)
+                            .font(.subheadline.weight(.semibold))
+                            .padding(.horizontal, 10).padding(.vertical, 6)
+                            .background(Color(uiColor: .secondarySystemBackground).opacity(0.95), in: Capsule())
+                            .padding(12)
+                    }
+                    .clipShape(RoundedRectangle(cornerRadius: 20))
             }
             HStack(alignment: .top, spacing: 12) {
                 if !prominent, !typeSize.isAccessibilitySize, let library {
                     ActivityThumbnail(activity: activity, library: library, revision: revision, compact: true)
-                        .frame(width: 60, height: 64)
-                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                        .frame(width: 68, height: 68)
+                        .clipShape(RoundedRectangle(cornerRadius: 14))
                 }
-                VStack(alignment: .leading, spacing: 4) {
-                    ViewThatFits(in: .horizontal) {
-                        HStack(alignment: .top, spacing: 12) {
-                            Text(activity.title).font(prominent ? .title3.bold() : .headline)
-                                .fixedSize(horizontal: false, vertical: true)
-                            Spacer(minLength: 0)
-                            headline
-                        }
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(activity.title).font(.headline)
-                            headline
-                        }
+                if typeSize.isAccessibilitySize {
+                    VStack(alignment: .leading, spacing: 8) {
+                        activityContent
+                        headline
                     }
-                    ViewThatFits(in: .horizontal) {
-                        HStack(spacing: 5) {
-                            Text("\(activity.isVirtual ? "Virtual ride" : activity.isIndoor ? "Indoor " + activity.sport.rawValue : activity.sport.rawValue.capitalized) · \(activity.start.formatted(.dateTime.weekday(.abbreviated).day().month(.abbreviated)))")
-                            SourceAttributionView(sources: activity.members.map(\.source))
-                        }
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text(activity.start, format: .dateTime.month(.abbreviated).day().hour().minute())
-                            SourceAttributionView(sources: activity.members.map(\.source))
-                        }
-                    }.font(.caption).foregroundStyle(.secondary)
-                    ViewThatFits(in: .horizontal) {
-                        HStack(spacing: 12) { metrics }
-                        VStack(alignment: .leading, spacing: 4) { metrics }
-                    }.font(.subheadline)
+                } else {
+                    HStack(alignment: .top, spacing: 12) {
+                        activityContent.frame(maxWidth: .infinity, alignment: .leading)
+                        headline
+                    }
                 }
             }
-            if !stale, !records.isEmpty {
-                Label(records.count == 1 ? records[0].title + " record" : "\(records.count) personal records", systemImage: "chart.line.uptrend.xyaxis")
-                    .font(.caption2).foregroundStyle(.secondary).padding(.horizontal, 6).padding(.vertical, 3)
-                    .background(Color(uiColor: .secondarySystemFill), in: RoundedRectangle(cornerRadius: 4))
+        }
+        .padding(.vertical, 8)
+        .monospacedDigit()
+        .contentShape(Rectangle())
+    }
+
+    private var activityContent: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(activity.title)
+                .font(prominent ? .title3.bold() : .headline)
+                .fixedSize(horizontal: false, vertical: true)
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 5) {
+                    Text(metadata)
+                    SourceAttributionView(sources: activity.members.map(\.source))
+                }
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(metadata)
+                    SourceAttributionView(sources: activity.members.map(\.source))
+                }
             }
-            if let route {
-                Label(route.rank(of: activity.id ?? activity.primary).map { "\(route.name) · #\($0) of \(route.ranked.count)" } ?? route.name,
-                      systemImage: "point.topleft.down.to.point.bottomright.curvepath")
-                    .font(.caption2).foregroundStyle(.secondary).padding(.horizontal, 6).padding(.vertical, 3)
-                    .background(Color(uiColor: .secondarySystemFill), in: RoundedRectangle(cornerRadius: 4))
+            .font(.subheadline).foregroundStyle(.secondary)
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 12) { metrics }
+                VStack(alignment: .leading, spacing: 4) { metrics }
+            }.font(.subheadline)
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 6) { badges }
+                VStack(alignment: .leading, spacing: 6) { badges }
             }
-            if stale { Label("Results need recalculation", systemImage: "arrow.clockwise").font(.caption) }
+            if stale { Label("Results need recalculation", systemImage: "arrow.clockwise").font(.caption).foregroundStyle(.secondary) }
             if removedAtSource {
                 Label("Removed at source · kept on this device", systemImage: "archivebox")
                     .font(.caption).foregroundStyle(.secondary)
             }
         }
-        .padding(.vertical, 5)
-        .monospacedDigit()
+    }
+
+    private var featureDate: String {
+        let time = activity.start.formatted(date: .omitted, time: .shortened)
+        if Calendar.current.isDateInToday(activity.start) { return "Today, \(time)" }
+        if Calendar.current.isDateInYesterday(activity.start) { return "Yesterday, \(time)" }
+        return activity.start.formatted(.dateTime.month(.abbreviated).day().hour().minute())
+    }
+
+    private var metadata: String {
+        let sport = activity.isVirtual ? "Virtual ride" : activity.isIndoor ? "Indoor " + activity.sport.rawValue : activity.sport.rawValue.capitalized
+        return prominent ? sport : "\(sport) · \(activity.start.formatted(.dateTime.weekday(.abbreviated).day().month(.abbreviated)))"
+    }
+
+    @ViewBuilder private var badges: some View {
+        if !stale, !records.isEmpty {
+            Label(records.count == 1 ? records[0].title + " record" : "\(records.count) personal records", systemImage: "star.fill")
+                .font(.caption).foregroundStyle(.secondary).padding(.horizontal, 8).padding(.vertical, 5)
+                .background(Color(uiColor: .secondarySystemFill), in: RoundedRectangle(cornerRadius: 6))
+        }
+        if let route {
+            Label(route.rank(of: activity.id ?? activity.primary).map { "\(route.name) · #\($0) of \(route.ranked.count)" } ?? route.name,
+                  systemImage: "point.topleft.down.to.point.bottomright.curvepath")
+                .font(.caption).foregroundStyle(.secondary).padding(.horizontal, 8).padding(.vertical, 5)
+                .background(Color(uiColor: .secondarySystemFill), in: RoundedRectangle(cornerRadius: 6))
+        }
     }
     @ViewBuilder private var headline: some View {
         if let headline = activity.headline {
             let isPower = headline.kind == "averagePower" || headline.kind == "weightedPower"
             VStack(alignment: .trailing, spacing: 2) {
-                Text(headline.value.value.map { isPower ? String(format: "%.0f W", $0) : pace($0) } ?? "—")
-                    .font(.title3.weight(.semibold)).fixedSize()
-                Text(headline.kind == "weightedPower" ? "weighted power" : isPower ? "average power" : "pace")
+                Group {
+                    if let value = headline.value.value {
+                        if isPower {
+                            Text(String(format: "%.0f", value)).font(.title2.weight(.semibold))
+                                + Text(" W").font(.subheadline)
+                        } else {
+                            Text(pace(value)).font(.title2.weight(.semibold))
+                                + Text(units == .metric ? "/km" : "/mi").font(.subheadline)
+                        }
+                    } else {
+                        Text("—").font(.title2.weight(.semibold))
+                    }
+                }
+                .fixedSize()
+                Text(headline.kind == "weightedPower" ? "weighted" : isPower ? "average" : "pace")
                     .font(.caption).foregroundStyle(.secondary)
             }
         }
     }
-    private var sourceNames: String {
-        Set(activity.members.map(\.source)).sorted { $0.rawValue < $1.rawValue }.map {
-            switch $0 {
-            case .garmin: "Garmin"
-            case .healthKit: "Apple Health"
-            case .file: "FIT file"
-            }
-        }.joined(separator: " · ")
-    }
     private func pace(_ secondsPerKilometre: Double) -> String {
         let seconds = Int((secondsPerKilometre * (units == .metric ? 1 : 1.609344)).rounded())
-        return String(format: "%d:%02d /%@", seconds / 60, seconds % 60, units == .metric ? "km" : "mi")
+        return String(format: "%d:%02d", seconds / 60, seconds % 60)
     }
     @ViewBuilder private var metrics: some View {
         Text(activity.distance.map { String(format: "%.1f %@", $0 / (units == .metric ? 1000 : 1609.344), units == .metric ? "km" : "mi") } ?? "No distance")
         Text(activity.movingTime.map { Duration.seconds($0).formatted(.time(pattern: .hourMinute)) } ?? "No moving time")
-        Text(activity.ascent.map { String(format: "%.0f %@ ascent", $0 * (units == .metric ? 1 : 3.28084), units == .metric ? "m" : "ft") } ?? "No ascent")
+        Text(activity.ascent.map { String(format: "%.0f %@", $0 * (units == .metric ? 1 : 3.28084), units == .metric ? "m" : "ft") } ?? "No ascent")
     }
 }
