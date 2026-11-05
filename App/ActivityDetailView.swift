@@ -1,4 +1,5 @@
 import SwiftUI
+import OSLog
 import SweatKitIdentity
 import SweatKitAnalysis
 import SweatKitModel
@@ -60,6 +61,8 @@ struct ActivityDetailView: View {
     @State private var collapsesStops = false
     @State private var options = FlyoverOptions()
 
+    private static let performanceLog = Logger(subsystem: "com.arjunakankipati.sweatkit", category: "MapPerformance")
+
     var body: some View {
         Group {
             if summaryOnly {
@@ -96,6 +99,9 @@ struct ActivityDetailView: View {
         .toolbar(prepared == nil ? .visible : .hidden, for: .navigationBar)
         .toolbar(.hidden, for: .tabBar)
         .task { await load() }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.didReceiveMemoryWarningNotification)) { _ in
+            Task { await DetailPreparationCache.shared.removeAll() }
+        }
         .task(id: record.id) {
             guard let library, let id = record.id else { return }
             do {
@@ -131,7 +137,7 @@ struct ActivityDetailView: View {
                 }
                 .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
-            }
+            } else { ProgressView("Preparing analysis") }
         }
         .task(id: "\(showsAnalysis)-\(historyWindow)") {
             guard showsAnalysis, record.sport.family == .cycling, let library else { return }
@@ -210,7 +216,7 @@ struct ActivityDetailView: View {
                     .ignoresSafeArea()
             } else if let presentation {
                 ActivityAnalysisView(presentation: presentation, detail: detail, metrics: metrics, units: units, scrub: manualScrub, selection: $selection, chartsOnly: true)
-            }
+            } else { ProgressView("Preparing analysis") }
         }
         .safeAreaInset(edge: .top) {
             if !showsAnalysis {
@@ -425,6 +431,8 @@ struct ActivityDetailView: View {
 
     private func load() async {
         guard let library, let id = activity.id else { error = "Open the library and try again."; return }
+        let started = ContinuousClock.now
+        Self.performanceLog.info("detail_open started")
         error = nil
         prepared = nil
         presentation = nil
@@ -445,28 +453,46 @@ struct ActivityDetailView: View {
             let native = try await recorded
             let athlete = try await profile
             units = athlete.units
-            metrics = try await storedMetrics
-            alternatives = try await sourceOffers
             summaryOnly = native.stream.samples.isEmpty || !record.sport.hasFullSupport
-            if summaryOnly { return }
+            if summaryOnly {
+                metrics = try await storedMetrics
+                alternatives = try await sourceOffers
+                return
+            }
             let input = try await DetailInput(stream: stream, sport: record.sport,
                 isIndoor: record.isIndoor, isVirtual: record.isVirtual,
                 lapStarts: DetailInput.lapStarts(of: native.laps, streamStart: stream.start),
                 recordedLaps: native.laps,
                 profile: athlete, activityDate: record.start)
-            let result = await Task.detached(priority: .userInitiated) {
-                let detail = DetailPreparation.prepare(input)
-                return (detail, DetailAnalysisPresentation.prepare(detail))
-            }.value
-            guard !Task.isCancelled else { return }
-            prepared = result.0
-            presentation = result.1
-            overlay = result.0.defaultOverlay
-            timelineKind = result.0.timelineKind(for: overlay)
-                ?? (result.0.timelineOverlays[.power] != nil ? .power : nil)
+            Self.performanceLog.info("detail_data_ready elapsed=\(String(describing: started.duration(to: .now)), privacy: .public)")
+            let prepareStarted = ContinuousClock.now
+            let result = try await DetailPreparationCache.shared.prepare(input)
+            try Task.checkCancellation()
+            prepared = result.detail
+            overlay = result.detail.defaultOverlay
+            timelineKind = result.detail.timelineKind(for: overlay)
+                ?? (result.detail.timelineOverlays[.power] != nil ? .power : nil)
             units = input.profile.units
             updateTimelineOverlay()
-            if result.0.timeline?.distance == nil { axis = .time }
+            if result.detail.timeline?.distance == nil { axis = .time }
+            Self.performanceLog.info("detail_map_ready elapsed=\(String(describing: started.duration(to: .now)), privacy: .public) preparation=\(String(describing: prepareStarted.duration(to: .now)), privacy: .public) cache_hit=\(result.cacheHit)")
+
+            // Publish the map before preparing the analysis sheet or awaiting
+            // ancillary data. The detached worker never occupies the UI actor.
+            let analysisStarted = ContinuousClock.now
+            let worker = Task.detached(priority: .utility) {
+                DetailAnalysisPresentation.prepare(result.detail)
+            }
+            let analysis = await withTaskCancellationHandler {
+                await worker.value
+            } onCancel: { worker.cancel() }
+            try Task.checkCancellation()
+            presentation = analysis
+            Self.performanceLog.info("detail_analysis_ready duration=\(String(describing: analysisStarted.duration(to: .now)), privacy: .public)")
+            metrics = try await storedMetrics
+            alternatives = try await sourceOffers
+        } catch is CancellationError {
+            return
         } catch { self.error = error.localizedDescription }
     }
 }
