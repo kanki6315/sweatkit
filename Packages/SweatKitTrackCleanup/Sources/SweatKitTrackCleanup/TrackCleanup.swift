@@ -81,54 +81,71 @@ public enum TrackCleanup {
 
     /// Step 2: collapses each stop into its first point.
     ///
-    /// A point is stopped when the speed in its second is below
-    /// `stoppedBelow`. A second with missing speed is not stopped, as in the
-    /// moving-time rule. With no threshold, nothing is stopped.
+    /// A point is slow when the speed in its second is below `stoppedBelow`.
+    /// A second with missing speed is not slow, as in the moving-time rule.
+    /// With no threshold, nothing is slow. A stop is a run of slow points that
+    /// stays within `radius` metres of the point where it began, its anchor.
     ///
     /// Readings, where the spec is silent:
-    /// - A stop is a run of consecutive points, as they stand after step 1,
-    ///   that are all stopped. Seconds without a position, or dropped in
-    ///   step 1, between two stopped points do not break the run.
-    /// - The single point a stop collapses into is its first: where the
-    ///   recorder came to rest. It is a recorded fix, unmoved, so it keeps a
-    ///   real coordinate and second; the rest of the stop's seconds are in
-    ///   its `coveredSamples`.
+    /// - A run is of consecutive points as they stand after step 1. Seconds
+    ///   without a position, or dropped in step 1, between two slow points do
+    ///   not break it.
+    /// - Distance is measured from the anchor, not from the previous point,
+    ///   so slow drift cannot creep away unnoticed.
+    /// - A slow point further than `radius` from the anchor means the person
+    ///   has moved: that point is kept, the stop ends before it, and it
+    ///   anchors a new stop. Slow walking is so kept at about one radius
+    ///   between points. A point exactly at the radius is within it and
+    ///   collapses.
+    /// - The single point a stop collapses into is its anchor, its first
+    ///   point: where the recorder came to rest. It is a recorded fix,
+    ///   unmoved, so it keeps a real coordinate and second; the rest of the
+    ///   stop's seconds are in its `coveredSamples`.
     /// - A stop of one point is left as it is, and a stop at the very start
-    ///   or end of the track collapses like any other.
-    /// - Pauses play no part: a paused second is stopped only if its speed
-    ///   says so.
+    ///   or end of the track collapses like any other. A slow stretch at the
+    ///   end that ends within the radius of its anchor loses that last
+    ///   stretch, so a track can come out up to one radius short.
+    /// - Pauses play no part: a paused second is slow only if its speed says
+    ///   so.
     public static func collapsingStops(
         _ points: [CleanedPosition],
         speed: Series,
-        stoppedBelow floor: Double?
+        stoppedBelow floor: Double?,
+        radius: Double = CleanupRules.stopRadius
     ) -> [CleanedPosition] {
         guard let floor else { return points }
-        func isStopped(_ point: CleanedPosition) -> Bool {
+        func isSlow(_ point: CleanedPosition) -> Bool {
             guard point.sampleIndex < speed.count, let value = speed[point.sampleIndex] else { return false }
             return value < floor
         }
         var result: [CleanedPosition] = []
         result.reserveCapacity(points.count)
-        var stopStart: CleanedPosition?
+        var anchor: CleanedPosition?
         var stopEnd = 0
         func closeStop() {
-            if let start = stopStart {
+            if let start = anchor {
                 result.append(CleanedPosition(
                     coordinate: start.coordinate,
                     sampleIndex: start.sampleIndex,
                     coveredSamples: start.sampleIndex...stopEnd
                 ))
-                stopStart = nil
+                anchor = nil
             }
         }
         for point in points {
-            if isStopped(point) {
-                if stopStart == nil { stopStart = point }
-                stopEnd = point.coveredSamples.upperBound
-            } else {
+            guard isSlow(point) else {
                 closeStop()
                 result.append(point)
+                continue
             }
+            if let start = anchor,
+               TrackGeodesy.distance(from: start.coordinate, to: point.coordinate) <= radius {
+                stopEnd = point.coveredSamples.upperBound
+                continue
+            }
+            closeStop()
+            anchor = point
+            stopEnd = point.coveredSamples.upperBound
         }
         closeStop()
         return result
