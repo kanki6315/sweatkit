@@ -77,7 +77,20 @@ struct ActivityAnalysisView: View {
                                 .foregroundStyle(Color.primary).lineStyle(StrokeStyle(lineWidth: 2))
                             }
                         }
-                        .chartXScale(type: .log).frame(height: 160)
+                        .chartXScale(type: .log)
+                        .chartXAxis {
+                            AxisMarks(values: [5, 30, 60, 300, 1200, 3600]) { axis in
+                                AxisGridLine()
+                                AxisTick()
+                                AxisValueLabel {
+                                    if let seconds = axis.as(Int.self) {
+                                        Text(seconds < 60 ? "\(seconds)s" : seconds < 3600 ? "\(seconds / 60)m" : "\(seconds / 3600)h")
+                                    }
+                                }
+                            }
+                        }
+                        .chartYAxisLabel("W", position: .trailing)
+                        .frame(height: 160)
                         DisclosureGroup("All best efforts") {
                         ForEach(presentation.powerCurve, id: \.duration) { point in
                             VStack(alignment: .leading, spacing: 4) {
