@@ -50,8 +50,9 @@ enum Pipeline {
     /// `FITDecodeError` for a file that is not a sound FIT activity, and
     /// `LibraryError.noTimeSpan` for one with nothing to put a grid on.
     @concurrent
-    static func decode(_ bytes: Data, versions: PipelineVersions) async throws -> Decoded {
-        let recorded = try FITActivityDecoder.decode(bytes)
+    static func decode(_ bytes: Data, versions: PipelineVersions, allowsSnapshot: Bool = false) async throws -> Decoded {
+        let snapshot = allowsSnapshot ? try HealthSnapshot.decode(bytes) : nil
+        let recorded = try snapshot?.activity ?? FITActivityDecoder.decode(bytes)
         return Decoded(recorded: recorded, stream: try stream(of: recorded, versions: versions))
     }
 
@@ -81,7 +82,9 @@ enum Pipeline {
         profile: AthleteProfile,
         versions: PipelineVersions,
         target: Target,
-        at date: Date
+        at date: Date,
+        summaryOnly: StatedSummary? = nil,
+        sourceDistance: Double? = nil
     ) async throws -> Derived {
         // Thresholds are looked up for the activity's start.
         let activityDate = stream.start
@@ -89,13 +92,13 @@ enum Pipeline {
             sport: facts.sport,
             isIndoor: facts.isIndoor,
             isVirtual: facts.isVirtual,
-            recording: .stream(stream),
+            recording: summaryOnly.map(ActivityInput.Recording.summaryOnly) ?? .stream(stream),
             profile: profile,
             activityDate: activityDate
         )
         let metrics = ActivityAnalysis.metrics(for: input)
 
-        let row = FeedRules.row(
+        var row = FeedRules.row(
             members: target.members,
             primary: target.primary,
             facts: facts,
@@ -104,6 +107,14 @@ enum Pipeline {
             metrics: metrics,
             existing: target.existing
         )
+
+        // The source's total distance remains available for a summary-only
+        // workout, without inventing a per-second distance series.
+        if let summaryOnly {
+            row.distance = summaryOnly.distance
+            row.elapsedTime = metrics.time.elapsed.value ?? row.elapsedTime
+        }
+        if row.distance == nil { row.distance = sourceDistance }
 
         let reading = ProfileReading(date: activityDate, inputs: profileInputs(for: facts.sport))
         let provenance = Provenance(

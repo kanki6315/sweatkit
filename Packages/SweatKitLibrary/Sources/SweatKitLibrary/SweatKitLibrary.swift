@@ -17,5 +17,6 @@
 /// Identity matching, merge/split, title, primary and visibility decisions
 /// are persisted separately from the resolved feed.
 /// Not here yet: reading a zip or a folder, geocoding a locality for the
-/// title, HealthKit snapshots, and permanent deletion.
+/// title and permanent deletion. Health snapshots and sync checkpoints are
+/// persisted locally; the app owns read-only HealthKit queries.
 public enum SweatKitLibrary {}

@@ -15,12 +15,15 @@ Updated 5 November 2026. The goal is the complete daily-use core defined in the 
 - Full regression after identity integration: **1,465 tests across all 14 packages passed** (`Scripts/test-packages.sh`, `/tmp/sweatkit-all-tests.log`). Final simulator build passed.
 - Device checklist prepared in `Documentation/DEVICE-ACCEPTANCE.md`; no device checks are marked passed.
 
+- Health snapshot/checkpoint coverage: **77 library tests passed**, including four new snapshot tests and one checkpoint recovery test. Logs: `/tmp/sweatkit-health-final-tests.log`. Simulator build passed (`/tmp/sweatkit-health-build.log`). No live Health data or permissions were accessed.
+- Health originals, stream caches and checkpoint files are individually excluded from OS backup. **Shared metadata backup isolation remains unresolved:** the common database and identity candidate journal contain Health-derived summaries. Automatic approval review rejected excluding the entire library root because it would remove backup protection for non-Health data. That broad change was not applied. A narrower storage design or explicit user-approved backup policy is still required before claiming local-only Health persistence.
+
 ## Implementation and remaining acceptance
 
 | Requirement | Current evidence / remaining work |
 | --- | --- |
 | Persistent FIT import and feed | App now opens Application Support library, accepts multiple files, retains security-scoped access, reports per-file outcomes, supports cancellation and paged search/sport/setting filters. File-picker journey and relaunch need UI verification. |
-| Complete feed | Still needs cached route thumbnails/indoor sparklines, weekly totals, date range filter, locality, and stale/source-removal indicators. Record and route badges depend on later milestones. |
+| Complete feed | Still needs cached route thumbnails/indoor sparklines, weekly totals, date range filter, locality, and stale-result indicators. Source-removal indicators are implemented. Record and route badges depend on later milestones. |
 | 500-file library | Store has paging tests; a representative 500-file import, relaunch and browsing-performance check is still required. |
 | Corrupt/truncated imports | Existing pipeline tests pass; app error presentation and unchanged-library checks through Files remain unverified. |
 | Athlete profile | Settings edits optional thresholds, weight, units and date-effective power history; saves and recomputes. Existing staleness tests pass. Form and correction journey need UI verification. |
@@ -29,10 +32,10 @@ Updated 5 November 2026. The goal is the complete daily-use core defined in the 
 | Garmin adapter | Atomic JSON checkpoints/summaries and real pipeline integration implemented and tested. Reads corrupted metadata as an explicit error; never resets progress silently. |
 | Garmin app setup/recovery | Keychain storage, key validation, foreground refresh, pause/resume and typed outcome messages implemented. Live key/token/network/rate-limit recovery and account history not yet exercised. Launch/background scheduling, full-reconciliation controls, user-entered key expiry period and the seven-day expiry warning remain. |
 | Garmin reconciliation | Existing planner suite passes. Need end-to-end bridge + planner tests for late uploads, interrupted backfill, changing listings, deletions and restart, plus live-account validation. |
-| HealthKit | Not implemented. Needs permission onboarding, anchored imports, routes/samples/summaries, durable checkpoints, source-deletion handling and permission recovery. |
+| HealthKit | Implemented initial read-only onboarding and anchored workout/route/quantity changes, durable anchors plus pending IDs, routes and sample snapshots, revision/rebuild support, summary-only display, explicit deletion retention and refresh/recovery messages. Snapshot and checkpoint tests pass; live Health queries, permission changes, route/sample update timing, partial permissions and query cancellation remain unverified. |
 | De-duplication | Identity now runs in the import pipeline. Add-only links/decisions/tombstones persist in an atomic journal; affected feed rows and metrics replace in one store save. Merge/split, primary, rename, hide/restore and review screens are implemented. Integration tests cover merge/split, restart, originals retained, and a third recording respecting keep-separate. HealthKit-specific matching and source identifiers, partial-recording integration coverage, alternative-channel notices, permanent deletion and visual verification remain. |
 | Concurrent decisions | Persisted-pipeline test passes for an offline split concurrent with rename/hide, exchanging add-only records in reversed order and confirming both libraries converge to two hidden, correctly named activities. |
-| Device build/checklist | Still required after remaining core implementation. Existing flyover and timeline checklists remain applicable. |
+| Device build/checklist | Unsigned Release build for physical iPhone succeeds, including HealthKit entitlement configuration and read usage text. Device checklist is prepared. Signing/provisioning, installation and actual device checks remain; existing flyover and timeline checklists remain applicable. |
 
 ## Required final journeys
 
@@ -46,4 +49,15 @@ Updated 5 November 2026. The goal is the complete daily-use core defined in the 
 
 ## Next implementation sequence
 
-Implement HealthKit and complete remaining identity/deletion cases, then complete the remaining feed/detail flows and source controls. Add cross-layer acceptance tests before device validation. Keep M4 iCloud, M5-specific rollout, routes UI and trends outside this goal.
+Verify/harden HealthKit and complete remaining identity/deletion cases, then complete the remaining feed/detail flows and source controls. Add cross-layer acceptance tests before device validation. Keep M4 iCloud, M5-specific rollout, routes UI and trends outside this goal.
+
+## HealthKit API references
+
+- Apple authorization guidance: https://developer.apple.com/documentation/healthkit/authorizing-access-to-health-data
+- Apple route queries: https://developer.apple.com/documentation/healthkit/hkworkoutroutequery
+- Apple anchored queries: https://developer.apple.com/documentation/healthkit/hkanchoredobjectquery
+- The installed SDK's `HKHealthStore.h` confirms authorization completion reports that prompting completed, not that reads were granted. Empty query results never infer deletion or denied access.
+
+### Physical-device compile evidence
+
+`xcodebuild -project SweatKit.xcodeproj -scheme SweatKit -configuration Release -destination 'generic/platform=iOS' -derivedDataPath DerivedData/Device CODE_SIGNING_ALLOWED=NO build` passed. Log: `/tmp/sweatkit-device-build.log`. Artifact: `DerivedData/Device/Build/Products/Release-iphoneos/SweatKit.app`. This artifact is unsigned and cannot be installed as-is. It is not evidence of on-phone performance or permission behavior.

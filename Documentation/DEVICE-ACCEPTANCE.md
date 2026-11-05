@@ -1,6 +1,6 @@
 # M1–M3 device acceptance
 
-Status: pending. Use this after the remaining implementation is ready; the current build does not yet support every step. Record build/commit, phone model, OS, date, pass/fail and observations. Simulator results do not certify device performance.
+Status: pending. An unsigned Release build has compiled for physical iPhone; no phone installation or device checks have been performed. Use this after the remaining implementation is ready; the current build does not yet support every step. Record build/commit, phone model, OS, date, pass/fail and observations. Simulator results do not certify device performance.
 
 1. **Local library:** import an outdoor ride, indoor/Zwift ride, walk, corrupt FIT and truncated FIT from Files. Successful imports remain; rejected files explain why and add nothing. Import the successful files again: no duplicate activities. Relaunch and verify the same feed and detail values.
 2. **Scale:** import 500 representative files, browse/filter/search during and after import, cancel a batch and retry. Record elapsed import time, scrolling stalls and memory pressure. Relaunch and confirm count and originals. Identical copies of one file do not count as 500 representative activities.
@@ -13,3 +13,7 @@ Status: pending. Use this after the remaining implementation is ready; the curre
 9. **Permanent deletion:** use only a designated disposable activity, read the confirmation, then verify its originals/snapshots/streams/results are erased and the retained tombstone prevents reimport. This check must wait for the deletion flow to be implemented.
 
 Attach results to `M1-M3-ACCEPTANCE.md`. Unrun, blocked, or inconclusive checks stay open; do not infer a pass from package tests or a successful build.
+
+## Preparing a signed device build
+
+Run `xcodegen generate`, open `SweatKit.xcodeproj`, select the connected iPhone and the SweatKit scheme, and use the configured team in Signing & Capabilities. The profile must support the HealthKit entitlement. The user should handle any Apple-account or device trust prompts. Build and run on the phone only after signing succeeds; record the installed commit and configuration above. A signing failure does not justify disabling the HealthKit capability.

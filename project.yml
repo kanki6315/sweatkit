@@ -49,6 +49,8 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.arjunakankipati.sweatkit
         GENERATE_INFOPLIST_FILE: YES
+        CODE_SIGN_ENTITLEMENTS: App/SweatKit.entitlements
+        INFOPLIST_KEY_NSHealthShareUsageDescription: SweatKit reads your workouts, routes and activity samples to show your activities in one private library.
         INFOPLIST_KEY_CFBundleDisplayName: SweatKit
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
         INFOPLIST_KEY_UISupportedInterfaceOrientations: UIInterfaceOrientationPortrait

@@ -13,6 +13,12 @@ struct ActivityFeedView: View {
 
     var body: some View {
         List {
+            if let health = model.health, health.enabled {
+                Section {
+                    Text(health.status).font(.subheadline)
+                    if health.running { Button("Pause Health refresh") { health.pause() } }
+                }
+            }
             if model.possibleDuplicateCount > 0, let library = model.library {
                 NavigationLink {
                     LibraryReviewView(library: library)
@@ -46,7 +52,7 @@ struct ActivityFeedView: View {
                 NavigationLink {
                     ActivityDetailView(activity: activity, library: model.library)
                 } label: {
-                    ActivityFeedRow(activity: activity, units: model.units)
+                    ActivityFeedRow(activity: activity, units: model.units, removedAtSource: activity.members.contains { model.removedSources.contains($0) })
                 }
             }
             if model.hasMore {
@@ -119,6 +125,7 @@ struct ActivityFeedView: View {
         }
         .refreshable {
             await model.garmin?.sync()
+            await model.health?.sync()
             await model.reload()
         }
         .task { await model.open() }
@@ -133,6 +140,7 @@ struct ActivityFeedView: View {
 struct ActivityFeedRow: View {
     let activity: ActivityRecord
     let units: UnitSystem
+    var removedAtSource = false
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(activity.title).font(.headline)
@@ -146,11 +154,24 @@ struct ActivityFeedRow: View {
                 HStack(spacing: 16) { metrics }
                 VStack(alignment: .leading, spacing: 4) { metrics }
             }
-            Text("\(activity.sport.rawValue.capitalized) · \(activity.primary.source.rawValue.capitalized)")
+            Text("\(activity.sport.rawValue.capitalized) · \(sourceNames)")
                 .font(.caption).foregroundStyle(.secondary)
+            if removedAtSource {
+                Label("Removed at source · kept on this device", systemImage: "archivebox")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
         }
         .padding(.vertical, 8)
         .monospacedDigit()
+    }
+    private var sourceNames: String {
+        Set(activity.members.map(\.source)).sorted { $0.rawValue < $1.rawValue }.map {
+            switch $0 {
+            case .garmin: "Garmin"
+            case .healthKit: "Apple Health"
+            case .file: "FIT file"
+            }
+        }.joined(separator: " · ")
     }
     private func pace(_ secondsPerKilometre: Double) -> String {
         let seconds = Int((secondsPerKilometre * (units == .metric ? 1 : 1.609344)).rounded())

@@ -1,0 +1,260 @@
+import Foundation
+import HealthKit
+import CoreLocation
+import Observation
+import Synchronization
+import SweatKitLibrary
+import SweatKitModel
+
+/// Read-only HealthKit synchronization. Anchors and pending snapshot IDs are
+/// committed together, so a failed snapshot is retried after the next launch.
+@MainActor @Observable
+final class HealthConnection {
+    private(set) var running = false
+    private(set) var enabled = false
+    private(set) var status = "Connect Apple Health to read your workouts."
+    private let health = HKHealthStore()
+    private let library: ActivityLibrary
+    private let stateURL: URL
+    private var syncTask: Task<Void, Never>?
+
+    private typealias State = HealthSyncState
+    private struct Page {
+        var samples: [HKSample]
+        var deleted: [HKDeletedObject]
+        var anchor: HKQueryAnchor?
+    }
+    private static let quantities: [HKQuantityTypeIdentifier] = [
+        .heartRate, .cyclingPower, .cyclingCadence, .cyclingSpeed, .runningPower, .runningSpeed
+    ]
+    private static var types: [HKSampleType] {
+        [HKObjectType.workoutType(), HKSeriesType.workoutRoute()] + quantities.compactMap(HKObjectType.quantityType(forIdentifier:))
+    }
+
+    init(library: ActivityLibrary, root: URL) {
+        self.library = library
+        stateURL = root.appendingPathComponent("health-sync.json")
+        enabled = UserDefaults.standard.bool(forKey: "healthReadRequested")
+        if enabled { status = "Apple Health is ready to refresh. Read access is controlled in Health settings." }
+    }
+
+    func connect() async {
+        guard HKHealthStore.isHealthDataAvailable() else { status = "Apple Health isn't available on this device."; return }
+        guard !running else { return }
+        running = true
+        do {
+            try await health.requestAuthorization(toShare: [], read: Set(Self.types))
+            var state = try readState()
+            state.anchors = [:]
+            state.pending.formUnion(state.workouts.keys)
+            try save(state)
+            enabled = true
+            UserDefaults.standard.set(true, forKey: "healthReadRequested")
+            running = false
+            await sync()
+        } catch {
+            running = false
+            status = "Couldn't request Health access. Open Health → your profile → Apps → SweatKit to review permissions, then retry."
+        }
+    }
+
+    func pause() { syncTask?.cancel() }
+
+    func sync() async {
+        guard enabled, !running, HKHealthStore.isHealthDataAvailable() else { return }
+        running = true
+        syncTask = Task { await synchronize() }
+        await syncTask?.value
+        syncTask = nil
+        running = false
+    }
+
+    private func synchronize() async {
+        status = "Reading Apple Health workouts and changes…"
+        do {
+            var state = try readState()
+            for type in Self.types {
+                var count: Int
+                repeat {
+                    try Task.checkCancellation()
+                    let anchor = try state.anchors[type.identifier].map {
+                        try NSKeyedUnarchiver.unarchivedObject(ofClass: HKQueryAnchor.self, from: $0)
+                    } ?? nil
+                    let page = try await changes(type, after: anchor)
+                    count = page.samples.count + page.deleted.count
+                    if type == HKObjectType.workoutType() {
+                        for sample in page.samples {
+                            state.workouts[sample.uuid] = DateInterval(start: sample.startDate, end: sample.endDate)
+                            state.pending.insert(sample.uuid)
+                        }
+                        for deleted in page.deleted {
+                            try await library.markHealthWorkoutRemoved(deleted.uuid)
+                            state.workouts.removeValue(forKey: deleted.uuid)
+                            state.pending.remove(deleted.uuid)
+                        }
+                    } else {
+                        for sample in page.samples {
+                            for (id, span) in state.workouts where span.start <= sample.endDate && span.end >= sample.startDate {
+                                state.pending.insert(id)
+                            }
+                        }
+                        // Deleted samples expose only an ID, not their date or
+                        // workout. Re-snapshot known workouts on these rare events.
+                        if !page.deleted.isEmpty { state.pending.formUnion(state.workouts.keys) }
+                    }
+                    if let anchor = page.anchor {
+                        state.anchors[type.identifier] = try NSKeyedArchiver.archivedData(withRootObject: anchor, requiringSecureCoding: true)
+                    }
+                    try save(state)
+                } while count >= 500
+            }
+            let pending = state.pending.sorted { $0.uuidString < $1.uuidString }
+            var completed = 0
+            var failures = 0
+            for id in pending {
+                try Task.checkCancellation()
+                do {
+                    guard let workout = try await samples(HKObjectType.workoutType(), predicate: HKQuery.predicateForObject(with: id)).first as? HKWorkout else {
+                        // Absence is not proof of deletion or denied permission.
+                        failures += 1
+                        continue
+                    }
+                    let snapshot = try await snapshot(workout)
+                    try await library.importHealthSnapshot(snapshot)
+                    state.pending.remove(id)
+                    try save(state)
+                    completed += 1
+                    status = "Apple Health: updated \(completed) of \(pending.count) workouts."
+                } catch is CancellationError { throw CancellationError() }
+                catch { failures += 1 }
+            }
+            if failures > 0 {
+                status = "Apple Health updated \(completed) workouts; \(failures) need another attempt. Review read access in Health → profile → Apps → SweatKit, then refresh. Your stored recordings are kept."
+            } else if state.workouts.isEmpty {
+                status = "No workouts are visible. There may be no workouts, or read access may be off. Review access in Health → profile → Apps → SweatKit, then refresh."
+            } else {
+                status = "Apple Health is up to date. \(completed) workouts refreshed."
+            }
+        } catch is CancellationError {
+            status = "Health refresh paused. Refresh again to resume saved work."
+        } catch {
+            status = "Couldn't finish Health refresh. Unlock your device, check available storage and Health read access, then retry. Saved progress is kept."
+        }
+    }
+
+    private func snapshot(_ workout: HKWorkout) async throws -> HealthSnapshot {
+        let sport: Sport
+        switch workout.workoutActivityType {
+        case .cycling: sport = .cycling
+        case .walking: sport = .walking
+        case .running: sport = .running
+        case .hiking: sport = .hiking
+        default: sport = .other
+        }
+        let predicate = HKQuery.predicateForObjects(from: workout)
+        var native: [NativeSample] = []
+        for identifier in Self.quantities {
+            try Task.checkCancellation()
+            guard let type = HKObjectType.quantityType(forIdentifier: identifier) else { continue }
+            let readings = try await samples(type, predicate: predicate)
+            for case let reading as HKQuantitySample in readings {
+                var point = NativeSample(timestamp: reading.startDate)
+                switch identifier {
+                case .heartRate: point.heartRate = reading.quantity.doubleValue(for: .count().unitDivided(by: .minute()))
+                case .cyclingCadence: point.cadence = reading.quantity.doubleValue(for: .count().unitDivided(by: .minute()))
+                case .cyclingPower where sport == .cycling, .runningPower where sport != .cycling:
+                    point.power = reading.quantity.doubleValue(for: .watt())
+                case .cyclingSpeed where sport == .cycling, .runningSpeed where sport != .cycling:
+                    point.speed = reading.quantity.doubleValue(for: .meter().unitDivided(by: .second()))
+                default: continue
+                }
+                native.append(point)
+            }
+        }
+        let routes = try await samples(HKSeriesType.workoutRoute(), predicate: predicate)
+        for case let route as HKWorkoutRoute in routes {
+            for location in try await locations(route) where location.horizontalAccuracy >= 0 {
+                native.append(NativeSample(timestamp: location.timestamp,
+                    position: Coordinate(latitude: location.coordinate.latitude, longitude: location.coordinate.longitude),
+                    altitude: location.verticalAccuracy >= 0 ? location.altitude : nil,
+                    speed: location.speed >= 0 ? location.speed : nil))
+            }
+        }
+        // Query and route batch ordering is not guaranteed. A stable order
+        // prevents unchanged workouts from producing spurious revisions.
+        native.sort { lhs, rhs in
+            if lhs.timestamp != rhs.timestamp { return lhs.timestamp < rhs.timestamp }
+            return Self.sampleOrder(lhs) < Self.sampleOrder(rhs)
+        }
+        let events = (workout.workoutEvents ?? []).compactMap { event -> TimerEvent? in
+            switch event.type {
+            case .pause, .motionPaused: TimerEvent(kind: .stop, timestamp: event.dateInterval.start)
+            case .resume, .motionResumed: TimerEvent(kind: .start, timestamp: event.dateInterval.start)
+            default: nil
+            }
+        }.sorted { $0.timestamp < $1.timestamp }
+        let timezone = (workout.metadata?[HKMetadataKeyTimeZone] as? String).flatMap(TimeZone.init(identifier:))
+        let activity = RecordedActivity(sport: sport,
+            isIndoor: (workout.metadata?[HKMetadataKeyIndoorWorkout] as? Bool) ?? false,
+            stated: StatedSummary(start: workout.startDate, end: workout.endDate, timerTime: workout.duration,
+                distance: workout.totalDistance?.doubleValue(for: .meter()),
+                utcOffset: timezone?.secondsFromGMT(for: workout.startDate)),
+            timerEvents: events, stream: NativeStream(samples: native))
+        var links: Set<SourceIdentity> = []
+        // Only an explicitly namespaced identifier is treated as a link.
+        // A bare external UUID or numeric ID is not assumed to be Garmin's.
+        if let external = workout.metadata?[HKMetadataKeyExternalUUID] as? String,
+           external.hasPrefix("garmin:"), let id = Int64(external.dropFirst(7)), id > 0 {
+            links.insert(SourceIdentity(source: .garmin, externalID: String(id)))
+        }
+        return HealthSnapshot(workoutID: workout.uuid, activity: activity, linkedIdentities: links,
+            sourceName: workout.sourceRevision.source.name,
+            sourceBundleIdentifier: workout.sourceRevision.source.bundleIdentifier)
+    }
+
+    private static func sampleOrder(_ sample: NativeSample) -> String {
+        // Stable tie breaker only; values remain native and are never merged.
+        [sample.position?.latitude, sample.position?.longitude, sample.altitude,
+         sample.speed, sample.heartRate, sample.power, sample.cadence]
+            .map { $0.map { String($0.bitPattern, radix: 16) } ?? "" }.joined(separator: ":")
+    }
+
+    private func changes(_ type: HKSampleType, after anchor: HKQueryAnchor?) async throws -> Page {
+        try await withCheckedThrowingContinuation { continuation in
+            let query = HKAnchoredObjectQuery(type: type, predicate: nil, anchor: anchor, limit: 500) { _, samples, deleted, anchor, error in
+                if let error { continuation.resume(throwing: error) }
+                else { continuation.resume(returning: Page(samples: samples ?? [], deleted: deleted ?? [], anchor: anchor)) }
+            }
+            health.execute(query)
+        }
+    }
+
+    private func samples(_ type: HKSampleType, predicate: NSPredicate) async throws -> [HKSample] {
+        try await withCheckedThrowingContinuation { continuation in
+            health.execute(HKSampleQuery(sampleType: type, predicate: predicate, limit: HKObjectQueryNoLimit,
+                sortDescriptors: [NSSortDescriptor(key: HKSampleSortIdentifierStartDate, ascending: true)]) { _, samples, error in
+                if let error { continuation.resume(throwing: error) }
+                else { continuation.resume(returning: samples ?? []) }
+            })
+        }
+    }
+
+    private func locations(_ route: HKWorkoutRoute) async throws -> [CLLocation] {
+        let accumulated = Mutex<(points: [CLLocation], finished: Bool)>(([], false))
+        return try await withCheckedThrowingContinuation { continuation in
+            health.execute(HKWorkoutRouteQuery(route: route) { _, locations, done, error in
+                let result = accumulated.withLock { state -> Result<[CLLocation], any Error>? in
+                    guard !state.finished else { return nil }
+                    if let error { state.finished = true; return .failure(error) }
+                    state.points += locations ?? []
+                    if done { state.finished = true; return .success(state.points) }
+                    return nil
+                }
+                if let result { continuation.resume(with: result) }
+            })
+        }
+    }
+
+    private func readState() throws -> State { try State.load(from: stateURL) }
+    private func save(_ state: State) throws { try state.save(to: stateURL) }
+}

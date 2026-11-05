@@ -139,6 +139,38 @@ public actor ActivityLibrary {
         }
     }
 
+    /// Imports a Health workout snapshot under its stable workout UUID.
+    /// A changed route or sample set becomes a new revision of that source.
+    @discardableResult
+    public func importHealthSnapshot(_ snapshot: HealthSnapshot, at date: Date = Date()) async throws -> ImportResult {
+        let result = try await importBytes(snapshot.encoded(), as: snapshot.identity,
+            fallbackUTCOffset: snapshot.activity.stated.utcOffset, at: date)
+        // Health data remains local even when device backups are enabled.
+        let records = try await store.sourceRecord(snapshot.identity)
+        if let revision = records?.currentRevision {
+            for relative in ["Originals/\(revision.hex)", "Streams/\(revision.hex).analysis", "Streams/\(revision.hex).recorded"] {
+                var url = store.root.appendingPathComponent(relative)
+                if FileManager.default.fileExists(atPath: url.path) {
+                    var values = URLResourceValues()
+                    values.isExcludedFromBackup = true
+                    try url.setResourceValues(values)
+                }
+            }
+        }
+        if let record = try await store.sourceRecord(snapshot.identity), record.state == .removedAtSource {
+            try await store.setState(.active, for: snapshot.identity)
+        }
+        return result
+    }
+
+    /// A deletion reported explicitly by the source keeps the local recording.
+    public func markHealthWorkoutRemoved(_ id: UUID) async throws {
+        let identity = SourceIdentity(source: .healthKit, externalID: id.uuidString)
+        if let record = try await store.sourceRecord(identity), record.state == .active {
+            try await store.setState(.removedAtSource, for: identity)
+        }
+    }
+
     /// Imports several files. Each succeeds or fails on its own, and the
     /// outcomes come back in the order the files were given.
     ///
@@ -201,7 +233,7 @@ public actor ActivityLibrary {
 
         // Decode before anything is stored, so a rejected file leaves no trace.
         let profile = try await currentProfile()
-        var decoded = try await Pipeline.decode(bytes, versions: versions)
+        var decoded = try await Pipeline.decode(bytes, versions: versions, allowsSnapshot: identity.source == .healthKit)
 
         identityNeedsRecovery = true
         let record = try await store.importOriginal(bytes, as: identity, at: date).record
@@ -214,7 +246,7 @@ public actor ActivityLibrary {
             // That record's own import never finished. Finish it from its
             // current original, which these bytes may not be.
             if record.currentRevision != hash {
-                decoded = try await Pipeline.decode(try await original(record.currentRevision), versions: versions)
+                decoded = try await Pipeline.decode(try await original(record.currentRevision), versions: versions, allowsSnapshot: record.source == .healthKit)
             }
         }
 
@@ -222,8 +254,9 @@ public actor ActivityLibrary {
         var journal = try readIdentityJournal()
         journal.candidates[record.identity.description] = MatchCandidate(identity: record.identity,
             sport: decoded.recorded.sport, start: decoded.stream.start,
-            elapsed: Double(decoded.stream.count), distance: (0..<decoded.stream.count).reversed().lazy.compactMap { decoded.stream.distance[$0] }.first,
-            isIndoor: decoded.recorded.isIndoor || decoded.recorded.isVirtual)
+            elapsed: Double(decoded.stream.count), distance: (0..<decoded.stream.count).reversed().lazy.compactMap { decoded.stream.distance[$0] }.first ?? decoded.recorded.stated.distance,
+            isIndoor: decoded.recorded.isIndoor || decoded.recorded.isVirtual,
+            linkedIdentities: (try HealthSnapshot.decode(bytes))?.linkedIdentities ?? [])
         try writeIdentityJournal(journal)
         try await reconcileIdentity()
         let resolvedID = try await store.sourceRecord(record.identity)?.activityID
@@ -283,7 +316,9 @@ public actor ActivityLibrary {
                 revision: revision,
                 existing: existing
             ),
-            at: date
+            at: date,
+            summaryOnly: decoded.recorded.stream.samples.isEmpty ? decoded.recorded.stated : nil,
+            sourceDistance: record.source == .healthKit ? decoded.recorded.stated.distance : nil
         )
         // The row first and the metrics last: the metrics are the mark of a
         // finished write, and their absence is what a recompute looks for.
@@ -545,7 +580,7 @@ public actor ActivityLibrary {
             for: revision,
             renormalise: renormalise,
             // With no row there is nowhere else to learn the sport from.
-            needsRecorded: stale.reasons.contains(.streamFile) || existing == nil
+            needsRecorded: stale.reasons.contains(.streamFile) || existing == nil || record.source == .healthKit
         )
 
         // Sport, flags and offset come from the decoded activity when it was
@@ -564,7 +599,9 @@ public actor ActivityLibrary {
                 revision: revision,
                 existing: existing
             ),
-            at: date
+            at: date,
+            summaryOnly: found.recorded.flatMap { $0.stream.samples.isEmpty ? $0.stated : nil },
+            sourceDistance: record.source == .healthKit ? found.recorded?.stated.distance : nil
         )
         // The row first and the metrics last, as in an import.
         let rowChanged = derived.row != existing
@@ -605,7 +642,7 @@ public actor ActivityLibrary {
             return (stream, recorded, .recordedActivity)
         }
 
-        let decoded = try await Pipeline.decode(try await original(revision), versions: versions)
+        let decoded = try await Pipeline.decode(try await original(revision), versions: versions, allowsSnapshot: true)
         try await store.saveRecordedActivity(decoded.recorded, decoderVersion: versions.decoder, for: revision)
         try await store.saveAnalysisStream(decoded.stream, for: revision)
         return (decoded.stream, decoded.recorded, .original)
@@ -705,10 +742,14 @@ public actor ActivityLibrary {
             guard let id = record.activityID, let row = old[id] else { continue }
             let found = try await materials(for: record.currentRevision, renormalise: false, needsRecorded: true)
             guard let recorded = found.recorded else { continue }
+            var linked: Set<SourceIdentity> = []
+            if record.source == .healthKit {
+                linked = try HealthSnapshot.decode(try await original(record.currentRevision))?.linkedIdentities ?? []
+            }
             journal.candidates[record.identity.description] = MatchCandidate(identity: record.identity,
                 sport: recorded.sport, start: found.stream.start, elapsed: Double(found.stream.count),
-                distance: (0..<found.stream.count).reversed().lazy.compactMap { found.stream.distance[$0] }.first,
-                isIndoor: recorded.isIndoor || recorded.isVirtual)
+                distance: (0..<found.stream.count).reversed().lazy.compactMap { found.stream.distance[$0] }.first ?? recorded.stated.distance,
+                isIndoor: recorded.isIndoor || recorded.isVirtual, linkedIdentities: linked)
             // Migrate pre-journal user edits without guessing again on future imports.
             if row.title != FeedRules.generatedTitle(for: row) {
                 journal.decisions.append(DecisionRecord(name: RecordName("legacy-title-\(id)"), value: .title(row.title),
@@ -746,7 +787,9 @@ public actor ActivityLibrary {
             var derived = try await Pipeline.derive(facts: ActivityFacts(recorded, fallbackUTCOffset: existing?.utcOffset),
                 stream: found.stream, profile: profile, versions: versions,
                 target: Pipeline.Target(members: members, primary: group.primary,
-                    revision: primary.currentRevision, existing: nil), at: Date())
+                    revision: primary.currentRevision, existing: nil), at: Date(),
+                summaryOnly: recorded.stream.samples.isEmpty ? recorded.stated : nil,
+                sourceDistance: primary.source == .healthKit ? recorded.stated.distance : nil)
             if let title = group.title { derived.row.title = title }
             derived.row.isHidden = group.isHidden
             replacements.append(derived.row)

@@ -14,6 +14,21 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack {
             Form {
+                if let health = model.health {
+                    Section("Apple Health") {
+                        Text(health.status)
+                        Button(health.enabled ? "Review Health access" : "Connect Apple Health") {
+                            Task { await health.connect(); await model.reload() }
+                        }.disabled(health.running)
+                        if health.enabled {
+                            Button("Refresh Health workouts") { Task { await health.sync(); await model.reload() } }
+                                .disabled(health.running)
+                            if health.running { Button("Pause Health refresh") { health.pause() } }
+                        }
+                        Text("Read-only access. Your workouts and samples stay on this device.")
+                            .font(.footnote).foregroundStyle(.secondary)
+                    }
+                }
                 Section("Garmin") {
                     if let garmin = model.garmin {
                         Text(garmin.status)

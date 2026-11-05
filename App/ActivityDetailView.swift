@@ -12,6 +12,7 @@ struct ActivityDetailView: View {
     let library: ActivityLibrary?
     @State private var current: ActivityRecord?
     private var record: ActivityRecord { current ?? activity }
+    @State private var summaryOnly = false
     @State private var prepared: PreparedDetail?
     @State private var error: String?
     @State private var scrub = 0.0
@@ -26,7 +27,24 @@ struct ActivityDetailView: View {
 
     var body: some View {
         Group {
-            if let prepared {
+            if summaryOnly {
+                List {
+                    Section {
+                        LabeledContent("Elapsed time", value: Duration.seconds(record.elapsedTime).formatted(.time(pattern: .hourMinuteSecond)))
+                        if let timer = record.timerTime {
+                            LabeledContent("Timer time", value: Duration.seconds(timer).formatted(.time(pattern: .hourMinuteSecond)))
+                        }
+                        if let distance = record.distance {
+                            LabeledContent("Recorded distance", value: String(format: "%.2f %@", distance / (units == .metric ? 1000 : 1609.344), units == .metric ? "km" : "mi"))
+                        }
+                    } header: { Text("Recorded summary") } footer: {
+                        Text("This recording has no visible per-second samples. Charts, zones and a route cannot be shown. If you expected samples from Apple Health, review read access in Health settings and refresh.")
+                    }
+                    if let library {
+                        NavigationLink("Activity info and sources") { ActivityManagementView(activity: record, library: library) }
+                    }
+                }.monospacedDigit()
+            } else if let prepared {
                 ZStack {
                     if let route = prepared.route(for: overlay).value {
                         FlyoverMap(route: route, bandColors: colors, scrubSample: $scrub, options: options)
@@ -116,15 +134,22 @@ struct ActivityDetailView: View {
     private func load() async {
         guard let library, let id = activity.id else { error = "Open the library and try again."; return }
         error = nil
+        prepared = nil
+        summaryOnly = false
         do {
             current = try await library.activity(id)
             async let stream = library.analysisStream(for: id)
             async let recorded = library.recordedActivity(for: id)
             async let profile = library.profile()
+            let native = try await recorded
+            let athlete = try await profile
+            units = athlete.units
+            summaryOnly = native.stream.samples.isEmpty
+            if summaryOnly { return }
             let input = try await DetailInput(stream: stream, sport: record.sport,
                 isIndoor: record.isIndoor, isVirtual: record.isVirtual,
-                lapStarts: DetailInput.lapStarts(of: recorded.laps, streamStart: stream.start),
-                profile: profile, activityDate: record.start)
+                lapStarts: DetailInput.lapStarts(of: native.laps, streamStart: stream.start),
+                profile: athlete, activityDate: record.start)
             let result = await Task.detached(priority: .userInitiated) { DetailPreparation.prepare(input) }.value
             guard !Task.isCancelled else { return }
             prepared = result

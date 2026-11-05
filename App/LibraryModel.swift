@@ -7,10 +7,12 @@ import SweatKitStore
 /// Owns the persistent library and the visible page, shared by all app screens.
 @MainActor @Observable
 final class LibraryModel {
+    private(set) var health: HealthConnection?
     private(set) var garmin: GarminConnection?
     private(set) var library: ActivityLibrary?
     private(set) var possibleDuplicateCount = 0
     private(set) var units = UnitSystem.metric
+    private(set) var removedSources: Set<SourceIdentity> = []
     private(set) var activities: [ActivityRecord] = []
     private(set) var isLoading = false
     private(set) var isImporting = false
@@ -32,6 +34,7 @@ final class LibraryModel {
             let opened = try ActivityLibrary(root: root)
             library = opened
             garmin = GarminConnection(library: opened, root: root)
+            health = HealthConnection(library: opened, root: root)
             await reload()
         } catch { self.error = error.localizedDescription }
     }
@@ -45,10 +48,12 @@ final class LibraryModel {
             let page = try await library.feed(filter, limit: 50)
             let profile = try await library.profile()
             let duplicates = try await library.possibleDuplicates()
+            let sources = try await library.store.sourceRecords()
             guard request == generation else { return }
             activities = page.activities
             units = profile.units
             possibleDuplicateCount = duplicates.count
+            removedSources = Set(sources.filter { $0.state == .removedAtSource }.map(\.identity))
             cursor = page.next
             error = nil
         } catch {
