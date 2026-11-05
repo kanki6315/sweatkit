@@ -2,7 +2,8 @@ import SwiftUI
 
 @main
 struct SweatKitApp: App {
-    @State private var library = LibraryModel()
+    @UIApplicationDelegateAdaptor(SweatKitAppDelegate.self) private var delegate
+    @State private var library = AppServices.library
 
     var body: some Scene {
         WindowGroup {
@@ -10,7 +11,9 @@ struct SweatKitApp: App {
         }
         .backgroundTask(.appRefresh(BackgroundRefresh.identifier)) {
             await library.open()
-            await library.garmin?.sync(.quick)
+            async let garminRefresh: Void? = library.garmin?.sync(.quick)
+            async let healthRefresh: Void? = library.health?.sync()
+            _ = await (garminRefresh, healthRefresh)
             await BackgroundRefresh.schedule()
         }
     }

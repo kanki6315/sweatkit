@@ -20,6 +20,9 @@ struct SettingsView: View {
                 if let health = model.health {
                     Section("Apple Health") {
                         Text(health.status)
+                        if let backgroundStatus = HealthBackgroundDelivery.shared.status {
+                            Text(backgroundStatus).font(.footnote).foregroundStyle(.secondary)
+                        }
                         Button(health.enabled ? "Review Health access" : "Connect Apple Health") {
                             Task { await health.connect(); await model.reload() }
                         }.disabled(health.running)

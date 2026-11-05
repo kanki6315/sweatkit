@@ -27,7 +27,7 @@ final class HealthConnection {
     private static let quantities: [HKQuantityTypeIdentifier] = [
         .heartRate, .cyclingPower, .cyclingCadence, .cyclingSpeed, .runningPower, .runningSpeed
     ]
-    private static var types: [HKSampleType] {
+    static var observedTypes: [HKSampleType] {
         [HKObjectType.workoutType(), HKSeriesType.workoutRoute()] + quantities.compactMap(HKObjectType.quantityType(forIdentifier:))
     }
 
@@ -43,7 +43,7 @@ final class HealthConnection {
         guard !running else { return }
         running = true
         do {
-            try await health.requestAuthorization(toShare: [], read: Set(Self.types))
+            try await health.requestAuthorization(toShare: [], read: Set(Self.observedTypes))
             var state = try readState()
             state.anchors = [:]
             state.pending.formUnion(state.workouts.keys)
@@ -51,6 +51,7 @@ final class HealthConnection {
             enabled = true
             UserDefaults.standard.set(true, forKey: "healthReadRequested")
             running = false
+            HealthBackgroundDelivery.shared.start()
             await sync()
         } catch {
             running = false
@@ -58,22 +59,46 @@ final class HealthConnection {
         }
     }
 
-    func pause() { syncTask?.cancel() }
+    func pause() {
+        syncTask?.cancel()
+        HealthBackgroundDelivery.shared.pause()
+    }
 
-    func sync() async {
-        guard enabled, !running, HKHealthStore.isHealthDataAvailable() else { return }
+    func sync(changesCaptured: (@MainActor () -> Void)? = nil) async {
+        // A notification may arrive after its type was read by an existing
+        // pass. Wait, then fetch again; never acknowledge it using that pass.
+        while running {
+            guard let active = syncTask else { changesCaptured?(); return }
+            await withTaskCancellationHandler {
+                await active.value
+            } onCancel: {
+                active.cancel()
+            }
+            if Task.isCancelled { changesCaptured?(); return }
+            await Task.yield()
+        }
+        guard enabled, !Task.isCancelled, HKHealthStore.isHealthDataAvailable() else { changesCaptured?(); return }
         running = true
-        syncTask = Task { await synchronize() }
-        await syncTask?.value
+        syncTask = Task { await synchronize(changesCaptured: changesCaptured) }
+        let active = syncTask
+        await withTaskCancellationHandler {
+            await active?.value
+        } onCancel: {
+            active?.cancel()
+        }
         syncTask = nil
         running = false
     }
 
-    private func synchronize() async {
+    private func synchronize(changesCaptured: (@MainActor () -> Void)? = nil) async {
+        // On error/cancellation unchanged anchors and saved pending IDs are
+        // retried on foreground activation. Completion does not claim success.
+        var acknowledged = false
+        defer { if !acknowledged { changesCaptured?() } }
         status = "Reading Apple Health workouts and changes…"
         do {
             var state = try readState()
-            for type in Self.types {
+            for type in Self.observedTypes {
                 var count: Int
                 repeat {
                     try Task.checkCancellation()
@@ -108,6 +133,10 @@ final class HealthConnection {
                     try save(state)
                 } while count >= 500
             }
+            // Every anchor and its pending snapshot IDs are durable now.
+            // Release HealthKit's delivery promptly, before costly derivation.
+            changesCaptured?()
+            acknowledged = true
             let deleted = try await library.deletedIdentities()
             let skipped = state.pending.filter { deleted.contains(SourceIdentity(source: .healthKit, externalID: $0.uuidString)) }
             state.pending.subtract(skipped)

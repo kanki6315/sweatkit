@@ -40,7 +40,9 @@ struct RootView: View {
         .task(id: scenePhase) {
             if scenePhase == .active {
                 await library.open()
-                await library.garmin?.sync()
+                async let garminRefresh: Void? = library.garmin?.sync()
+                async let healthRefresh: Void? = library.health?.sync()
+                _ = await (garminRefresh, healthRefresh)
                 await library.reload()
             } else if scenePhase == .background {
                 BackgroundRefresh.schedule()
