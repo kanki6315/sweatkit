@@ -28,3 +28,7 @@ The privacy text describes the current local-first implementation. Review it aga
 ## App theme
 
 The site extends the native app's system typography, neutral light/dark surfaces, cyan interaction color, and rounded navigation. The landing page and favicons reuse the route and endpoint artwork from `App/SweatKit.icon/Assets/`, flattened into the two SVGs in `public/assets/`. These are static web renditions; they do not reproduce iOS Icon Composer lighting. Keep the app's source icon layers unchanged when editing the website.
+
+## Contact links
+
+Keep the `<!--email_off-->` and `<!--/email_off-->` comments around the entire email link on support and privacy pages. These opt out of Cloudflare Email Address Obfuscation, preserving both the visible address and `mailto:` destination without a decode script (the site intentionally blocks scripts through CSP). Do not strip these comments during future HTML minification.
