@@ -87,6 +87,12 @@ struct RouteInput: Sendable {
 struct RouteCatalogCache: Codable, Sendable {
     let key: ContentHash
     let catalog: RouteCatalog
+    var labels: [SourceIdentity: RouteGeometryLabel] = [:]
+}
+
+struct RouteGeometryLabel: Codable, Sendable {
+    let shape: String
+    let region: String
 }
 
 private struct RouteCacheInputs: Encodable {
@@ -98,7 +104,6 @@ private struct RouteCacheInputs: Encodable {
     let streamRules: Int
     let algorithms: Int
     let matching: Int
-    let localities: [String: String]
 }
 
 struct RouteSeed: Codable {
@@ -208,10 +213,10 @@ extension ActivityLibrary {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
         let key = ContentHash(of: try encoder.encode(RouteCacheInputs(
-            format: 2, sources: sourceSnapshot.sorted { $0.identity < $1.identity },
-            rows: rows, decisions: decisions, decoder: versions.decoder,
+            format: 3, sources: sourceSnapshot.sorted { $0.identity < $1.identity },
+            rows: rows.map { var row = $0; row.title = ""; return row }, decisions: decisions, decoder: versions.decoder,
             streamRules: versions.streamRules, algorithms: versions.combinedAlgorithmVersion,
-            matching: SweatKitRouteMatching.algorithmVersion, localities: localities)))
+            matching: SweatKitRouteMatching.algorithmVersion)))
         if routeCatalogCache == nil,
            let data = try? Data(contentsOf: routeCacheURL),
            let saved = try? JSONDecoder().decode(RouteCatalogCache.self, from: data) {
@@ -219,7 +224,7 @@ extension ActivityLibrary {
         }
         if let cached = routeCatalogCache, cached.key == key {
             // Metrics can change after a profile correction without changing geometry.
-            var catalog = cached.catalog
+            var catalog = Self.refreshRouteLabels(cached, rows: rows, sources: sourcesByID, localities: localities, decisions: decisions)
             for r in catalog.routes.indices {
                 for e in catalog.routes[r].efforts.indices {
                     let effort = catalog.routes[r].efforts[e]
@@ -245,7 +250,7 @@ extension ActivityLibrary {
         }
         let seeds = FileManager.default.fileExists(atPath: routeSeedURL.path)
             ? try JSONDecoder().decode([RouteSeed].self, from: Data(contentsOf: routeSeedURL)) : []
-        let result = await Self.assembleRoutes(inputs, seeds: seeds, decisions: decisions)
+        let result = try await Self.assembleRoutes(inputs, seeds: seeds, decisions: decisions)
         try Task.checkCancellation()
         guard try await store.sourceRecords() == sourceSnapshot else { return try await routes(includeOlderHistory: includeOlderHistory, now: now) }
         for input in inputs {
@@ -257,11 +262,51 @@ extension ActivityLibrary {
         var saved = Dictionary(uniqueKeysWithValues: seeds.map { ($0.id, $0) })
         for route in result.routes { saved[route.id] = RouteSeed(id: route.id, members: route.efforts.map(\.id)) }
         try JSONEncoder().encode(saved.values.sorted { $0.id < $1.id }).write(to: routeSeedURL, options: .atomic)
-        let cached = RouteCatalogCache(key: key, catalog: result)
+        var labels: [SourceIdentity: RouteGeometryLabel] = [:]
+        for route in result.routes {
+            if var input = inputs.first(where: { $0.row.id == route.referenceID }) {
+                input.locality = nil
+                labels[route.id] = RouteGeometryLabel(shape: Self.routeShapeDescription(input), region: Self.routeRegion(input))
+            }
+        }
+        let cached = RouteCatalogCache(key: key, catalog: result, labels: labels)
         routeCatalogCache = cached
         // Cache failures must not prevent browsing; missing/corrupt data is rebuilt.
         if let data = try? encoder.encode(cached) { try? data.write(to: routeCacheURL, options: .atomic) }
         return result
+    }
+
+    /// Update display metadata without reading streams or matching geometry again.
+    nonisolated static func refreshRouteLabels(_ cached: RouteCatalogCache, rows: [ActivityRecord],
+        sources: [SourceIdentity: SourceRecord], localities: [String: String], decisions: [RouteDecision]) -> RouteCatalog {
+        var catalog = cached.catalog
+        let byID = Dictionary(uniqueKeysWithValues: rows.compactMap { row in row.id.map { ($0, row) } })
+        func locality(_ row: ActivityRecord) -> String? {
+            sources[row.primary].flatMap { localities[$0.currentRevision.hex] }
+        }
+        for index in catalog.routes.indices {
+            var route = catalog.routes[index]
+            route.efforts = route.efforts.map { effort in
+                RouteEffort(activity: byID[effort.id] ?? effort.activity, alignment: effort.alignment, metrics: effort.metrics)
+            }
+            if let reference = byID[route.referenceID], let label = cached.labels[route.id] {
+                let place = locality(reference) ?? route.efforts.compactMap { locality($0.activity) }.first
+                route.region = reference.isVirtual ? "Virtual routes" : place ?? label.region
+                let explicitName = decisions.compactMap { decision -> String? in
+                    if decision.route == route.id, case .name(let name) = decision.value { return name }
+                    return nil
+                }.last
+                route.name = explicitName ?? "\(reference.isVirtual ? "Virtual" : place ?? "Local") \(label.shape)"
+            }
+            catalog.routes[index] = route
+        }
+        let routes = Dictionary(uniqueKeysWithValues: catalog.routes.map { ($0.id, $0) })
+        catalog.reviews = catalog.reviews.map { review in
+            RouteReview(routeID: review.routeID, region: routes[review.routeID]?.region ?? review.region,
+                routeName: routes[review.routeID]?.name ?? review.routeName,
+                activity: byID[review.activity.id!] ?? review.activity, measures: review.measures)
+        }
+        return catalog
     }
 
     nonisolated static func routeTrack(_ stream: AnalysisStream, row: ActivityRecord) async -> CleanedTrack {
@@ -282,7 +327,7 @@ extension ActivityLibrary {
         }, sportFamily: row.sport.family, pausePositionsAreReliable: clean.pausePositionsAreReliable)
     }
 
-    nonisolated static func assembleRoutes(_ inputs: [RouteInput], seeds: [RouteSeed], decisions: [RouteDecision], minimumOutings: Int = 5) async -> RouteCatalog {
+    nonisolated static func assembleRoutes(_ inputs: [RouteInput], seeds: [RouteSeed], decisions: [RouteDecision], minimumOutings: Int = 5) async throws -> RouteCatalog {
         // A paged feed may overlap while an import changes ordering. Never count an effort twice.
         var uniqueInputs: [SourceIdentity: RouteInput] = [:]
         for input in inputs { uniqueInputs[input.row.id!] = input }
@@ -324,11 +369,13 @@ extension ActivityLibrary {
             anchoredSeeds[decision.route] = RouteSeed(id: decision.route, members: Array(Set(previous + hints)).sorted())
         }
         for seed in anchoredSeeds.values.sorted(by: { $0.id < $1.id }) {
+            try Task.checkCancellation()
             if let input = ([seed.id] + seed.members).compactMap({ byID[$0] }).first(where: { !excluded($0.row.id!, seed.id) }) {
                 groups.append(makeGroup(input, id: seed.id))
             }
         }
         for input in orderedInputs {
+            try Task.checkCancellation()
             let id = input.row.id!
             let matches = RouteMatcher.match(input.track, against: groups.map(\.reference))
             let allowed = matches.filter { !excluded(id, groups[$0.routeIndex].id) && $0.outcome != .reject }
@@ -364,6 +411,7 @@ extension ActivityLibrary {
             let sourceEfforts = groups[sourceIndex].efforts
             var moved: [RouteEffort] = []
             for effort in sourceEfforts {
+                try Task.checkCancellation()
                 guard let input = byID[effort.id], !excluded(effort.id, target.id),
                       let match = RouteMatcher.match(input.track, against: [target.reference]).first,
                       match.outcome != .reject else { continue }
@@ -390,6 +438,7 @@ extension ActivityLibrary {
         let visible = groups.filter { $0.efforts.count >= minimumOutings }
         let confirmedIDs = Set(visible.flatMap { $0.efforts.map(\.id) })
         for input in orderedInputs where !confirmedIDs.contains(input.row.id!) {
+            try Task.checkCancellation()
             let matches = RouteMatcher.match(input.track, against: visible.map(\.reference))
             reviews += matches.filter {
                 $0.outcome != .reject && !excluded(input.row.id!, visible[$0.routeIndex].id)

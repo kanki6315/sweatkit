@@ -22,7 +22,7 @@ import SweatKitTestSupport
     }
     @Test func groupsRanksAndRejectsReverse() async throws {
         let a = input("a"), b = input("b"), c = input("c", reverse: true)
-        let catalog = await ActivityLibrary.assembleRoutes([a,a,b,c], seeds: [], decisions: [], minimumOutings: 2)
+        let catalog = try await ActivityLibrary.assembleRoutes([a,a,b,c], seeds: [], decisions: [], minimumOutings: 2)
         let route = try #require(catalog.routes.first)
         #expect(catalog.routes.count == 1)
         #expect(route.efforts.count == 2)
@@ -43,7 +43,7 @@ import SweatKitTestSupport
         var sameDate = input("b").row
         sameDate.start = first.row.start
         let faster = RouteInput(row: sameDate, track: fastTrack, metrics: nil)
-        let route = try #require(await ActivityLibrary.assembleRoutes([faster, first], seeds: [], decisions: [], minimumOutings: 2).routes.first)
+        let route = try #require(try await ActivityLibrary.assembleRoutes([faster, first], seeds: [], decisions: [], minimumOutings: 2).routes.first)
         #expect(route.occurrence(of: first.row.id!) == 1)
         #expect(route.occurrence(of: faster.row.id!) == 2)
         #expect(route.rank(of: first.row.id!) == 2)
@@ -53,20 +53,20 @@ import SweatKitTestSupport
 
     @Test func parallelRoadNeedsExplicitDecisionAndRemovalPersists() async throws {
         let a = input("a"), b = input("b", offset: 14)
-        let review = await ActivityLibrary.assembleRoutes([a,b], seeds: [], decisions: [], minimumOutings: 2)
+        let review = try await ActivityLibrary.assembleRoutes([a,b], seeds: [], decisions: [], minimumOutings: 2)
         #expect(review.routes.isEmpty)
         #expect(review.reviews.isEmpty) // Too few confirmed outings to surface a review.
         let approve = RouteDecision(route: a.row.id!, value: .membership(activity: b.row.id!, included: true))
-        let joined = await ActivityLibrary.assembleRoutes([a,b], seeds: [], decisions: [approve], minimumOutings: 2)
+        let joined = try await ActivityLibrary.assembleRoutes([a,b], seeds: [], decisions: [approve], minimumOutings: 2)
         #expect(joined.routes.count == 1)
         let remove = RouteDecision(route: a.row.id!, value: .membership(activity: b.row.id!, included: false))
-        let separate = await ActivityLibrary.assembleRoutes([a,b], seeds: [.init(id: a.row.id!, members: [a.row.id!, b.row.id!])], decisions: [approve,remove], minimumOutings: 2)
+        let separate = try await ActivityLibrary.assembleRoutes([a,b], seeds: [.init(id: a.row.id!, members: [a.row.id!, b.row.id!])], decisions: [approve,remove], minimumOutings: 2)
         #expect(separate.routes.isEmpty)
         #expect(separate.reviews.isEmpty)
     }
     @Test func unknownPausesHaveNoMovingRankAndBothGhostsUseElapsed() async throws {
         let a = input("a"), b = input("b", reliable: false)
-        let route = try #require(await ActivityLibrary.assembleRoutes([a,b], seeds: [], decisions: [], minimumOutings: 2).routes.first)
+        let route = try #require(try await ActivityLibrary.assembleRoutes([a,b], seeds: [], decisions: [], minimumOutings: 2).routes.first)
         #expect(route.ranked.count == 1)
         #expect(route.rank(of: b.row.id!) == nil)
         #expect(route.occurrence(of: b.row.id!) == 2)
@@ -92,7 +92,7 @@ import SweatKitTestSupport
         let seed = RouteSeed(id: a.row.id!, members: [a.row.id!, b.row.id!, c.row.id!])
         let rename = RouteDecision(route: a.row.id!, value: .name("River loop"))
         let reference = RouteDecision(route: a.row.id!, value: .reference(c.row.id!))
-        let route = try #require(await ActivityLibrary.assembleRoutes([b,c], seeds: [seed], decisions: [rename,reference], minimumOutings: 2).routes.first)
+        let route = try #require(try await ActivityLibrary.assembleRoutes([b,c], seeds: [seed], decisions: [rename,reference], minimumOutings: 2).routes.first)
         #expect(route.id == a.row.id!)
         #expect(route.name == "River loop")
         #expect(route.referenceID == c.row.id!)
@@ -102,7 +102,7 @@ import SweatKitTestSupport
     @Test func exportedEditScopeRestoresNamedGroupWithoutLocalSeedsOrOriginalReference() async throws {
         let a = input("a"), b = input("b"), c = input("c")
         let name = RouteDecision(route: a.row.id!, value: .name("Cloud-restored name"), anchors: [a.row.id!, b.row.id!, c.row.id!])
-        let catalog = await ActivityLibrary.assembleRoutes([b,c], seeds: [], decisions: [name], minimumOutings: 2)
+        let catalog = try await ActivityLibrary.assembleRoutes([b,c], seeds: [], decisions: [name], minimumOutings: 2)
         let route = try #require(catalog.routes.first)
         #expect(route.id == a.row.id!)
         #expect(route.name == "Cloud-restored name")
@@ -114,25 +114,25 @@ import SweatKitTestSupport
         let mergedInput = RouteInput(row: merged, track: b.track, metrics: nil)
         let seed = RouteSeed(id: b.row.id!, members: [b.row.id!, c.row.id!])
         let name = RouteDecision(route: b.row.id!, value: .name("Kept name"))
-        let catalog = await ActivityLibrary.assembleRoutes([mergedInput,c], seeds: [seed], decisions: [name], minimumOutings: 2)
+        let catalog = try await ActivityLibrary.assembleRoutes([mergedInput,c], seeds: [seed], decisions: [name], minimumOutings: 2)
         let route = try #require(catalog.routes.first)
         #expect(route.id == b.row.id!)
         #expect(route.name == "Kept name")
         #expect(catalog.membership(of: b.row.id!)?.id == b.row.id!)
         let remove = RouteDecision(route: b.row.id!, value: .membership(activity: b.row.id!, included: false))
-        #expect(await ActivityLibrary.assembleRoutes([mergedInput,c], seeds: [seed], decisions: [name,remove], minimumOutings: 2).routes.isEmpty)
+        #expect(try await ActivityLibrary.assembleRoutes([mergedInput,c], seeds: [seed], decisions: [name,remove], minimumOutings: 2).routes.isEmpty)
     }
     @Test func explicitMergeRebuildsEveryAlignmentWithoutOverridingExclusions() async throws {
         let a = input("a"), b = input("b"), c = input("c", offset: 14), d = input("d", offset: 14)
         let separate = [c,d].map { RouteDecision(route: a.row.id!, value: .membership(activity: $0.row.id!, included: false)) }
-        let split = await ActivityLibrary.assembleRoutes([a,b,c,d], seeds: [], decisions: separate, minimumOutings: 2)
+        let split = try await ActivityLibrary.assembleRoutes([a,b,c,d], seeds: [], decisions: separate, minimumOutings: 2)
         #expect(split.routes.count == 2)
         let merge = RouteDecision(route: a.row.id!, value: .merge(c.row.id!))
         // Per-effort exclusions remain stronger than merging their group.
-        let refused = await ActivityLibrary.assembleRoutes([a,b,c,d], seeds: [], decisions: separate + [merge], minimumOutings: 2)
+        let refused = try await ActivityLibrary.assembleRoutes([a,b,c,d], seeds: [], decisions: separate + [merge], minimumOutings: 2)
         #expect(refused.routes.count == 2)
         let included = [c,d].map { RouteDecision(route: a.row.id!, value: .membership(activity: $0.row.id!, included: true)) }
-        let merged = await ActivityLibrary.assembleRoutes([a,b,c,d], seeds: [], decisions: separate + included + [merge], minimumOutings: 2)
+        let merged = try await ActivityLibrary.assembleRoutes([a,b,c,d], seeds: [], decisions: separate + included + [merge], minimumOutings: 2)
         #expect(merged.routes.count == 1)
         #expect(merged.routes.first?.efforts.count == 4)
     }
@@ -156,30 +156,30 @@ import SweatKitTestSupport
         var outings = ["a", "b", "c", "d", "e"].map { input($0) }
         for i in outings.indices { outings[i].locality = "Brookline" }
         outings[0].locality = nil // A newer outing can name an older reference.
-        let four = await ActivityLibrary.assembleRoutes(Array(outings.prefix(4)) + [input("z", offset: 14)], seeds: [], decisions: [])
+        let four = try await ActivityLibrary.assembleRoutes(Array(outings.prefix(4)) + [input("z", offset: 14)], seeds: [], decisions: [])
         #expect(four.routes.isEmpty)
         #expect(four.reviews.isEmpty)
-        let five = await ActivityLibrary.assembleRoutes(outings + [input("z", offset: 14)], seeds: [], decisions: [])
+        let five = try await ActivityLibrary.assembleRoutes(outings + [input("z", offset: 14)], seeds: [], decisions: [])
         let route = try #require(five.routes.first)
         #expect(route.efforts.count == 5)
         #expect(route.region == "Brookline")
         #expect(route.name == "Brookline 2.0 km Point-to-Point")
         #expect(five.reviews.count == 1)
         #expect(five.reviews.first?.region == "Brookline")
-        let renamed = await ActivityLibrary.assembleRoutes(outings, seeds: [], decisions: [
+        let renamed = try await ActivityLibrary.assembleRoutes(outings, seeds: [], decisions: [
             RouteDecision(route: outings[0].row.id!, value: .name("Rail Trail"))
         ])
         #expect(renamed.routes.first?.name == "Rail Trail")
         var elsewhere = ["f", "g", "h", "i", "j"].map { input($0, offset: 1000) }
         for i in elsewhere.indices { elsewhere[i].locality = "Cambridge" }
-        let regions = await ActivityLibrary.assembleRoutes(outings + elsewhere, seeds: [], decisions: [])
+        let regions = try await ActivityLibrary.assembleRoutes(outings + elsewhere, seeds: [], decisions: [])
         #expect(Set(regions.routes.map(\.region)) == ["Brookline", "Cambridge"])
     }
 
     @Test func earlyNoisyRecordingDoesNotBlockFiveConsistentOutings() async throws {
         let noisy = input("a", offset: 14)
         let consistent = ["b", "c", "d", "e", "f"].map { input($0) }
-        let catalog = await ActivityLibrary.assembleRoutes([noisy] + consistent, seeds: [], decisions: [])
+        let catalog = try await ActivityLibrary.assembleRoutes([noisy] + consistent, seeds: [], decisions: [])
         #expect(catalog.routes.count == 1)
         #expect(catalog.routes.first?.efforts.count == 5)
         #expect(catalog.reviews.count == 1)
@@ -194,6 +194,18 @@ import SweatKitTestSupport
         #expect(RouteMatcher.match(drift, against: [reference]).first?.outcome == .join)
         #expect(RouteMatcher.match(input("c", offset: 14).track, against: [reference]).first?.outcome == .manualReview)
         #expect(RouteMatcher.match(input("d", reverse: true).track, against: [reference]).isEmpty)
+    }
+
+    @Test func cancelledMatchingStopsBeforeProducingACatalog() async throws {
+        let inputs = [input("a"), input("b")]
+        let task = Task {
+            withUnsafeCurrentTask { $0?.cancel() }
+            return try await ActivityLibrary.assembleRoutes(inputs, seeds: [], decisions: [], minimumOutings: 2)
+        }
+        do {
+            _ = try await task.value
+            Issue.record("Cancelled route matching returned a catalog")
+        } catch is CancellationError { }
     }
 
     @Test func emptyCatalogPersistsAndAlgorithmUpgradeInvalidatesCache() async throws {
@@ -252,6 +264,17 @@ import SweatKitTestSupport
         #expect(try await cachedLibrary.routes(includeOlderHistory: true).routes.first?.best == route.best)
         #expect(try FileManager.default.attributesOfItem(atPath: cacheURL.path)[.modificationDate] as? Date == marker)
         #expect(await cachedLibrary.routeCatalogCache?.key == saved.key)
+        // Geocoding changes names and effort rows, but must reuse persisted geometry.
+        let request = try #require(try await library.localityRequest(for: first.activity.id!))
+        #expect(try await library.setLocality("Cambridge", for: request))
+        let localized = try #require(try await library.routes(includeOlderHistory: true).routes.first)
+        #expect(localized.region == "Cambridge")
+        #expect(localized.name.hasPrefix("Cambridge "))
+        #expect(localized.efforts.first(where: { $0.id == first.activity.id! })?.activity.title.contains("Cambridge") == true)
+        #expect(await library.routeCatalogCache?.key == saved.key)
+        #expect(try FileManager.default.attributesOfItem(atPath: cacheURL.path)[.modificationDate] as? Date == marker)
+        let localizedReopen = try temporary.open()
+        #expect(try await localizedReopen.routes(includeOlderHistory: true).routes.first?.name == localized.name)
         try await library.decideRoute(route.id, value: .name("Fixture course"), includeOlderHistory: true)
         #expect(try await library.routes(includeOlderHistory: true).routes.first?.name == "Fixture course")
         #expect(await library.routeCatalogCache?.key != saved.key)

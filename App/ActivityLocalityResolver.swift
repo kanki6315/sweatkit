@@ -20,6 +20,7 @@ final class ActivityLocalityResolver {
         }
         guard worker == nil, !queued.isEmpty else { return }
         worker = Task {
+            var changed = false
             while !queued.isEmpty && !Task.isCancelled {
                 let id = queued.removeFirst()
                 visited.insert(id)
@@ -36,7 +37,7 @@ final class ActivityLocalityResolver {
                         // Use a locality, never a street address or the user's
                         // current position. No location permission is requested.
                         let name = items.lazy.compactMap { $0.addressRepresentations?.cityName }.first
-                        if try await library.setLocality(name, for: request) { await didChange() }
+                        if try await library.setLocality(name, for: request) { changed = true }
                         // Keep large libraries from issuing a burst of requests.
                         try await Task.sleep(for: .seconds(1))
                     }
@@ -49,6 +50,7 @@ final class ActivityLocalityResolver {
             }
             visited.removeAll()
             worker = nil
+            if changed && !Task.isCancelled { await didChange() }
         }
     }
 }

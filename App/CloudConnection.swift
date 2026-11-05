@@ -55,9 +55,16 @@ final class CloudConnection {
             else { copy = try PrivateCloudCopy(root: root); transport = copy }
             let exports = try await library.cloudExport()
             // Stage deletion intent first, including while offline.
-            for item in exports.sorted(by: { $0.permanentlyDeleted && !$1.permanentlyDeleted }) {
-                let bytes = item.kind == .original ? try await library.cloudOriginal(item) : nil
-                try await copy.stage(item, original: bytes)
+            let ordered = exports.sorted(by: { $0.permanentlyDeleted && !$1.permanentlyDeleted })
+            for start in stride(from: 0, to: ordered.count, by: 32) {
+                try Task.checkCancellation()
+                let batch = Array(ordered[start..<min(start + 32, ordered.count)])
+                var originals: [String: Data] = [:]
+                for item in batch where await copy.needsOriginal(item) {
+                    try Task.checkCancellation()
+                    originals[item.name] = try await library.cloudOriginal(item)
+                }
+                try await copy.stage(batch, originals: originals)
             }
             var transportError: Error?
             do { try await copy.sync() } catch { transportError = error }

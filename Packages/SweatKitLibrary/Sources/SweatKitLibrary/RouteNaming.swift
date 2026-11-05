@@ -13,6 +13,11 @@ extension ActivityLibrary {
     }
 
     nonisolated static func routeDescription(_ input: RouteInput) -> String {
+        let place = input.row.isVirtual ? "Virtual" : input.locality ?? "Local"
+        return "\(place) \(routeShapeDescription(input))"
+    }
+
+    nonisolated static func routeShapeDescription(_ input: RouteInput) -> String {
         let points = RouteDetection.resample(input.track)
         let length = input.track.length
         var shape = "Point-to-Point"
@@ -24,7 +29,6 @@ extension ActivityLibrary {
             }.count
             shape = pairs > 0 && Double(retraced) / Double(pairs) >= 0.75 ? "Out-and-Back" : "Loop"
         }
-        let place = input.row.isVirtual ? "Virtual" : input.locality ?? "Local"
-        return "\(place) \(String(format: "%.1f", length / 1000)) km \(shape)"
+        return "\(String(format: "%.1f", length / 1000)) km \(shape)"
     }
 }

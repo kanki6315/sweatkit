@@ -100,3 +100,30 @@ extension CloudReplicaTests {
         #expect(replica.pendingDeletes == [first.name])
     }
 }
+
+struct CloudStagingTests {
+    @Test func unchangedBatchDoesNotReadOriginalsOrRewriteCheckpoint() async throws {
+        let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let copy = try PrivateCloudCopy(root: root)
+        let bytes = Data([1, 2, 3])
+        let id = SourceIdentity(source: .file, externalID: "battery-test")
+        let original = try CloudRecord(key: "original", kind: .original, payload: Data(), subject: id, assetHash: ContentHash(of: bytes))
+        #expect(await copy.needsOriginal(original))
+        try await copy.stage([original], originals: [original.name: bytes])
+        #expect(await copy.needsOriginal(original) == false)
+        let checkpoint = root.appending(path: "CloudTransport/checkpoint.json")
+        let marker = Date(timeIntervalSince1970: 1_000_000)
+        try FileManager.default.setAttributes([.modificationDate: marker], ofItemAtPath: checkpoint.path)
+        let reopened = try PrivateCloudCopy(root: root)
+        try await reopened.stage([original], originals: [:])
+        #expect(try FileManager.default.attributesOfItem(atPath: checkpoint.path)[.modificationDate] as? Date == marker)
+        #expect(await reopened.status().pending == 1)
+        #expect(try await reopened.asset(original) == bytes)
+        let deletion = try CloudRecord(key: "delete", kind: .tombstone, payload: Data(), subject: id, permanentlyDeleted: true)
+        try await reopened.stage([deletion, original], originals: [:])
+        #expect(await reopened.needsOriginal(original) == false)
+        #expect(await reopened.status().total == 0)
+        #expect(!FileManager.default.fileExists(atPath: root.appending(path: "CloudTransport/\(original.name).asset").path))
+    }
+}

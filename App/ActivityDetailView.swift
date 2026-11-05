@@ -168,7 +168,11 @@ struct ActivityDetailView: View {
         }
         .task(id: selection) {
             guard let selection, let prepared else { selectionStats = nil; return }
-            let result = await Task.detached(priority: .userInitiated) { prepared.rangeStats(selection) }.value
+            do { try await Task.sleep(for: .milliseconds(120)) } catch { return }
+            let worker = Task.detached(priority: .userInitiated) { prepared.rangeStats(selection) }
+            let result = await withTaskCancellationHandler {
+                await worker.value
+            } onCancel: { worker.cancel() }
             guard !Task.isCancelled else { return }
             selectionStats = result
         }

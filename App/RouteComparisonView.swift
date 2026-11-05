@@ -11,6 +11,7 @@ struct RouteComparisonView: View {
     var units = UnitSystem.metric
     private var distanceDivisor: Double { units == .metric ? 1000 : 1609.344 }
     private var distanceLabel: String { units == .metric ? "Route distance (km)" : "Route distance (mi)" }
+    @Environment(\.scenePhase) private var scenePhase
     @Environment(\.dynamicTypeSize) private var typeSize
     @State private var baselineID: SourceIdentity?
     @State private var clock = ComparisonClock.moving
@@ -27,10 +28,11 @@ struct RouteComparisonView: View {
     private var baseline: RouteEffort? {
         alternatives.first { $0.id == baselineID } ?? route.ranked.first { $0.id != subject.id } ?? alternatives.first
     }
-    private var comparison: EffortComparison? {
-        guard let baseline else { return nil }
-        return RouteComparison.compare(subject.alignment, against: baseline.alignment, clock: clock).value
-    }
+    @State private var comparisonLoading = true
+    @State private var comparison: EffortComparison?
+    @State private var gapGrid: [ComparisonGridPoint] = []
+    @State private var firstPlot: [PlotPoint] = []
+    @State private var secondPlot: [PlotPoint] = []
     var body: some View {
         ScrollView {
             if let comparison, let baseline {
@@ -62,8 +64,8 @@ struct RouteComparisonView: View {
                         Text("Time gap · ahead / behind").font(.caption).foregroundStyle(Color.secondary)
                         Chart {
                             RuleMark(y: .value("Even", 0)).foregroundStyle(Color.secondary)
-                            ForEach(comparison.grid.indices, id: \.self) { i in
-                                let point = comparison.grid[i]
+                            ForEach(gapGrid.indices, id: \.self) { i in
+                                let point = gapGrid[i]
                                 LineMark(x: .value(distanceLabel, point.routeDistance / distanceDivisor), y: .value("Seconds behind baseline", point.gap)).foregroundStyle(Color.primary)
                             }
                             RuleMark(x: .value("Cursor", frame.subjectRouteDistance / distanceDivisor)).foregroundStyle(Color.secondary)
@@ -80,6 +82,7 @@ struct RouteComparisonView: View {
                         .background(Color(uiColor: .systemGroupedBackground), in: UnevenRoundedRectangle(topLeadingRadius: 28, topTrailingRadius: 28))
                         .padding(.top, -24)
                 }.padding(.bottom, 12)
+            } else if comparisonLoading { ProgressView("Preparing comparison")
             } else { ContentUnavailableView("Comparison unavailable", systemImage: "chart.xyaxis.line", description: Text("Both efforts must cover the full timed section.")) }
         }
         .background(Color(uiColor: .systemGroupedBackground))
@@ -119,15 +122,32 @@ struct RouteComparisonView: View {
         .navigationBarTitleDisplayMode(.inline)
         .task(id: baseline?.id) {
             seconds = 0; playing = false
-            if let comparison, !comparison.movingTimeIsAvailable { clock = .elapsed }
             await loadStreams()
         }
+        .task(id: "\(baseline?.id.description ?? "")-\(clock)") {
+            comparisonLoading = true
+            comparison = nil; gapGrid = []; firstPlot = []; secondPlot = []
+            guard let baseline else { comparisonLoading = false; return }
+            let subjectAlignment = subject.alignment, baselineAlignment = baseline.alignment, requestedClock = clock
+            let worker = Task.detached(priority: .userInitiated) {
+                RouteComparison.compare(subjectAlignment, against: baselineAlignment, clock: requestedClock).value
+            }
+            let result = await withTaskCancellationHandler { await worker.value } onCancel: { worker.cancel() }
+            guard !Task.isCancelled else { return }
+            comparison = result
+            comparisonLoading = false
+            if let result, !result.movingTimeIsAvailable, clock != .elapsed { clock = .elapsed }
+            refreshPlots()
+        }
         .onChange(of: clock) { seconds = 0; playing = false }
+        .onChange(of: channel) { refreshPlots() }
+        .onChange(of: units) { refreshPlots() }
+        .onChange(of: scenePhase) { if scenePhase != .active { playing = false } }
         .task(id: playing) {
-            guard playing else { return }
+            guard playing, let comparison else { return }
             let origin = seconds
             let start = Date()
-            while !Task.isCancelled, playing, let comparison {
+            while !Task.isCancelled, playing {
                 seconds = min(duration(comparison), origin + Date().timeIntervalSince(start) * 30)
                 if seconds >= duration(comparison) { playing = false; break }
                 try? await Task.sleep(for: .milliseconds(100))
@@ -161,17 +181,22 @@ struct RouteComparisonView: View {
         subjectStream = nil; baselineStream = nil; coloredRuns = []
         guard let library, let baseline else { return }
         do {
-            subjectStream = try await library.analysisStream(for: subject.id)
-            baselineStream = try await library.analysisStream(for: baseline.id)
+            let subjectData = try await library.analysisStream(for: subject.id)
+            let baselineData = try await library.analysisStream(for: baseline.id)
+            try Task.checkCancellation()
+            subjectStream = subjectData; baselineStream = baselineData
+            refreshPlots()
             if let stream = subjectStream {
                 let profile = try await library.profile()
                 let sport = subject.activity.sport, alignment = subject.alignment
                 let drawing = await Task.detached(priority: .userInitiated) {
                     ComparisonRouteDrawing.prepare(stream: stream, sport: sport, profile: profile, alignment: alignment)
                 }.value
+                try Task.checkCancellation()
                 coloredRuns = drawing.runs; routeLegend = drawing.legend
             }
             error = nil
+        } catch is CancellationError {
         } catch { self.error = "Charts couldn’t load. \(error.localizedDescription)" }
     }
     private func sample(_ series: Series?, at time: Double) -> Double? {
@@ -180,7 +205,7 @@ struct RouteComparisonView: View {
         guard after < series.count, let a = series[before], let b = series[after] else { return nil }
         return a + (b - a) * (time - Double(before))
     }
-    private struct PlotPoint: Identifiable {
+    private struct PlotPoint: Identifiable, Sendable {
         let id: Int; let distance: Double; let clock: Double; let value: Double; let segment: Int
     }
     private func plot(_ comparison: EffortComparison, subject: Bool) -> [PlotPoint] {
@@ -192,8 +217,31 @@ struct RouteComparisonView: View {
             return PlotPoint(id: index, distance: point.routeDistance / distanceDivisor, clock: subject ? point.subjectClock : point.baselineClock, value: value, segment: segment)
         }
     }
+    private func refreshPlots() {
+        guard let comparison else { return }
+        gapGrid = reduced(comparison.grid, value: { $0.gap })
+        firstPlot = reduced(plot(comparison, subject: true), value: { $0.value })
+        secondPlot = reduced(plot(comparison, subject: false), value: { $0.value })
+    }
+
+    /// Bound chart work while retaining each bucket's endpoints and extrema.
+    /// Plot points keep their original segment IDs so missing samples stay gaps.
+    private func reduced<T>(_ points: [T], value: (T) -> Double, budget: Int = 600) -> [T] {
+        guard points.count > budget else { return points }
+        let width = Int(ceil(Double(points.count) / Double(budget / 4)))
+        var output: [T] = []
+        for start in stride(from: 0, to: points.count, by: width) {
+            let end = min(start + width, points.count)
+            let indices = start..<end
+            let low = indices.min { value(points[$0]) < value(points[$1]) }!
+            let high = indices.max { value(points[$0]) < value(points[$1]) }!
+            output += Set([start, low, high, end - 1]).sorted().map { points[$0] }
+        }
+        return output
+    }
+
     @ViewBuilder private func pairedChart(_ comparison: EffortComparison, distance: Double) -> some View {
-        let first = plot(comparison, subject: true), second = plot(comparison, subject: false)
+        let first = firstPlot, second = secondPlot
         if first.isEmpty && second.isEmpty { Text("\(channel.rawValue) unavailable for both efforts.").foregroundStyle(Color.secondary) }
         else {
             Chart {
@@ -210,7 +258,7 @@ struct RouteComparisonView: View {
         }
     }
     @ViewBuilder private func miniTimeline(_ comparison: EffortComparison) -> some View {
-        let first = plot(comparison, subject: true), second = plot(comparison, subject: false)
+        let first = firstPlot, second = secondPlot
         if first.isEmpty && second.isEmpty { Text("Samples unavailable").font(.caption2).foregroundStyle(Color.secondary) }
         else {
             Chart {

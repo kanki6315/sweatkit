@@ -61,16 +61,41 @@ public actor PrivateCloudCopy: CKSyncEngineDelegate {
             total: originals.count, pending: disk.replica.pendingSaves.count + disk.replica.pendingDeletes.count,
             lastConfirmed: disk.lastConfirmed, message: failure)
     }
+    /// Check before reading and hashing a potentially large original file.
+    public func needsOriginal(_ record: CloudRecord) -> Bool {
+        guard record.kind == .original, let subject = record.subject,
+              !FileManager.default.fileExists(atPath: assetURL(record).path) else { return false }
+        return !disk.replica.deletedSubjects.contains(subject)
+    }
+
     public func stage(_ record: CloudRecord, original: Data? = nil) throws {
-        try record.validate()
-        if record.kind == .original, !disk.replica.deletedSubjects.contains(record.subject!) {
-            if !FileManager.default.fileExists(atPath: assetURL(record).path) {
-                guard let original, ContentHash(of: original) == record.assetHash else { throw CloudFailure.missingAsset }
-                try original.write(to: assetURL(record), options: .atomic)
+        try stage([record], originals: original.map { [record.name: $0] } ?? [:])
+    }
+
+    /// A bounded batch shares one durable checkpoint. Unchanged retries do no writes.
+    public func stage(_ records: [CloudRecord], originals: [String: Data]) throws {
+        var next = disk.replica
+        var changed = false
+        for record in records {
+            try record.validate()
+            if next.records[record.name] != record {
+                try next.merge(record)
+                changed = true
             }
         }
-        try disk.replica.merge(record)
-        try persist()
+        let deleted = next.deletedSubjects
+        for record in records where record.kind == .original && !deleted.contains(record.subject!) {
+            if !FileManager.default.fileExists(atPath: assetURL(record).path) {
+                guard let bytes = originals[record.name], ContentHash(of: bytes) == record.assetHash else { throw CloudFailure.missingAsset }
+                try bytes.write(to: assetURL(record), options: .atomic)
+            }
+        }
+        if changed {
+            let previous = disk.replica
+            disk.replica = next
+            do { try persist() }
+            catch { disk.replica = previous; throw error }
+        }
         try purgeDeletedAssets()
     }
     private func purgeDeletedAssets() throws {
