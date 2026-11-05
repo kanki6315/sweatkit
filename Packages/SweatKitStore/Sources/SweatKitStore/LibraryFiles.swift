@@ -24,6 +24,8 @@ struct LibraryFiles: Sendable {
 
     let root: URL
 
+    var thumbnailsDirectory: URL { root.appendingPathComponent("Thumbnails", isDirectory: true) }
+
     var databaseURL: URL { root.appending(path: Self.databaseName) }
     var originalsDirectory: URL { root.appending(path: Self.originalsName, directoryHint: .isDirectory) }
     var streamsDirectory: URL { root.appending(path: Self.streamsName, directoryHint: .isDirectory) }
@@ -44,6 +46,11 @@ struct LibraryFiles: Sendable {
         let manager = FileManager.default
         try manager.createDirectory(at: originalsDirectory, withIntermediateDirectories: true)
         try manager.createDirectory(at: streamsDirectory, withIntermediateDirectories: true)
+        try manager.createDirectory(at: thumbnailsDirectory, withIntermediateDirectories: true)
+        var thumbnails = thumbnailsDirectory
+        var thumbnailValues = URLResourceValues()
+        thumbnailValues.isExcludedFromBackup = true
+        try thumbnails.setResourceValues(thumbnailValues)
         // Streams are derived and rebuilt from originals, so they stay out of backups.
         var streams = streamsDirectory
         var values = URLResourceValues()

@@ -224,6 +224,8 @@ public actor ActivityLibrary {
 
         if identityNeedsRecovery && FileManager.default.fileExists(atPath: identityURL.path) { try await reconcileIdentity() }
 
+        if try deletedIdentities().contains(identity) { throw LibraryError.permanentlyDeleted(identity) }
+
         // Already imported: nothing to decode, store or compute.
         if let activity = try await finishedActivity(of: identity, holding: hash) {
             if !FileManager.default.fileExists(atPath: identityURL.path) { try await reconcileIdentity() }
@@ -377,6 +379,8 @@ public actor ActivityLibrary {
     /// that, from the original, and stored. The metrics are not touched:
     /// that is `recompute`'s work.
     public func analysisStream(for id: SourceIdentity) async throws(LibraryError) -> AnalysisStream {
+        await begin(id)
+        defer { end(id) }
         do {
             return try await materials(for: try await currentRevision(of: id), renormalise: false, needsRecorded: false).stream
         } catch {
@@ -388,6 +392,8 @@ public actor ActivityLibrary {
     /// timer events and native samples. A missing, unreadable or outdated
     /// file is decoded again from the original and stored.
     public func recordedActivity(for id: SourceIdentity) async throws(LibraryError) -> RecordedActivity {
+        await begin(id)
+        defer { end(id) }
         do {
             let revision = try await currentRevision(of: id)
             let found = try await materials(for: revision, renormalise: false, needsRecorded: true)
@@ -733,6 +739,13 @@ public actor ActivityLibrary {
     /// on the next feed read or import, including after relaunch.
     private func reconcileIdentity() async throws {
         var journal = try readIdentityJournal()
+        let deleted = Set(journal.tombstones.filter { $0.kind == .deleted }.map(\.identity))
+        if !deleted.isEmpty {
+            // Intent is durable before any erasure. Recovery also repeats file
+            // collection after a crash between the metadata save and unlink.
+            try await store.eraseSources(deleted)
+            journal.candidates = journal.candidates.filter { !deleted.contains($0.value.identity) }
+        }
         let records = try await store.sourceRecords()
         var old: [SourceIdentity: ActivityRecord] = [:]
         for id in Set(records.compactMap(\.activityID)) {
@@ -840,6 +853,8 @@ public actor ActivityLibrary {
     /// Channels present in preserved alternatives but absent from the primary.
     /// Only measured/interpolated values count; an all-missing series does not.
     public func alternativeSources(for id: SourceIdentity) async throws -> [AlternativeOffer] {
+        await begin(id)
+        defer { end(id) }
         guard let row = try await store.activity(id) else { throw LibraryError.unknownActivity(id) }
         guard row.members.count > 1 else { return [] }
         var channels: [SourceIdentity: Set<Channel>] = [:]
@@ -869,6 +884,24 @@ public actor ActivityLibrary {
             if let row = try await store.activity(id), row.isHidden { rows.append(row) }
         }
         return rows.sorted { $0.start > $1.start }
+    }
+
+    /// The durable identities that imports and sync must never restore.
+    public func deletedIdentities() throws -> Set<SourceIdentity> {
+        Set(try readIdentityJournal().tombstones.filter { $0.kind == .deleted }.map(\.identity))
+    }
+
+    /// Caller must obtain explicit confirmation. Tombstones commit first; the
+    /// next feed/import completes erasure if storage fails or the app exits.
+    public func permanentlyDelete(_ id: SourceIdentity, at date: Date = Date()) async throws {
+        await begin(id)
+        defer { end(id) }
+        if identityNeedsRecovery && FileManager.default.fileExists(atPath: identityURL.path) { try await reconcileIdentity() }
+        guard let row = try await store.activity(id) else { throw LibraryError.unknownActivity(id) }
+        var journal = try readIdentityJournal()
+        journal.tombstones += Tombstone.written(.deleted, for: Set(row.members), at: date)
+        try writeIdentityJournal(journal)
+        try await reconcileIdentity()
     }
 
     /// User decisions apply to every current member, independent of primary.

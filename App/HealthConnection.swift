@@ -108,6 +108,11 @@ final class HealthConnection {
                     try save(state)
                 } while count >= 500
             }
+            let deleted = try await library.deletedIdentities()
+            let skipped = state.pending.filter { deleted.contains(SourceIdentity(source: .healthKit, externalID: $0.uuidString)) }
+            state.pending.subtract(skipped)
+            for id in skipped { state.workouts.removeValue(forKey: id) }
+            try save(state)
             let pending = state.pending.sorted { $0.uuidString < $1.uuidString }
             var completed = 0
             var failures = 0

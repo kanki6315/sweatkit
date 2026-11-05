@@ -41,9 +41,10 @@ public actor PersistentGarminLibrary: GarminLibrary {
     }
 
     public func garminTombstones() async throws -> Set<SourceIdentity> {
-        Set(try await library.store.sourceRecords().filter {
+        let deleted = try await library.deletedIdentities().filter { $0.source == .garmin }
+        return Set(try await library.store.sourceRecords().filter {
             $0.source == .garmin && ($0.state == .hidden || $0.state == .deleted)
-        }.map(\.identity))
+        }.map(\.identity)).union(deleted)
     }
 
     public func loadSyncState() async throws -> GarminSyncState? { try read().state }

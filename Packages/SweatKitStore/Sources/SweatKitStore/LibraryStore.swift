@@ -534,6 +534,43 @@ public actor LibraryStore: ModelActor {
         }
     }
 
+    /// Cache writes serialize with deletion and require a live revision, so
+    /// an in-flight map render cannot recreate a deleted activity's thumbnail.
+    public func saveThumbnail(_ data: Data, for revision: ContentHash, variant: ContentHash) throws {
+        try requireRevision(revision)
+        try data.write(to: thumbnailURL(for: revision, variant: variant), options: .atomic)
+    }
+
+    public nonisolated func thumbnailURL(for revision: ContentHash, variant: ContentHash) -> URL {
+        files.thumbnailsDirectory.appendingPathComponent("\(revision.hex)-\(variant.hex).png")
+    }
+
+    /// Erases source metadata and cached rows after the caller durably records
+    /// deletion intent. Safe to repeat after termination at any point. Shared
+    /// originals remain while any surviving revision references their hash.
+    public func eraseSources(_ identities: Set<SourceIdentity>) throws {
+        let keys = Set(identities.map(\.description))
+        let records = try modelContext.fetch(FetchDescriptor<SourceRecordEntity>()).filter { keys.contains($0.key) }
+        let affected = Set(records.compactMap { $0.activity?.id })
+        do {
+            for entity in try modelContext.fetch(FetchDescriptor<ActivityEntity>()) where affected.contains(entity.id) {
+                // The pipeline will rebuild a surviving merged activity from
+                // its remaining sources. Never leave a stale primary behind.
+                entity.members = []
+                modelContext.delete(entity)
+            }
+            for result in try modelContext.fetch(FetchDescriptor<DerivedResultEntity>())
+                where affected.contains(where: { result.owner == "activity/\($0)" }) {
+                modelContext.delete(result)
+            }
+            for record in records { modelContext.delete(record) }
+            try modelContext.save()
+        } catch { modelContext.rollback(); throw error }
+        // Metadata commits first. A crash here leaves only unreferenced files;
+        // retrying this method collects them even if the records are gone.
+        _ = try collectGarbage()
+    }
+
     // MARK: Garbage
 
     /// Removes files that no metadata names: originals and streams left by
@@ -557,6 +594,18 @@ public actor LibraryStore: ModelActor {
             if !isStream || !known.contains(url.deletingPathExtension().lastPathComponent) {
                 try manager.removeItem(at: url)
                 removedStreamFiles += 1
+            }
+        }
+
+        for url in try files.contents(of: files.thumbnailsDirectory) {
+            let revision = String(url.lastPathComponent.prefix(64))
+            if !known.contains(revision) { try manager.removeItem(at: url) }
+        }
+
+        let localities = files.root.appendingPathComponent("Localities")
+        if manager.fileExists(atPath: localities.path) {
+            for url in try files.contents(of: localities) where !known.contains(url.deletingPathExtension().lastPathComponent) {
+                try manager.removeItem(at: url)
             }
         }
 

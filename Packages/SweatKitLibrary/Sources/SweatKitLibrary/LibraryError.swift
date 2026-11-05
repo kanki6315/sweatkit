@@ -28,6 +28,8 @@ public enum LibraryError: Error, Hashable, Sendable {
     case originalDamaged(ContentHash)
     /// The work was cancelled before this item was reached.
     case cancelled
+    /// A durable tombstone forbids restoring this recording.
+    case permanentlyDeleted(SourceIdentity)
     /// The store could not read or write. The value describes the failure.
     case storage(String)
 }
@@ -72,6 +74,8 @@ extension LibraryError: LocalizedError {
             "The original file for this activity isn't on this device."
         case .originalDamaged:
             "The original file for this activity is damaged."
+        case .permanentlyDeleted:
+            "This recording was permanently deleted and cannot be imported again."
         case .cancelled:
             "Cancelled before this was reached."
         case .storage:

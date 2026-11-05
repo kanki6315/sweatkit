@@ -52,9 +52,8 @@ struct ActivityThumbnail: View {
         }
         try Task.checkCancellation()
         guard let source = try await library.store.sourceRecord(activity.primary), let id = activity.id else { return nil }
-        let key = ContentHash(of: Data("thumbnail-v1|\(source.currentRevision.hex)|\(activity.sport.rawValue)|\(activity.isIndoor)|\(activity.isVirtual)|\(dark)".utf8)).hex
-        let directory = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0].appendingPathComponent("SweatKitThumbnails")
-        let destination = directory.appendingPathComponent(key + ".png")
+        let key = ContentHash(of: Data("thumbnail-v1|\(source.currentRevision.hex)|\(activity.sport.rawValue)|\(activity.isIndoor)|\(activity.isVirtual)|\(dark)".utf8))
+        let destination = library.store.thumbnailURL(for: source.currentRevision, variant: key)
         if let cached = UIImage(contentsOfFile: destination.path) { return cached }
         let stream = try await library.analysisStream(for: id)
         let drawing = await Task.detached(priority: .utility) {
@@ -118,8 +117,7 @@ struct ActivityThumbnail: View {
                 path.stroke()
             }
         }
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        if let png = image.pngData() { try png.write(to: destination, options: .atomic) }
+        if let png = image.pngData() { try await library.store.saveThumbnail(png, for: source.currentRevision, variant: key) }
         return image
     }
 }

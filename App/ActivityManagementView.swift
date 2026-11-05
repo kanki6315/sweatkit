@@ -8,6 +8,7 @@ struct ActivityManagementView: View {
     let activity: ActivityRecord
     let library: ActivityLibrary
     @Environment(\.dismiss) private var dismiss
+    @State private var confirmsDeletion = false
     @State private var offers: [AlternativeOffer] = []
     @State private var title = ""
     @State private var busy = false
@@ -50,7 +51,25 @@ struct ActivityManagementView: View {
             Section {
                 Button("Hide activity") { perform { try await library.decide(.hidden(true), for: id) } }
             } footer: { Text("Hidden activities stay on your device and can be restored in Settings. Sync won't bring them back into the feed.") }
+            Section {
+                Button("Permanently delete activity", role: .destructive) { confirmsDeletion = true }
+            } footer: { Text("Erases this activity's recordings and computed data from SweatKit. It does not delete anything from Garmin or Apple Health.") }
             if let error { Section { Text(error).foregroundStyle(.red) } }
+        }
+        .confirmationDialog("Permanently delete this activity?", isPresented: $confirmsDeletion, titleVisibility: .visible) {
+            Button("Delete permanently", role: .destructive) {
+                perform {
+                    // Older builds kept unindexed thumbnails outside the library.
+                    // Drop that rebuildable cache before confirming erasure.
+                    let legacy = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+                        .appendingPathComponent("SweatKitThumbnails")
+                    if FileManager.default.fileExists(atPath: legacy.path) { try FileManager.default.removeItem(at: legacy) }
+                    try await library.permanentlyDelete(id)
+                }
+            }
+            Button("Cancel", role: .cancel) { }
+        } message: {
+            Text("All \(activity.members.count) recordings in this activity will be erased from SweatKit. This cannot be undone, and sync will not import them again. Copies used by another activity are kept.")
         }
         .disabled(busy)
         .navigationTitle("Activity info")
