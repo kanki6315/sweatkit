@@ -263,58 +263,67 @@ struct ActivityFeedRow: View {
                         .clipShape(RoundedRectangle(cornerRadius: 12))
                 }
                 VStack(alignment: .leading, spacing: 4) {
-                    ViewThatFits(in: .horizontal) {
+                    if typeSize.isAccessibilitySize {
+                        titleAndMetadata
+                        headline
+                    } else {
                         HStack(alignment: .top, spacing: 12) {
-                            Text(activity.title).font(prominent ? .title3.bold() : .headline)
-                                .fixedSize(horizontal: false, vertical: true)
-                            Spacer(minLength: 0)
-                            headline
-                        }
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(activity.title).font(.headline)
+                            titleAndMetadata
+                                .frame(maxWidth: .infinity, alignment: .leading)
                             headline
                         }
                     }
                     ViewThatFits(in: .horizontal) {
-                        HStack(spacing: 5) {
-                            Text("\(activity.isVirtual ? "Virtual ride" : activity.isIndoor ? "Indoor " + activity.sport.rawValue : activity.sport.rawValue.capitalized) · \(activity.start.formatted(.dateTime.weekday(.abbreviated).day().month(.abbreviated)))")
-                            SourceAttributionView(sources: activity.members.map(\.source))
-                        }
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text(activity.start, format: .dateTime.month(.abbreviated).day().hour().minute())
-                            SourceAttributionView(sources: activity.members.map(\.source))
-                        }
-                    }.font(.caption).foregroundStyle(.secondary)
-                    ViewThatFits(in: .horizontal) {
                         HStack(spacing: 12) { metrics }
                         VStack(alignment: .leading, spacing: 4) { metrics }
                     }.font(.subheadline)
+                    annotations
                 }
-            }
-            if !stale, !records.isEmpty {
-                Label(records.count == 1 ? records[0].title + " record" : "\(records.count) personal records", systemImage: "chart.line.uptrend.xyaxis")
-                    .font(.caption2).foregroundStyle(.secondary).padding(.horizontal, 6).padding(.vertical, 3)
-                    .background(Color(uiColor: .secondarySystemFill), in: RoundedRectangle(cornerRadius: 4))
-            }
-            if let route {
-                Label(route.rank(of: activity.id ?? activity.primary).map { "\(route.name) · #\($0) of \(route.ranked.count)" } ?? route.name,
-                      systemImage: "point.topleft.down.to.point.bottomright.curvepath")
-                    .font(.caption2).foregroundStyle(.secondary).padding(.horizontal, 6).padding(.vertical, 3)
-                    .background(Color(uiColor: .secondarySystemFill), in: RoundedRectangle(cornerRadius: 4))
-            }
-            if stale { Label("Results need recalculation", systemImage: "arrow.clockwise").font(.caption) }
-            if removedAtSource {
-                Label("Removed at source · kept on this device", systemImage: "archivebox")
-                    .font(.caption).foregroundStyle(.secondary)
+                .alignmentGuide(.listRowSeparatorLeading) { dimensions in dimensions[.leading] }
             }
         }
         .padding(.vertical, 5)
         .monospacedDigit()
     }
+    private var titleAndMetadata: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(activity.title)
+                .font(prominent ? .title3.bold() : .headline)
+                .lineLimit(typeSize.isAccessibilitySize ? nil : 1)
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 5) {
+                    Text("\(activity.isVirtual ? "Virtual ride" : activity.isIndoor ? "Indoor " + activity.sport.rawValue : activity.sport.rawValue.capitalized) · \(activity.start.formatted(.dateTime.weekday(.abbreviated).day().month(.abbreviated)))")
+                    SourceAttributionView(sources: activity.members.map(\.source))
+                }
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("\(activity.isVirtual ? "Virtual ride" : activity.isIndoor ? "Indoor " + activity.sport.rawValue : activity.sport.rawValue.capitalized) · \(activity.start.formatted(.dateTime.weekday(.abbreviated).day().month(.abbreviated)))")
+                    SourceAttributionView(sources: activity.members.map(\.source))
+                }
+            }.font(.caption).foregroundStyle(.secondary)
+        }
+    }
+    @ViewBuilder private var annotations: some View {
+        if !stale, !records.isEmpty {
+            Label(records.count == 1 ? records[0].title + " record" : "\(records.count) personal records", systemImage: "chart.line.uptrend.xyaxis")
+                .font(.caption2).foregroundStyle(.secondary).padding(.horizontal, 6).padding(.vertical, 3)
+                .background(Color(uiColor: .secondarySystemFill), in: RoundedRectangle(cornerRadius: 4))
+        }
+        if let route {
+            Label(route.rank(of: activity.id ?? activity.primary).map { "\(route.name) · #\($0) of \(route.ranked.count)" } ?? route.name,
+                  systemImage: "point.topleft.down.to.point.bottomright.curvepath")
+                .font(.caption2).foregroundStyle(.secondary).padding(.horizontal, 6).padding(.vertical, 3)
+                .background(Color(uiColor: .secondarySystemFill), in: RoundedRectangle(cornerRadius: 4))
+        }
+        if stale { Label("Results need recalculation", systemImage: "arrow.clockwise").font(.caption) }
+        if removedAtSource {
+            Label("Removed at source · kept on this device", systemImage: "archivebox")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+    }
     @ViewBuilder private var headline: some View {
         if let headline = activity.headline {
             let isPower = headline.kind == "averagePower" || headline.kind == "weightedPower"
-            VStack(alignment: .trailing, spacing: 2) {
+            VStack(alignment: typeSize.isAccessibilitySize ? .leading : .trailing, spacing: 2) {
                 Text(headline.value.value.map { isPower ? String(format: "%.0f W", $0) : pace($0) } ?? "—")
                     .font(.title3.weight(.semibold)).fixedSize()
                 Text(headline.kind == "weightedPower" ? "weighted power" : isPower ? "average power" : "pace")
