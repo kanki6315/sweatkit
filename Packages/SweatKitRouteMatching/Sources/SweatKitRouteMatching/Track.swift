@@ -48,6 +48,6 @@ public struct CleanedTrack: Hashable, Codable, Sendable {
     /// The distance travelled: the sum of the distances between consecutive
     /// points, in metres. A track of fewer than two points has length 0.
     public var length: Double {
-        fatalError("unimplemented")
+        Polyline(points.map(\.coordinate)).length
     }
 }

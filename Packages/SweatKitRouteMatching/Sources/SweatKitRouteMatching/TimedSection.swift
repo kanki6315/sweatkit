@@ -34,12 +34,15 @@ public struct TimedSection: Hashable, Codable, Sendable {
     /// the end mark would not lie after the start mark, which is a line no
     /// longer than twice `rules.endTolerance`.
     public init?(referenceLength: Double, rules: MatchingRules = .standard) {
-        fatalError("unimplemented")
+        let start = rules.endTolerance
+        let end = referenceLength - rules.endTolerance
+        guard end > start else { return nil }
+        self.init(start: start, end: end)
     }
 
     /// The length of the section in metres.
     public var length: Double {
-        fatalError("unimplemented")
+        end - start
     }
 }
 
@@ -63,7 +66,7 @@ public struct SectionTimes: Hashable, Codable, Sendable {
     /// The effort's time over the timed section: `end` minus `start`. This is
     /// the route time that rankings and statistics use.
     public var duration: TimeInterval {
-        fatalError("unimplemented")
+        end - start
     }
 }
 
@@ -98,7 +101,17 @@ extension Alignment {
     /// interpolation of the stored clock: it does not check whether pause
     /// positions are reliable.
     public func time(atRouteDistance distance: Double, clock: ComparisonClock) -> TimeInterval? {
-        fatalError("unimplemented")
+        // The first point at or beyond the distance. Route distance never
+        // decreases along an effort, so every point before it is below.
+        let arrival = firstIndex(in: points.count) { points[$0].routeDistance >= distance }
+        guard arrival < points.count else { return nil }
+        let after = points[arrival]
+        if after.routeDistance == distance { return after.time(on: clock) }
+        // The first point is already beyond the distance.
+        guard arrival > 0 else { return nil }
+        let before = points[arrival - 1]
+        let fraction = (distance - before.routeDistance) / (after.routeDistance - before.routeDistance)
+        return before.time(on: clock) + fraction * (after.time(on: clock) - before.time(on: clock))
     }
 
     /// When the effort crossed each mark of the timed section.
@@ -112,6 +125,27 @@ extension Alignment {
     ///   (`movingClockUnavailable`),
     /// - the effort does not cross both marks (`timedSectionNotCovered`).
     public func sectionTimes(clock: ComparisonClock, rules: MatchingRules = .standard) -> Metric<SectionTimes> {
-        fatalError("unimplemented")
+        guard let section = TimedSection(referenceLength: referenceLength, rules: rules) else {
+            return .unavailable(.referenceLineTooShort)
+        }
+        if clock == .moving, !pausePositionsAreReliable {
+            return .unavailable(.movingClockUnavailable)
+        }
+        guard let start = time(atRouteDistance: section.start, clock: clock),
+              let end = time(atRouteDistance: section.end, clock: clock)
+        else {
+            return .unavailable(.timedSectionNotCovered)
+        }
+        return .available(SectionTimes(clock: clock, start: start, end: end))
+    }
+}
+
+extension MappedPoint {
+    /// The point's time on one clock.
+    func time(on clock: ComparisonClock) -> TimeInterval {
+        switch clock {
+        case .moving: movingTime
+        case .elapsed: elapsedTime
+        }
     }
 }

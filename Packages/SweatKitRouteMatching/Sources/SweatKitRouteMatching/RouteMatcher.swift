@@ -18,7 +18,10 @@ public struct RouteReference: Hashable, Codable, Sendable {
     /// The reference for a route whose first activity has this track, or nil
     /// when the track has fewer than two points or no length.
     public init?(track: CleanedTrack, rules: MatchingRules = .standard) {
-        fatalError("unimplemented")
+        guard let signature = TrackSignature(track: track, rules: rules),
+              let line = ReferenceLine(track: track)
+        else { return nil }
+        self.init(signature: signature, line: line)
     }
 }
 
@@ -54,6 +57,22 @@ public enum RouteMatcher {
         against routes: [RouteReference],
         rules: MatchingRules = .standard
     ) -> [RouteMatch] {
-        fatalError("unimplemented")
+        guard let signature = TrackSignature(track: track, rules: rules) else { return [] }
+        let shortlist = RouteDetection.shortlist(
+            candidate: signature,
+            references: routes.map(\.signature),
+            rules: rules
+        )
+        let alignments = shortlist.map { RouteAlignment.align(track, to: routes[$0].line, rules: rules) }
+        let measures = alignments.map { $0.measures(rules: rules) }
+        let outcomes = RouteAlignment.outcomes(for: measures, rules: rules)
+        return shortlist.indices.map { position in
+            RouteMatch(
+                routeIndex: shortlist[position],
+                alignment: alignments[position],
+                measures: measures[position],
+                outcome: outcomes[position]
+            )
+        }
     }
 }

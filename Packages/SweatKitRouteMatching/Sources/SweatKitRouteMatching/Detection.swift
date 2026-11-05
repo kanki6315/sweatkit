@@ -1,3 +1,4 @@
+import Foundation
 import SweatKitModel
 
 /// One cell of the detection grid.
@@ -11,6 +12,11 @@ import SweatKitModel
 /// divided by the cell size, rounded down. Rounding is towards negative
 /// infinity, so the cells either side of the equator and the prime meridian
 /// are distinct.
+///
+/// Because the easting shrinks with the cosine of the latitude, a cell is
+/// 50 m wide and 50 m tall everywhere but leans to one side away from
+/// longitude 0. Every track sees the same lean, so shared cells still mean a
+/// shared course.
 public struct GridCell: Hashable, Codable, Sendable {
     /// Counts cells east of longitude 0. Negative to the west.
     public var column: Int
@@ -53,7 +59,16 @@ public struct TrackSignature: Hashable, Codable, Sendable {
     /// The signature of a cleaned track, or nil when the track has fewer than
     /// two points and so has no course to detect.
     public init?(track: CleanedTrack, rules: MatchingRules = .standard) {
-        fatalError("unimplemented")
+        guard track.points.count >= 2, let first = track.points.first, let last = track.points.last else {
+            return nil
+        }
+        self.init(
+            sportFamily: track.sportFamily,
+            length: track.length,
+            start: first.coordinate,
+            finish: last.coordinate,
+            cells: RouteDetection.cells(of: track, rules: rules)
+        )
     }
 }
 
@@ -94,13 +109,13 @@ public struct DetectionGates: Hashable, Sendable {
     /// The spec's step 1.2: same sport family, total distance within
     /// tolerance, and start and finish each within tolerance.
     public var isCandidate: Bool {
-        fatalError("unimplemented")
+        sameSportFamily && distanceWithinTolerance && startWithinTolerance && finishWithinTolerance
     }
 
     /// The spec's step 1.3: a candidate that also shares enough cells. Only a
     /// shortlisted candidate goes on to alignment.
     public var isShortlisted: Bool {
-        fatalError("unimplemented")
+        isCandidate && sharesEnoughCells
     }
 }
 
@@ -118,13 +133,51 @@ public enum RouteDetection {
     /// whole spacing. The literal reading is taken: nothing is added for it,
     /// so a 110 m track gives points at 0, 25, 50, 75 and 100 m. A track with
     /// one point gives that point, and an empty track gives nothing.
+    ///
+    /// A spacing that is not above zero cannot be stepped along. The track's
+    /// own points are returned unchanged for it.
     public static func resample(_ track: CleanedTrack, rules: MatchingRules = .standard) -> [Coordinate] {
-        fatalError("unimplemented")
+        let line = Polyline(track.points.map(\.coordinate))
+        guard let first = line.points.first else { return [] }
+        let spacing = rules.resampleSpacing
+        guard spacing > 0 else { return line.points }
+
+        var resampled = [first]
+        // The track point at or beyond the next resampled point.
+        var upper = 1
+        var step = 1
+        while true {
+            let target = Double(step) * spacing
+            guard target <= line.length else { break }
+            // The target is no further than the line's last point, so this
+            // stops on a point of the line.
+            while upper < line.points.count - 1, line.cumulative[upper] < target {
+                upper += 1
+            }
+            let pieceLength = line.cumulative[upper] - line.cumulative[upper - 1]
+            let fraction = pieceLength > 0 ? (target - line.cumulative[upper - 1]) / pieceLength : 1
+            resampled.append(Geodesy.interpolate(from: line.points[upper - 1], to: line.points[upper], fraction: fraction))
+            step += 1
+        }
+        return resampled
     }
 
     /// The grid cell that holds a position. `GridCell` defines the grid.
     public static func cell(containing coordinate: Coordinate, rules: MatchingRules = .standard) -> GridCell {
-        fatalError("unimplemented")
+        let latitude = Geodesy.radians(coordinate.latitude)
+        let northing = Geodesy.earthRadius * latitude
+        let easting = Geodesy.earthRadius * Geodesy.radians(coordinate.longitude) * cos(latitude)
+        return GridCell(
+            column: cellIndex(easting / rules.cellSize),
+            row: cellIndex(northing / rules.cellSize)
+        )
+    }
+
+    /// A count of cells, rounded down. A value that is not a number, which
+    /// only a broken position or a cell size of zero can give, counts as 0
+    /// instead of stopping the app.
+    private static func cellIndex(_ cells: Double) -> Int {
+        Int(exactly: cells.rounded(.down)) ?? 0
     }
 
     /// The grid cells a track passes through.
@@ -133,7 +186,7 @@ public enum RouteDetection {
     /// resampled points. A cell the line only clips between two resampled
     /// points is not recorded.
     public static func cells(of track: CleanedTrack, rules: MatchingRules = .standard) -> Set<GridCell> {
-        fatalError("unimplemented")
+        Set(resample(track, rules: rules).map { cell(containing: $0, rules: rules) })
     }
 
     /// The share of grid cells two tracks have in common: the number of cells
@@ -144,7 +197,9 @@ public enum RouteDetection {
     /// at least that share of each track's own cells, which is the same as
     /// dividing by the larger set. Two tracks with no cells share 0.
     public static func sharedCellFraction(_ a: Set<GridCell>, _ b: Set<GridCell>) -> Double {
-        fatalError("unimplemented")
+        let larger = max(a.count, b.count)
+        guard larger > 0 else { return 0 }
+        return Double(a.intersection(b).count) / Double(larger)
     }
 
     /// Every detection gate for one candidate against one reference.
@@ -161,7 +216,18 @@ public enum RouteDetection {
         reference: TrackSignature,
         rules: MatchingRules = .standard
     ) -> DetectionGates {
-        fatalError("unimplemented")
+        let sharedCellFraction = sharedCellFraction(candidate.cells, reference.cells)
+        return DetectionGates(
+            sameSportFamily: candidate.sportFamily == reference.sportFamily,
+            distanceWithinTolerance: abs(candidate.length - reference.length)
+                <= rules.distanceTolerance * reference.length,
+            startWithinTolerance: Geodesy.distance(from: candidate.start, to: reference.start)
+                <= rules.endpointTolerance,
+            finishWithinTolerance: Geodesy.distance(from: candidate.finish, to: reference.finish)
+                <= rules.endpointTolerance,
+            sharedCellFraction: sharedCellFraction,
+            sharesEnoughCells: sharedCellFraction >= rules.minimumSharedCells
+        )
     }
 
     /// The indices of the references the candidate is shortlisted against, in
@@ -171,6 +237,8 @@ public enum RouteDetection {
         references: [TrackSignature],
         rules: MatchingRules = .standard
     ) -> [Int] {
-        fatalError("unimplemented")
+        references.indices.filter { index in
+            gates(candidate: candidate, reference: references[index], rules: rules).isShortlisted
+        }
     }
 }

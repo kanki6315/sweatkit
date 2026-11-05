@@ -91,7 +91,37 @@ public struct EffortComparison: Hashable, Sendable {
     /// it stays at the end mark. Where several points share one clock time,
     /// the marker is at the furthest of them.
     public func ghost(at clockTime: TimeInterval) -> GhostFrame {
-        fatalError("unimplemented")
+        let subjectDistance = marker(of: subject, times: subjectTimes, at: clockTime)
+        let baselineDistance = marker(of: baseline, times: baselineTimes, at: clockTime)
+        return GhostFrame(
+            subjectRouteDistance: subjectDistance,
+            baselineRouteDistance: baselineDistance,
+            separation: baselineDistance - subjectDistance
+        )
+    }
+
+    /// The route distance of one effort's marker when the shared clock reads
+    /// `clockTime`.
+    private func marker(of effort: Alignment, times: SectionTimes, at clockTime: TimeInterval) -> Double {
+        guard clockTime > 0 else { return section.start }
+        guard clockTime < times.duration else { return section.end }
+        let time = times.start + clockTime
+        let points = effort.points
+        // The first point reached after this moment. Time never decreases
+        // along an effort, so every point before it was reached by now, and
+        // the one just before it is the furthest of those.
+        let next = firstIndex(in: points.count) { points[$0].time(on: clock) > time }
+        guard next > 0 else { return section.start }
+        let before = points[next - 1]
+        guard next < points.count else { return within(before.routeDistance) }
+        let after = points[next]
+        let fraction = (time - before.time(on: clock)) / (after.time(on: clock) - before.time(on: clock))
+        return within(before.routeDistance + fraction * (after.routeDistance - before.routeDistance))
+    }
+
+    /// A route distance held inside the timed section.
+    private func within(_ distance: Double) -> Double {
+        min(section.end, max(section.start, distance))
     }
 }
 
@@ -106,7 +136,7 @@ public enum RouteComparison {
         subjectPausePositionsAreReliable: Bool,
         baselinePausePositionsAreReliable: Bool
     ) -> ComparisonClock {
-        fatalError("unimplemented")
+        subjectPausePositionsAreReliable && baselinePausePositionsAreReliable ? requested : .elapsed
     }
 
     /// Compares two efforts that are aligned with the same reference line.
@@ -130,12 +160,81 @@ public enum RouteComparison {
     /// (`referenceLineTooShort`) or either effort does not cross both marks
     /// (`timedSectionNotCovered`). Both alignments must have the same
     /// reference length; the subject's is the one used.
+    ///
+    /// A grid spacing that is not above zero cannot be stepped along. The grid
+    /// is then the two marks alone.
     public static func compare(
         _ subject: Alignment,
         against baseline: Alignment,
         clock requested: ComparisonClock = .moving,
         rules: MatchingRules = .standard
     ) -> Metric<EffortComparison> {
-        fatalError("unimplemented")
+        guard let section = TimedSection(referenceLength: subject.referenceLength, rules: rules) else {
+            return .unavailable(.referenceLineTooShort)
+        }
+        let clock = clock(
+            requested: requested,
+            subjectPausePositionsAreReliable: subject.pausePositionsAreReliable,
+            baselinePausePositionsAreReliable: baseline.pausePositionsAreReliable
+        )
+        guard let subjectStart = subject.time(atRouteDistance: section.start, clock: clock),
+              let subjectEnd = subject.time(atRouteDistance: section.end, clock: clock),
+              let baselineStart = baseline.time(atRouteDistance: section.start, clock: clock),
+              let baselineEnd = baseline.time(atRouteDistance: section.end, clock: clock)
+        else {
+            return .unavailable(.timedSectionNotCovered)
+        }
+
+        var distances: [Double] = []
+        let spacing = rules.comparisonGridSpacing
+        if spacing > 0 {
+            var step = 0
+            while true {
+                let distance = section.start + Double(step) * spacing
+                guard distance <= section.end else { break }
+                distances.append(distance)
+                step += 1
+            }
+        } else {
+            distances.append(section.start)
+        }
+        if let last = distances.last, last < section.end {
+            distances.append(section.end)
+        }
+
+        var grid: [ComparisonGridPoint] = []
+        grid.reserveCapacity(distances.count)
+        for distance in distances {
+            // Both efforts cross both marks, so each has a time at every
+            // distance between them.
+            guard let subjectTime = subject.time(atRouteDistance: distance, clock: clock),
+                  let baselineTime = baseline.time(atRouteDistance: distance, clock: clock),
+                  let subjectElapsed = subject.time(atRouteDistance: distance, clock: .elapsed),
+                  let baselineElapsed = baseline.time(atRouteDistance: distance, clock: .elapsed)
+            else {
+                return .unavailable(.timedSectionNotCovered)
+            }
+            let subjectClock = subjectTime - subjectStart
+            let baselineClock = baselineTime - baselineStart
+            grid.append(ComparisonGridPoint(
+                routeDistance: distance,
+                subjectClock: subjectClock,
+                baselineClock: baselineClock,
+                gap: subjectClock - baselineClock,
+                subjectElapsedTime: subjectElapsed,
+                baselineElapsedTime: baselineElapsed
+            ))
+        }
+
+        return .available(EffortComparison(
+            clock: clock,
+            movingTimeIsAvailable: subject.pausePositionsAreReliable && baseline.pausePositionsAreReliable,
+            section: section,
+            subjectTimes: SectionTimes(clock: clock, start: subjectStart, end: subjectEnd),
+            baselineTimes: SectionTimes(clock: clock, start: baselineStart, end: baselineEnd),
+            grid: grid,
+            subject: subject,
+            baseline: baseline
+        ))
     }
 }
