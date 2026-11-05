@@ -11,7 +11,7 @@ enum StatStyle {
 
     var valueFont: Font {
         switch self {
-        case .headline: .title.weight(.bold)
+        case .headline: .largeTitle.weight(.semibold)
         case .panel: .title3.weight(.heavy)
         case .compact: .callout.weight(.bold)
         }
@@ -47,22 +47,12 @@ struct StatSlotView: View {
 
     var body: some View {
         let quiet: HierarchicalShapeStyle = contrast == .increased ? .primary : .secondary
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(alignment: .firstTextBaseline, spacing: 3) {
-                // The numerals sit against their unit, so a value with
-                // fewer digits leaves its space on the left.
-                ZStack(alignment: .trailing) {
-                    Text(slot.template).hidden()
-                    Text(slot.stat.value)
-                        .foregroundStyle(slot.stat.value == StatFormatter.missing ? quiet : .primary)
-                }
-                .font(style.valueFont)
-                .monospacedDigit()
-                if !slot.stat.unit.isEmpty {
-                    Text(slot.stat.unit)
-                        .font(style.unitFont)
-                        .foregroundStyle(quiet)
-                }
+        VStack(alignment: .leading, spacing: 4) {
+            // Reserve the complete value-and-unit width, rather than padding
+            // the number on its left. Values and labels share one leading edge.
+            ZStack(alignment: .leading) {
+                valueRow(slot.template).hidden()
+                valueRow(slot.stat.value)
             }
             Text(slot.label)
                 .font(style.labelFont)
@@ -74,6 +64,19 @@ struct StatSlotView: View {
         .accessibilityLabel(slot.spokenLabel)
         .accessibilityValue(slot.stat.spoken)
     }
+
+    private func valueRow(_ value: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 3) {
+            Text(value)
+                .font(style.valueFont).monospacedDigit()
+                .foregroundStyle(value == StatFormatter.missing ? .secondary : .primary)
+            if !slot.stat.unit.isEmpty {
+                Text(slot.stat.unit).font(style.unitFont)
+                    .foregroundStyle(contrast == .increased ? .primary : .secondary)
+            }
+        }
+    }
+
 }
 
 /// Lays stat slots out row by row in as many columns as fit, up to a

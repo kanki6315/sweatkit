@@ -52,7 +52,7 @@ public struct StatsPanel: View {
                 }
             }
             Divider()
-            StatGridLayout(maximumColumns: 5, spacing: 8) {
+            StatGridLayout(maximumColumns: 5, spacing: 4) {
                 ForEach(slots.filter { !primaryLabels.contains($0.label) }) {
                     StatSlotView(slot: $0, style: .compact)
                 }
