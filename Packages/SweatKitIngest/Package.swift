@@ -23,7 +23,9 @@ let package = Package(
             name: "SweatKitIngestTests",
             dependencies: [
                 "SweatKitIngest",
+                .product(name: "SweatKitModel", package: "SweatKitModel"),
                 .product(name: "SweatKitTestSupport", package: "SweatKitModel"),
+                .product(name: "FITSwiftSDK", package: "fit-swift-sdk"),
             ]
         ),
     ]

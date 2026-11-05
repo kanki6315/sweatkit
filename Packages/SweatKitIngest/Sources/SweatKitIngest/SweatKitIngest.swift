@@ -1,6 +1,11 @@
 import SweatKitModel
 
-/// Decodes originals into a `RecordedActivity` and builds the analysis
-/// stream from it under the versioned stream rules. The spec's "Stream
-/// rules" section is the contract.
+/// Turns an original into the stream everything else reads.
+///
+/// - `FITActivityDecoder` reads a FIT file into a `RecordedActivity`.
+/// - `StreamNormaliser` builds the 1 Hz `AnalysisStream` from a
+///   `RecordedActivity` under `StreamRules`.
+///
+/// The spec's "Stream rules" section and the "Time" table of "Analysis
+/// metrics" are the contract.
 public enum SweatKitIngest {}
