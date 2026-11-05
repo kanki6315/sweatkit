@@ -14,7 +14,7 @@ import SweatKitModel
 ///
 /// `current` is what the app uses. The parts are variables so that a test can
 /// stand in for a later build by changing one.
-public struct PipelineVersions: Hashable, Sendable {
+public struct PipelineVersions: Codable, Hashable, Sendable {
     /// The version of the FIT decoder. Stored decoded activities carry it,
     /// and one from another version is decoded again from its original.
     public var decoder: Int

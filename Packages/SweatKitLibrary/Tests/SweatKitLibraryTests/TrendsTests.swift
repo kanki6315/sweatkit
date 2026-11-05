@@ -90,12 +90,130 @@ import SweatKitTestSupport
         let first = try await library.trendsHistory()
         _ = try await library.importFile(try Fixtures.FIT.zwiftRide.data(), as: id)
         let changed = try await library.trendsHistory()
+        #expect(changed.id != first.id)
         #expect(changed.activities.count == 1)
         #expect(changed.activities.first?.curve != first.activities.first?.curve)
         #expect(changed.activities.first?.activity.isVirtual == true)
         try await library.permanentlyDelete(id)
         #expect(try await library.trendsHistory().activities.isEmpty)
     }
+    @Test func presentationCacheReusesAndInvalidates() async {
+        let cache = TrendsPresentationCache()
+        var profile = AthleteProfile()
+        profile.thresholdPowerHistory = [.init(effectiveFrom: day.addingTimeInterval(-86400), watts: 250)]
+        var history = TrendsHistory(activities: [row()], profile: profile)
+        var options = TrendsOptions(sport: "Rides", dateWindow: "Last 90 days", setting: "All settings",
+                                    measure: .distance, period: .week, comparison: "90 days", recordWindow: "All time")
+        let first = await cache.presentation(history, options: options, now: day, calendar: calendar)
+        let reused = await cache.presentation(history, options: options, now: day.addingTimeInterval(1), calendar: calendar)
+        #expect(reused.setThresholds.last?.date == first.setThresholds.last?.date)
+        let later = await cache.presentation(history, options: options, now: day.addingTimeInterval(60), calendar: calendar)
+        #expect(later.setThresholds.last?.date == day.addingTimeInterval(60))
+        options.measure = .time
+        let time = await cache.presentation(history, options: options, now: day, calendar: calendar)
+        #expect(time.buckets.reduce(0) { $0 + $1.total.known } == 1200)
+        history.activities = []
+        let deleted = await cache.presentation(history, options: options, now: day, calendar: calendar)
+        #expect(deleted.rows.isEmpty)
+        #expect(deleted.records.isEmpty)
+    }
+
+    @Test func diskCachesSurviveRestartAndExpireSafely() async throws {
+        let temp = TemporaryLibrary()
+        let library = try temp.open()
+        _ = try await library.importFile(try Fixtures.FIT.outdoorRide.data())
+        var profile = try await library.profile()
+        profile.thresholdPowerHistory = [.init(effectiveFrom: .distantPast, watts: 250)]
+        _ = try await library.saveProfile(profile)
+        let history = try await library.trendsHistory()
+        let options = TrendsOptions(sport: "Rides", dateWindow: "All time", setting: "All settings",
+                                    measure: .distance, period: .week, comparison: "All time", recordWindow: "All time")
+        let first = await TrendsPresentationCache().presentation(history, options: options, now: day,
+                                                                 calendar: calendar, store: library.store)
+        let reopened = try temp.open()
+        let restored = try await reopened.trendsHistory()
+        #expect(restored.id == history.id)
+        let cached = await TrendsPresentationCache().presentation(restored, options: options, now: day.addingTimeInterval(1),
+                                                                  calendar: calendar, store: reopened.store)
+        #expect(cached.setThresholds.last?.date == first.setThresholds.last?.date)
+        let expired = await TrendsPresentationCache().presentation(restored, options: options, now: day.addingTimeInterval(60),
+                                                                   calendar: calendar, store: reopened.store)
+        #expect(expired.setThresholds.last?.date == day.addingTimeInterval(60))
+        let generation = try await reopened.store.trendsCacheGeneration()
+        let key = ContentHash(of: Data("late calculation".utf8))
+        let id = try #require(restored.activities.first?.activity.id)
+        try await reopened.permanentlyDelete(id)
+        try await reopened.store.saveTrendsCache(Data("old result".utf8), key: key, generation: generation)
+        #expect(try await reopened.store.readTrendsCache(key: key, generation: generation) == nil)
+        let afterDelete = try temp.open()
+        #expect(try await afterDelete.trendsHistory().activities.isEmpty)
+    }
+
+    @Test func diskHistoryRejectsCorruptionAndAlgorithmChanges() async throws {
+        let temp = TemporaryLibrary()
+        let library = try temp.open()
+        _ = try await library.importFile(try Fixtures.FIT.outdoorRide.data())
+        let first = try await library.trendsHistory()
+        let directory = temp.root.appendingPathComponent("LocalMetadata/TrendsCache")
+        let files = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
+        for file in files where file.lastPathComponent != "generation" { try Data("broken".utf8).write(to: file) }
+        let reopened = try temp.open()
+        let repaired = try await reopened.trendsHistory()
+        #expect(repaired.id != first.id)
+        #expect(repaired.activities.count == first.activities.count)
+        #expect(repaired.activities.first?.curve == first.activities.first?.curve)
+        var versions = PipelineVersions.current
+        versions.decoder += 1
+        let upgraded = try temp.open(versions: versions)
+        let rebuilt = try await upgraded.trendsHistory()
+        #expect(rebuilt.id != repaired.id)
+        #expect(rebuilt.activities.first?.isStale == true)
+        let excluded = try temp.root.appendingPathComponent("LocalMetadata").resourceValues(forKeys: [.isExcludedFromBackupKey])
+        #expect(excluded.isExcludedFromBackup == true)
+    }
+
+    @Test func diskCacheBoundsStorageAndInvalidatesDirectStoreWrites() async throws {
+        let temp = TemporaryLibrary(); let library = try temp.open()
+        let generation = try await library.store.trendsCacheGeneration()
+        for index in 0..<20 {
+            try await library.store.saveTrendsCache(Data([UInt8(index)]), key: ContentHash(of: Data("\(index)".utf8)), generation: generation)
+        }
+        let directory = temp.root.appendingPathComponent("LocalMetadata/TrendsCache")
+        #expect(try FileManager.default.contentsOfDirectory(atPath: directory.path).count == 13)
+        try await library.store.saveProfile(AthleteProfile())
+        #expect(try await library.store.trendsCacheGeneration() != generation)
+    }
+
+    @Test func concurrentHistoryRequestsShareSnapshot() async throws {
+        let temp = TemporaryLibrary(); let library = try temp.open()
+        _ = try await library.importFile(try Fixtures.FIT.outdoorRide.data())
+        async let first = library.trendsHistory()
+        async let second = library.trendsHistory()
+        let (a, b) = try await (first, second)
+        #expect(a.id == b.id)
+        #expect(try await library.trendsHistory().id == a.id)
+    }
+
+    @Test func slidingThresholdsMatchRollingEstimateAcrossDSTAndGaps() {
+        var c = calendar; c.timeZone = TimeZone(identifier: "America/New_York")!
+        var rows = (-100...160).map { row(Double($0), power: Double(200 + ($0 * $0) % 170), id: "\($0)") }
+        rows[110].isStale = true
+        rows[111].curve = []
+        rows.append(row(-90, power: 900, id: "boundary"))
+        let end = day.addingTimeInterval(300 * 86400)
+        let points = TrendsAggregation.thresholds(rows.reversed(), range: day..<end, calendar: c)
+        var date = day
+        var expected: [TrendPoint] = []
+        while date < end {
+            if let value = TrendsAggregation.estimate(rows, on: date, calendar: c) {
+                expected.append(TrendPoint(date: date, value: value))
+            }
+            date = c.date(byAdding: .day, value: 1, to: date)!
+        }
+        #expect(points.map(\.date) == expected.map(\.date))
+        #expect(points.map(\.value) == expected.map(\.value))
+    }
+
     @Test func representativeYearAggregationBenchmark() {
         let rows = (0..<365).map { row(Double($0), power: Double(200 + $0 % 100), id: "\($0)") }
         let end = day.addingTimeInterval(365 * 86400)
@@ -122,15 +240,18 @@ import SweatKitTestSupport
         let id = try #require(item.activity.id)
         #expect(!item.curve.isEmpty)
         let cached = try #require(try await library.store.derivedResults(owner: .activity(id)).first { $0.kind.hasPrefix("trends.") })
-        _ = try await library.trendsHistory()
+        let reused = try await library.trendsHistory()
+        #expect(reused.id == first.id)
         let again = try await library.store.derivedResult(owner: .activity(id), kind: cached.kind)
         #expect(again?.computedAt == cached.computedAt)
         let reopened = try temp.open()
         #expect(try await reopened.trendsHistory().activities.first?.curve == item.curve)
+        #expect(try await reopened.trendsHistory().id == first.id)
         var profile = try await library.profile()
         profile.thresholdPowerHistory = [.init(effectiveFrom: item.activity.start, watts: 250)]
         _ = try await library.saveProfile(profile)
         let stale = try await library.trendsHistory()
+        #expect(stale.id != first.id)
         #expect(stale.activities.first?.isStale == true)
         #expect(stale.activities.first?.metrics == nil)
         try await library.decide(.hidden(true), for: id)

@@ -26,6 +26,7 @@ final class LibraryModel {
     var error: String?
     var filter = FeedFilter()
     private var cursor: FeedCursor?
+    let trendsPresentationCache = TrendsPresentationCache()
     private(set) var trendsRevision = 0
     private var generation = 0
     var routeCatalog = RouteCatalog(routes: [], reviews: [])
