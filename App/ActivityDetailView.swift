@@ -219,7 +219,7 @@ struct ActivityDetailView: View {
                         Button { dismiss() } label: {
                             Image(systemName: "chevron.left").foregroundStyle(.primary).frame(width: 36, height: 36)
                                 .background(Color(uiColor: .quaternarySystemFill), in: Circle()).frame(width: 44, height: 44)
-                        }.accessibilityLabel("Back")
+                        }.buttonStyle(.plain).accessibilityLabel("Back")
                         VStack(alignment: .leading, spacing: 3) {
                             Text(record.title).font(.headline).lineLimit(2)
                             Text("\(record.start.formatted(.dateTime.month(.abbreviated).day().hour().minute())) · \(SourceAttributionView.names(record.members.map(\.source)))")
@@ -262,8 +262,7 @@ struct ActivityDetailView: View {
                         .accessibilityLabel("Activity options")
                     }.padding(.horizontal, 8).padding(.top, 8)
                     StatsPanel(stats: detail.cursorStats(at: Int(scrub)), sport: record.sport, units: units, floating: false)
-                        .frame(maxHeight: dynamicTypeSize.isAccessibilitySize ? 240 : nil)
-                    routeComparisonLink
+                        .frame(maxHeight: dynamicTypeSize.isAccessibilitySize ? 160 : nil)
                     if !alternatives.isEmpty, let library {
                         NavigationLink("Review additional source data") {
                             ActivityManagementView(activity: record, library: library, deleteActivity: deleteActivity)
@@ -305,86 +304,183 @@ struct ActivityDetailView: View {
     @ViewBuilder private func timeline(_ detail: PreparedDetail) -> some View {
         VStack(spacing: 4) {
             if !showsAnalysis {
-                Capsule().fill(.secondary.opacity(0.5)).frame(width: 36, height: 4)
-                    .frame(maxWidth: .infinity).padding(.vertical, 5)
-                    .contentShape(Rectangle())
-                    .gesture(DragGesture(minimumDistance: 10).onEnded { value in
-                        if value.translation.height < -20 { showsAnalysis = true }
-                    })
-                    .accessibilityHidden(true)
+                Button { showsAnalysis = true } label: {
+                    Capsule().fill(.secondary.opacity(0.5)).frame(width: 36, height: 4)
+                        .frame(maxWidth: .infinity, minHeight: 28)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Analysis")
+                .accessibilityHint("Opens activity analysis. You can also swipe up here.")
+                .simultaneousGesture(DragGesture(minimumDistance: 10).onEnded { value in
+                    if value.translation.height < -20 { showsAnalysis = true }
+                })
             }
-            HStack {
-                Picker("Timeline series", selection: $timelineKind) {
-                    Text("Elevation").tag(nil as TimelineOverlay.Kind?)
-                    ForEach(TimelineOverlay.Kind.allCases, id: \.self) { kind in
-                        if detail.timelineOverlays[kind] != nil {
-                            Text(kind.rawValue.capitalized).tag(Optional(kind))
-                        }
-                    }
-                }.pickerStyle(.menu)
-                Spacer()
-                Picker("Timeline axis", selection: $axis) {
-                    Text(units == .metric ? "km" : "mi").tag(TimelineAxisMode.distance)
-                    Text("Time").tag(TimelineAxisMode.time)
-                }.pickerStyle(.segmented).frame(width: 130)
-                    .disabled(detail.timeline?.distance == nil)
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 12) {
+                    timelineSelector(detail)
+                    Spacer(minLength: 0)
+                    timelineAxisPicker(detail)
+                }
+                VStack(alignment: .leading, spacing: 8) {
+                    timelineSelector(detail)
+                    timelineAxisPicker(detail)
+                }
             }.padding(.horizontal, 14)
-            if detail.line.value != nil {
-                HStack(spacing: 4) {
-                    Text("Route: \(overlay.label)")
-                    ForEach(colors.indices, id: \.self) { index in
-                        Capsule().fill(colors[index]).frame(width: 12, height: 6)
-                            .overlay { Capsule().stroke(.primary.opacity(0.5), lineWidth: 0.5) }
-                    }
-                    Spacer()
-                }.font(.caption2).foregroundStyle(.secondary).padding(.horizontal, 14)
-            }
             if let data = detail.timeline {
                 ActivityTimeline(data: data, overlay: timelineOverlay, scrubSample: manualScrub,
                     selection: $selection, selectionStats: selectionStats, axisMode: axis,
                     collapsesStops: collapsesStops, sport: record.sport, units: units, floating: false)
             }
-            HStack {
-                Button(playing ? "Pause" : "Play", systemImage: playing ? "pause.fill" : "play.fill") {
-                    if scrub >= Double(detail.input.stream.count - 1) { scrub = 0 }
-                    playing.toggle()
-                }.labelStyle(.iconOnly).buttonStyle(.borderedProminent).buttonBorderShape(.circle)
-                    .frame(minWidth: 44, minHeight: 44)
-                Picker("Playback speed", selection: $playbackSpeed) {
-                    ForEach([0.5, 1.0, 2.0, 4.0], id: \.self) { speed in Text("\(speed, specifier: "%g")×").tag(speed) }
-                }.pickerStyle(.menu).fixedSize(horizontal: true, vertical: false)
-                Spacer()
-                VStack(alignment: .trailing, spacing: 2) {
-                    Text(Duration.seconds(scrub.rounded(.down)).formatted(.time(pattern: .hourMinuteSecond)))
-                        .font(.subheadline.monospacedDigit())
-                    Text("of \(Duration.seconds(Double(max(0, detail.input.stream.count - 1))).formatted(.time(pattern: .hourMinuteSecond)))")
-                        .font(.caption2.monospacedDigit()).foregroundStyle(.secondary)
-                }.frame(minWidth: 88, alignment: .trailing)
-                if !showsAnalysis, detail.line.value != nil {
-                    Button {
-                        options.cameraMode = options.cameraMode == .follow ? .overview : .follow
-                    } label: { Image(systemName: options.cameraMode == .follow ? "location.fill" : "location") }
-                        .tint(.primary).frame(minWidth: 44, minHeight: 44)
-                        .accessibilityLabel(options.cameraMode == .follow ? "Show whole route" : "Follow current position")
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 10) {
+                    playbackButton(detail)
+                    playbackSpeedPicker
+                    playbackClock(detail).frame(maxWidth: .infinity)
+                    cameraButton(detail)
                 }
-                if !showsAnalysis {
-                    Button { showsAnalysis = true } label: {
-                        if dynamicTypeSize.isAccessibilitySize { Image(systemName: "chart.xyaxis.line") }
-                        else { Label("Analysis", systemImage: "chevron.up") }
-                    }.accessibilityLabel("Analysis")
-                        .font(.subheadline).frame(minWidth: 44, minHeight: 44)
+                VStack(spacing: 8) {
+                    playbackClock(detail)
+                    HStack {
+                        playbackButton(detail)
+                        playbackSpeedPicker
+                        Spacer()
+                        cameraButton(detail)
+                    }
                 }
-            }.padding(.horizontal, 14)
+            }.padding(.horizontal, 14).padding(.bottom, 8)
+            if !showsAnalysis, matchedRoute != nil {
+                Divider().padding(.horizontal, 14).padding(.top, 8)
+                routeComparisonLink
+            }
             if detail.line.value == nil && !showsAnalysis {
                 Text(record.isVirtual ? "Virtual activity · no map" : record.isIndoor ? "Indoor activity · no map" : "No usable route · recorded charts")
                     .font(.caption).foregroundStyle(.secondary).padding(.bottom, 8)
             }
         }
-        .padding(.top, 8)
+        .padding(.vertical, 8)
         .modifier(FloatingPanel(enabled: !showsAnalysis))
         .background(showsAnalysis ? Color(uiColor: .systemBackground) : .clear)
         .padding(.horizontal, showsAnalysis ? 0 : 12)
         .padding(.bottom, showsAnalysis ? 0 : 8)
+    }
+
+    private func timelineSelector(_ detail: PreparedDetail) -> some View {
+        Menu {
+            Picker("Timeline series", selection: $timelineKind) {
+                Text("Elevation").tag(nil as TimelineOverlay.Kind?)
+                ForEach(TimelineOverlay.Kind.allCases, id: \.self) { kind in
+                    if detail.timelineOverlays[kind] != nil {
+                        Text(kind.rawValue.capitalized).tag(Optional(kind))
+                    }
+                }
+            }
+            if detail.line.value != nil {
+                Picker("Route colour", selection: $overlay) {
+                    ForEach(RouteOverlay.allCases, id: \.self) { item in
+                        Text(item.label).tag(item).disabled(detail.bands[item]?.value == nil)
+                    }
+                }
+            }
+        } label: {
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 8) {
+                    Text(timelineKind?.rawValue.capitalized ?? "Elevation")
+                        .font(.subheadline.weight(.semibold))
+                    legendRamp(timelineColors)
+                    Image(systemName: "chevron.down").font(.caption.weight(.semibold))
+                }
+                if detail.line.value != nil, detail.timelineKind(for: overlay) != timelineKind {
+                    HStack(spacing: 6) {
+                        Text("Route: \(overlay.label)").font(.caption2)
+                        legendRamp(colors)
+                    }.foregroundStyle(.secondary)
+                }
+            }
+            .padding(.horizontal, 12).padding(.vertical, 8)
+            .frame(minHeight: 44)
+            .background(Color(uiColor: .quaternarySystemFill), in: Capsule())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Timeline series")
+        .accessibilityValue(timelineKind?.rawValue.capitalized ?? "Elevation")
+    }
+
+    private func legendRamp(_ palette: [Color]) -> some View {
+        HStack(spacing: 2) {
+            ForEach(palette.indices, id: \.self) { index in
+                RoundedRectangle(cornerRadius: 2).fill(palette[index])
+                    .frame(width: 7, height: 10)
+                    .overlay { RoundedRectangle(cornerRadius: 2).stroke(.primary.opacity(0.3), lineWidth: 0.5) }
+            }
+        }.accessibilityHidden(true)
+    }
+
+    private func timelineAxisPicker(_ detail: PreparedDetail) -> some View {
+        Picker("Timeline axis", selection: $axis) {
+            Text(units == .metric ? "km" : "mi").tag(TimelineAxisMode.distance)
+            Text("Time").tag(TimelineAxisMode.time)
+        }.pickerStyle(.segmented).frame(width: 100)
+            .disabled(detail.timeline?.distance == nil)
+    }
+
+    private func playbackButton(_ detail: PreparedDetail) -> some View {
+        Button {
+            if scrub >= Double(detail.input.stream.count - 1) { scrub = 0 }
+            playing.toggle()
+        } label: {
+            Image(systemName: playing ? "pause.fill" : "play.fill")
+                .font(.title3).frame(width: 44, height: 44)
+                .foregroundStyle(Color(uiColor: .systemBackground))
+                .background(.tint, in: Circle())
+        }.buttonStyle(.plain).accessibilityLabel(playing ? "Pause" : "Play")
+    }
+
+    private var playbackSpeedPicker: some View {
+        Menu {
+            Picker("Playback speed", selection: $playbackSpeed) {
+                ForEach([0.5, 1.0, 2.0, 4.0], id: \.self) { speed in
+                    Text("\(speed, specifier: "%g")×").tag(speed)
+                }
+            }
+        } label: {
+            Text("\(playbackSpeed, specifier: "%g")×")
+                .font(.subheadline.weight(.semibold)).monospacedDigit()
+                .frame(minWidth: 48, minHeight: 44)
+                .background(Color(uiColor: .quaternarySystemFill), in: Capsule())
+        }.buttonStyle(.plain).accessibilityLabel("Playback speed")
+    }
+
+    private func playbackClock(_ detail: PreparedDetail) -> some View {
+        let total = Double(max(0, detail.input.stream.count - 1))
+        return HStack(alignment: .firstTextBaseline, spacing: 4) {
+            Text(clockTime(scrub)).fontWeight(.semibold)
+            Text("/ \(clockTime(total))").foregroundStyle(.secondary)
+        }
+        .font(.subheadline.monospacedDigit())
+        .fixedSize(horizontal: true, vertical: false)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Playback time")
+        .accessibilityValue("\(clockTime(scrub)) of \(clockTime(total))")
+    }
+
+    private func clockTime(_ seconds: Double) -> String {
+        let duration = Duration.seconds(seconds.rounded(.down))
+        return seconds >= 3600 ? duration.formatted(.time(pattern: .hourMinuteSecond))
+            : duration.formatted(.time(pattern: .minuteSecond))
+    }
+
+    @ViewBuilder private func cameraButton(_ detail: PreparedDetail) -> some View {
+        if !showsAnalysis, detail.line.value != nil {
+            Button {
+                options.cameraMode = options.cameraMode == .follow ? .overview : .follow
+            } label: {
+                Image(systemName: options.cameraMode == .follow ? "location.fill" : "location")
+                    .frame(minWidth: 48, minHeight: 44)
+                    .background(Color(uiColor: .quaternarySystemFill), in: Capsule())
+            }.buttonStyle(.plain)
+                .accessibilityLabel(options.cameraMode == .follow ? "Show whole route" : "Follow current position")
+        }
     }
 
     private var timelineColors: [Color] {

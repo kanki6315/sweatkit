@@ -73,3 +73,19 @@ Remaining reference differences: native tab-bar dimensions/materials are retaine
 The search button now sits separately to the right of the three tabs, with no search field or button in the Activities header. iOS 27 uses the explicit prominent tab role; iOS 26 retains the search role. Search owns its search field, and both activity surfaces share query/sport/date/setting filters. Tab changes dismiss active search. The existing native Close control exits text entry before switching tabs.
 
 Focused `testBottomSearch` passed in light, dark, and accessibility-medium on iPhone 17 / iOS 27.2: bottom control exists, header search is absent, typing produces no-match results, clearing restores activities, and Close → Activities restores the header controls. Result: `/tmp/sweatkit-feed-parity/search-verified.xcresult`. The test is retained in `Scripts/IntegrationValidation/UITests.swift`. `Evidence/FEED-HEADER/{light,dark,large}.png` now contains the passing bottom-search layout. iOS 26 fallback compiles but was not exercised on its runtime in this follow-up.
+
+### Flyover alignment follow-up — 5 November 2026
+
+Stat values and units now share the label's leading edge; the invisible width reservation covers the complete value/unit group so shorter values no longer indent independently. Primary figures use the board's larger hierarchy. Secondary gaps are tighter so all five cycling stats fit at standard text size on iPhone 17. Large text retains a bounded, scrollable stats viewport to keep navigation inside the safe area.
+
+Playback speed and camera controls use neutral pills. The bottom-panel refinement below supersedes the initial clock and Analysis arrangement. Route comparison context moves from the top stats panel to the lower panel when available. Back uses a plain neutral style.
+
+Verified with a disposable production-view integration harness on a Simlock-leased iPhone 17 / iOS 27.2. Light, dark, and accessibility-medium checks passed Play/Back reachability and opening Analysis; final screenshots were visually inspected. Result: `/tmp/sweatkit-flyover-alignment/final.xcresult`. Captures: `Evidence/FLYOVER-ALIGNMENT/{light,dark,large}.png`. Build, whitespace check, and mechanical layout scan passed.
+
+The actual terrain, measurements and native controls remain different from the illustrative board. At large text sizes stats scroll within the upper panel. No release or physical-device validation was performed.
+
+### Bottom panel refinement — 5 November 2026
+
+The series selector now owns its colour ramp and the route-colour picker. When route and chart metrics differ, the route label/ramp appears inside the same selector. The standalone legend row is removed. Playback displays elapsed / total on one baseline, omits zero hours, and uses a simple speed pill without redundant menu arrows. At larger text sizes the clock moves above the controls if the full row cannot fit. The separate Analysis row is removed: tapping or swiping up on the grabber opens analysis, with the existing Activity options menu action retained.
+
+Final production-view harness checks passed in light, dark and accessibility-medium on iPhone 17 / iOS 27.2. Checks include scrubbing to 95% of the route, Play/Back reachability, and opening Analysis through the grabber. Captures at 1:20:46 / 1:26:20 were visually inspected; the large-text clock reflows without truncation. Updated captures remain in `Evidence/FLYOVER-ALIGNMENT`. Result: `/tmp/sweatkit-flyover-alignment/bottom-final.xcresult`; build, whitespace and mechanical layout checks passed. Not released.
