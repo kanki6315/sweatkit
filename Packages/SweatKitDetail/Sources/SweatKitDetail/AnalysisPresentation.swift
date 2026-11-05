@@ -1,0 +1,86 @@
+import Foundation
+import SweatKitModel
+import SweatKitTimeline
+
+/// Display points retain their original grid second and contiguous run. Never
+/// connect points across missing data, even when a gap falls inside a bucket.
+public struct DetailChartPoint: Sendable, Hashable, Identifiable {
+    public let second: Int
+    public let value: Double
+    public let segment: Int
+    public var id: Int { second }
+}
+
+public struct DetailChartSeries: Sendable, Identifiable {
+    public enum Kind: String, CaseIterable, Sendable {
+        case power, heartRate, speed, cadence, elevation
+    }
+    public let kind: Kind
+    public let points: [DetailChartPoint]
+    public var id: Kind { kind }
+
+    /// Keep each bucket's endpoints and extrema, in time order. The budget
+    /// bounds normal continuous data, not the number of gaps: gaps take priority.
+    public static func points(_ values: [Double?], budget: Int = 1200) -> [DetailChartPoint] {
+        let width = max(1, Int(ceil(Double(values.count) * 4 / Double(max(4, budget)))))
+        var result: [DetailChartPoint] = []
+        var bucket: [(Int, Double)] = []
+        var segment = 0
+        func flush() {
+            guard let first = bucket.first, let last = bucket.last,
+                  let low = bucket.min(by: { $0.1 < $1.1 }), let high = bucket.max(by: { $0.1 < $1.1 }) else { return }
+            let indices = Set([first.0, last.0, low.0, high.0])
+            for (second, value) in bucket where indices.contains(second) {
+                result.append(DetailChartPoint(second: second, value: value, segment: segment))
+            }
+            bucket.removeAll(keepingCapacity: true)
+        }
+        for (second, optional) in values.enumerated() {
+            guard let value = optional, value.isFinite else {
+                flush()
+                segment += 1
+                continue
+            }
+            bucket.append((second, value))
+            if bucket.count >= width { flush() }
+        }
+        flush()
+        return result
+    }
+}
+
+public struct DetailLap: Sendable, Identifiable {
+    public let id: Int
+    public let range: ClosedRange<Int>
+    public let stats: RangeStats
+}
+
+public struct DetailAnalysisPresentation: Sendable {
+    public let charts: [DetailChartSeries]
+    public let laps: [DetailLap]
+
+    public static func prepare(_ detail: PreparedDetail) -> Self {
+        let stream = detail.input.stream
+        var sources: [(DetailChartSeries.Kind, Series)] = [
+            (.heartRate, stream.heartRate), (.speed, stream.speed),
+            (.cadence, stream.cadence), (.elevation, stream.altitude)
+        ]
+        if detail.input.sport.family == .cycling { sources.insert((.power, stream.power), at: 0) }
+        let charts = sources.compactMap { kind, series -> DetailChartSeries? in
+            let points = DetailChartSeries.points((0..<series.count).map { index -> Double? in
+                guard let value = series[index] else { return nil }
+                // Stationary pace is undefined, not zero or infinity.
+                if kind == .speed && detail.input.sport.family == .onFoot && value <= 0 { return nil }
+                return value
+            })
+            return points.isEmpty ? nil : DetailChartSeries(kind: kind, points: points)
+        }
+        let starts = Array(Set([0] + detail.input.lapStarts.filter { $0 > 0 && $0 < stream.count })).sorted()
+        let laps: [DetailLap] = stream.count > 0 && !detail.input.lapStarts.isEmpty ? starts.enumerated().map { index, start in
+            let end = (index + 1 < starts.count ? starts[index + 1] : stream.count) - 1
+            let range = start...end
+            return DetailLap(id: index + 1, range: range, stats: detail.rangeStats(range))
+        } : []
+        return Self(charts: charts, laps: laps)
+    }
+}

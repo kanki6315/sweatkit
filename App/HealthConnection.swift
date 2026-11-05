@@ -19,7 +19,7 @@ final class HealthConnection {
     private var syncTask: Task<Void, Never>?
 
     private typealias State = HealthSyncState
-    private struct Page {
+    private struct Page: Sendable {
         var samples: [HKSample]
         var deleted: [HKDeletedObject]
         var anchor: HKQueryAnchor?
@@ -120,6 +120,7 @@ final class HealthConnection {
                         continue
                     }
                     let snapshot = try await snapshot(workout)
+                    try Task.checkCancellation()
                     try await library.importHealthSnapshot(snapshot)
                     state.pending.remove(id)
                     try save(state)
@@ -220,29 +221,28 @@ final class HealthConnection {
     }
 
     private func changes(_ type: HKSampleType, after anchor: HKQueryAnchor?) async throws -> Page {
-        try await withCheckedThrowingContinuation { continuation in
-            let query = HKAnchoredObjectQuery(type: type, predicate: nil, anchor: anchor, limit: 500) { _, samples, deleted, anchor, error in
-                if let error { continuation.resume(throwing: error) }
-                else { continuation.resume(returning: Page(samples: samples ?? [], deleted: deleted ?? [], anchor: anchor)) }
+        try await HealthQueryOperation<Page>(health: health).run { finish in
+            HKAnchoredObjectQuery(type: type, predicate: nil, anchor: anchor, limit: 500) { _, samples, deleted, anchor, error in
+                if let error { finish(.failure(error)) }
+                else { finish(.success(Page(samples: samples ?? [], deleted: deleted ?? [], anchor: anchor))) }
             }
-            health.execute(query)
         }
     }
 
     private func samples(_ type: HKSampleType, predicate: NSPredicate) async throws -> [HKSample] {
-        try await withCheckedThrowingContinuation { continuation in
-            health.execute(HKSampleQuery(sampleType: type, predicate: predicate, limit: HKObjectQueryNoLimit,
+        try await HealthQueryOperation<[HKSample]>(health: health).run { finish in
+            HKSampleQuery(sampleType: type, predicate: predicate, limit: HKObjectQueryNoLimit,
                 sortDescriptors: [NSSortDescriptor(key: HKSampleSortIdentifierStartDate, ascending: true)]) { _, samples, error in
-                if let error { continuation.resume(throwing: error) }
-                else { continuation.resume(returning: samples ?? []) }
-            })
+                if let error { finish(.failure(error)) }
+                else { finish(.success(samples ?? [])) }
+            }
         }
     }
 
     private func locations(_ route: HKWorkoutRoute) async throws -> [CLLocation] {
         let accumulated = Mutex<(points: [CLLocation], finished: Bool)>(([], false))
-        return try await withCheckedThrowingContinuation { continuation in
-            health.execute(HKWorkoutRouteQuery(route: route) { _, locations, done, error in
+        return try await HealthQueryOperation<[CLLocation]>(health: health).run { finish in
+            HKWorkoutRouteQuery(route: route) { _, locations, done, error in
                 let result = accumulated.withLock { state -> Result<[CLLocation], any Error>? in
                     guard !state.finished else { return nil }
                     if let error { state.finished = true; return .failure(error) }
@@ -250,11 +250,54 @@ final class HealthConnection {
                     if done { state.finished = true; return .success(state.points) }
                     return nil
                 }
-                if let result { continuation.resume(with: result) }
-            })
+                if let result { finish(result) }
+            }
         }
     }
 
     private func readState() throws -> State { try State.load(from: stateURL) }
     private func save(_ state: State) throws { try state.save(to: stateURL) }
+}
+
+/// Owns one query and resumes its waiter exactly once. HealthKit does not
+/// promise a completion callback after stop(_:), so cancellation resumes it.
+/// Main-actor serialization covers cancellation before setup and late callbacks.
+@MainActor
+private final class HealthQueryOperation<Value: Sendable> {
+    private let health: HKHealthStore
+    private var query: HKQuery?
+    private var continuation: CheckedContinuation<Value, any Error>?
+    private var cancelled = false
+
+    init(health: HKHealthStore) { self.health = health }
+
+    func run(_ makeQuery: (@escaping @Sendable (Result<Value, any Error>) -> Void) -> HKQuery) async throws -> Value {
+        try await withTaskCancellationHandler {
+            try Task.checkCancellation()
+            return try await withCheckedThrowingContinuation { continuation in
+                guard !cancelled else { continuation.resume(throwing: CancellationError()); return }
+                self.continuation = continuation
+                let query = makeQuery { result in
+                    Task { @MainActor in self.finish(result) }
+                }
+                self.query = query
+                health.execute(query)
+            }
+        } onCancel: {
+            Task { @MainActor in self.cancel() }
+        }
+    }
+
+    private func cancel() {
+        cancelled = true
+        if let query { health.stop(query) }
+        finish(.failure(CancellationError()))
+    }
+
+    private func finish(_ result: Result<Value, any Error>) {
+        guard let continuation else { return }
+        self.continuation = nil
+        query = nil
+        continuation.resume(with: cancelled ? .failure(CancellationError()) : result)
+    }
 }

@@ -837,6 +837,26 @@ public actor ActivityLibrary {
         try await reconcileIdentity()
     }
 
+    /// Channels present in preserved alternatives but absent from the primary.
+    /// Only measured/interpolated values count; an all-missing series does not.
+    public func alternativeSources(for id: SourceIdentity) async throws -> [AlternativeOffer] {
+        guard let row = try await store.activity(id) else { throw LibraryError.unknownActivity(id) }
+        guard row.members.count > 1 else { return [] }
+        var channels: [SourceIdentity: Set<Channel>] = [:]
+        for member in row.members {
+            guard let record = try await store.sourceRecord(member) else { continue }
+            let stream = try await materials(for: record.currentRevision, renormalise: false, needsRecorded: false).stream
+            let series: [(Channel, Series)] = [(.latitude, stream.latitude), (.longitude, stream.longitude),
+                (.altitude, stream.altitude), (.distance, stream.distance), (.speed, stream.speed),
+                (.heartRate, stream.heartRate), (.power, stream.power), (.cadence, stream.cadence),
+                (.temperature, stream.temperature), (.gradient, stream.gradient)]
+            channels[member] = Set(series.compactMap { channel, values in
+                (0..<values.count).contains { values[$0] != nil } ? channel : nil
+            })
+        }
+        return PrimaryChoice.alternativesOfferingMore(than: row.primary, channelsByMember: channels)
+    }
+
     public func activityContaining(_ source: SourceIdentity) async throws -> ActivityRecord? {
         guard let id = try await store.sourceRecord(source)?.activityID else { return nil }
         return try await store.activity(id)

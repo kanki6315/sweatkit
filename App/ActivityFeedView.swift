@@ -1,5 +1,6 @@
 import SwiftUI
 import UniformTypeIdentifiers
+import SweatKitLibrary
 import SweatKitModel
 import SweatKitStore
 
@@ -9,10 +10,21 @@ struct ActivityFeedView: View {
     @State private var showsResults = false
     @State private var search = ""
     @State private var sport: Sport?
+    @State private var limitsDates = false
+    @State private var from = Calendar.current.date(byAdding: .month, value: -1, to: Date()) ?? Date()
+    @State private var through = Date()
+    @State private var showsDates = false
     @State private var setting: FeedFilter.Setting?
 
     var body: some View {
         List {
+            if !model.staleIDs.isEmpty || model.isRecomputing {
+                Section {
+                    Text("\(model.staleIDs.count) activities need recalculation. Displayed results may be out of date.")
+                    if model.isRecomputing { ProgressView("Recalculating activities") }
+                    else { Button("Recalculate activities") { Task { await model.recompute() } } }
+                }
+            }
             if let health = model.health, health.enabled {
                 Section {
                     Text(health.status).font(.subheadline)
@@ -48,12 +60,16 @@ struct ActivityFeedView: View {
                     Button("Try again") { Task { await model.open(); await model.reload() } }
                 }
             }
-            ForEach(model.activities, id: \.id) { activity in
-                NavigationLink {
-                    ActivityDetailView(activity: activity, library: model.library)
-                } label: {
-                    ActivityFeedRow(activity: activity, units: model.units, removedAtSource: activity.members.contains { model.removedSources.contains($0) })
-                }
+            ForEach(weekStarts, id: \.self) { week in
+                Section {
+                    ForEach(activities(in: week), id: \.id) { activity in
+                        NavigationLink {
+                            ActivityDetailView(activity: activity, library: model.library)
+                        } label: {
+                            ActivityFeedRow(activity: activity, units: model.units, library: model.library, revision: model.revisions[activity.primary], removedAtSource: activity.members.contains { model.removedSources.contains($0) }, stale: model.staleIDs.contains(activity.id ?? activity.primary))
+                        }
+                    }
+                } header: { weekHeader(week) }
             }
             if model.hasMore {
                 Button("Load more activities") { Task { await model.loadMore() } }
@@ -62,9 +78,9 @@ struct ActivityFeedView: View {
             }
         }
         .overlay {
-            if model.activities.isEmpty && !model.isImporting && model.error == nil {
+            if model.activities.isEmpty && !model.isImporting && model.error == nil && model.staleIDs.isEmpty {
                 if model.isLoading { ProgressView("Opening library") }
-                else if !search.isEmpty || sport != nil || setting != nil {
+                else if !search.isEmpty || sport != nil || setting != nil || limitsDates {
                     ContentUnavailableView.search(text: search)
                 } else {
                     ContentUnavailableView {
@@ -82,6 +98,8 @@ struct ActivityFeedView: View {
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {
                 Menu {
+                    Button(limitsDates ? "Change date range" : "Filter by date") { showsDates = true }
+                    if limitsDates { Button("Show all dates") { limitsDates = false } }
                     Picker("Sport", selection: $sport) {
                         Text("All sports").tag(nil as Sport?)
                         ForEach(Sport.allCases, id: \.self) { Text($0.rawValue.capitalized).tag(Optional($0)) }
@@ -102,6 +120,18 @@ struct ActivityFeedView: View {
             switch result {
             case .success(let urls): model.importFiles(urls)
             case .failure(let error): model.error = error.localizedDescription
+            }
+        }
+        .sheet(isPresented: $showsDates) {
+            NavigationStack {
+                Form {
+                    Toggle("Limit date range", isOn: $limitsDates)
+                    DatePicker("From", selection: $from, in: ...through, displayedComponents: .date)
+                    DatePicker("Through", selection: $through, in: from..., displayedComponents: .date)
+                }
+                .navigationTitle("Activity dates")
+                .toolbar { Button("Done") { showsDates = false } }
+                .presentationDetents([.medium])
             }
         }
         .sheet(isPresented: $showsResults) {
@@ -130,22 +160,63 @@ struct ActivityFeedView: View {
         }
         .task { await model.open() }
         .onAppear { Task { if model.library != nil { await model.reload() } } }
-        .task(id: FeedFilter(sports: sport.map { [$0] }, setting: setting, titleContains: search)) {
-            model.filter = FeedFilter(sports: sport.map { [$0] }, setting: setting, titleContains: search)
+        .task(id: feedFilter) {
+            model.filter = feedFilter
             await model.reload()
         }
     }
+    private var feedFilter: FeedFilter {
+        let start = Calendar.current.startOfDay(for: from)
+        let end = Calendar.current.date(byAdding: .day, value: 1, to: Calendar.current.startOfDay(for: through)) ?? through
+        return FeedFilter(sports: sport.map { [$0] }, dates: limitsDates ? start..<max(start.addingTimeInterval(1), end) : nil,
+                          setting: setting, titleContains: search)
+    }
+    private var weekStarts: [Date] {
+        Set(model.activities.compactMap { Calendar.current.dateInterval(of: .weekOfYear, for: $0.start)?.start }).sorted(by: >)
+    }
+    private func activities(in week: Date) -> [ActivityRecord] {
+        model.activities.filter { Calendar.current.dateInterval(of: .weekOfYear, for: $0.start)?.start == week }
+    }
+    @ViewBuilder private func weekHeader(_ week: Date) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("Week of \(week.formatted(date: .abbreviated, time: .omitted))").font(.headline)
+            if let summary = model.weekSummaries[week] {
+                Text("\(summary.count) activities · \(weekDistance(summary)) · \(summary.missingMovingTime == summary.count ? "No moving time" : Duration.seconds(summary.movingTime).formatted(.time(pattern: .hourMinute))) · \(summary.missingAscent == summary.count ? "No ascent" : String(format: "%.0f %@ ascent", summary.ascent * (model.units == .metric ? 1 : 3.28084), model.units == .metric ? "m" : "ft"))")
+                    .font(.caption).monospacedDigit()
+                if summary.missingDistance > 0 || summary.missingMovingTime > 0 || summary.missingAscent > 0 {
+                    Text("Totals include recorded values only; some figures are missing.").font(.caption)
+                }
+            }
+        }.textCase(nil)
+    }
+    private func weekDistance(_ week: FeedWeekSummary) -> String {
+        guard week.missingDistance < week.count else { return "No distance" }
+        return String(format: "%.1f %@", week.distance / (model.units == .metric ? 1000 : 1609.344), model.units == .metric ? "km" : "mi")
+    }
+
 }
 
 struct ActivityFeedRow: View {
     let activity: ActivityRecord
     let units: UnitSystem
+    var library: ActivityLibrary?
+    var revision: ContentHash?
     var removedAtSource = false
+    var stale = false
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(activity.title).font(.headline)
-            Text(activity.start, format: .dateTime.month(.abbreviated).day().year().hour().minute())
-                .font(.subheadline).foregroundStyle(.secondary)
+            HStack(alignment: .top, spacing: 12) {
+                if let library {
+                    ActivityThumbnail(activity: activity, library: library, revision: revision)
+                        .frame(width: 96, height: 64)
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                }
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(activity.title).font(.headline)
+                    Text(activity.start, format: .dateTime.month(.abbreviated).day().year().hour().minute())
+                        .font(.subheadline).foregroundStyle(.secondary)
+                }
+            }
             if let headline = activity.headline, let value = headline.value.value {
                 Text(headline.kind == "averagePower" ? String(format: "%.0f W average", value) : pace(value))
                     .font(.title3.weight(.semibold))
@@ -156,6 +227,9 @@ struct ActivityFeedRow: View {
             }
             Text("\(activity.sport.rawValue.capitalized) · \(sourceNames)")
                 .font(.caption).foregroundStyle(.secondary)
+            if stale {
+                Label("Results need recalculation", systemImage: "arrow.clockwise").font(.caption)
+            }
             if removedAtSource {
                 Label("Removed at source · kept on this device", systemImage: "archivebox")
                     .font(.caption).foregroundStyle(.secondary)

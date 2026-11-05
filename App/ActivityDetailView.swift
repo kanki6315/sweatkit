@@ -1,4 +1,6 @@
 import SwiftUI
+import SweatKitIdentity
+import SweatKitAnalysis
 import SweatKitModel
 import SweatKitDetail
 import SweatKitFlyover
@@ -10,6 +12,14 @@ import SweatKitTimeline
 struct ActivityDetailView: View {
     let activity: ActivityRecord
     let library: ActivityLibrary?
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var alternatives: [AlternativeOffer] = []
+    @State private var presentation: DetailAnalysisPresentation?
+    @State private var metrics: ActivityMetrics?
+    @State private var showsAnalysis = false
+    @State private var playing = false
+    @State private var playbackSpeed = 1.0
+    @State private var timelineKind: TimelineOverlay.Kind?
     @State private var current: ActivityRecord?
     private var record: ActivityRecord { current ?? activity }
     @State private var summaryOnly = false
@@ -38,37 +48,20 @@ struct ActivityDetailView: View {
                             LabeledContent("Recorded distance", value: String(format: "%.2f %@", distance / (units == .metric ? 1000 : 1609.344), units == .metric ? "km" : "mi"))
                         }
                     } header: { Text("Recorded summary") } footer: {
-                        Text("This recording has no visible per-second samples. Charts, zones and a route cannot be shown. If you expected samples from Apple Health, review read access in Health settings and refresh.")
+                        Text(record.sport.hasFullSupport ? "This recording has no visible per-second samples. Charts, zones and a route cannot be shown. If you expected samples from Apple Health, review read access in Health settings and refresh." : "This sport is shown as a summary. Full detail is available for cycling, walking, running and hiking.")
                     }
                     if let library {
                         NavigationLink("Activity info and sources") { ActivityManagementView(activity: record, library: library) }
                     }
                 }.monospacedDigit()
             } else if let prepared {
-                ZStack {
-                    if let route = prepared.route(for: overlay).value {
-                        FlyoverMap(route: route, bandColors: colors, scrubSample: $scrub, options: options)
-                            .ignoresSafeArea(edges: .bottom)
-                    } else {
-                        Color(uiColor: .systemGroupedBackground).ignoresSafeArea()
-                    }
-                    VStack(spacing: 12) {
-                        StatsPanel(stats: prepared.cursorStats(at: Int(scrub)), sport: record.sport, units: units)
-                        if prepared.line.value == nil {
-                            Text(record.isVirtual ? "Virtual activity · no outdoor route" : "No outdoor route recorded")
-                                .font(.subheadline).foregroundStyle(.secondary)
-                        }
-                        Spacer()
-                        if let timeline = prepared.timeline {
-                            ActivityTimeline(data: timeline, overlay: timelineOverlay,
-                                             scrubSample: $scrub, selection: $selection, selectionStats: selectionStats,
-                                             axisMode: axis, collapsesStops: collapsesStops, sport: record.sport, units: units)
-                        }
-                    }.padding()
-                }
+                detailSurface(prepared)
                 .toolbar {
                     ToolbarItem(placement: .topBarTrailing) {
                         Menu {
+                            if prepared.line.value != nil {
+                                Button("Charts, laps and zones") { showsAnalysis = true }
+                            }
                             if let library {
                                 NavigationLink("Activity info and sources") {
                                     ActivityManagementView(activity: record, library: library)
@@ -77,6 +70,14 @@ struct ActivityDetailView: View {
                             Picker("Overlay", selection: $overlay) {
                                 ForEach(RouteOverlay.allCases, id: \.self) { item in
                                     Text(item.label).tag(item).disabled(prepared.bands[item]?.value == nil)
+                                }
+                            }
+                            Picker("Timeline series", selection: $timelineKind) {
+                                Text("None").tag(nil as TimelineOverlay.Kind?)
+                                ForEach(TimelineOverlay.Kind.allCases, id: \.self) { kind in
+                                    if prepared.timelineOverlays[kind] != nil {
+                                        Text(kind.rawValue.capitalized).tag(Optional(kind))
+                                    }
                                 }
                             }
                             Picker("Timeline axis", selection: $axis) {
@@ -106,7 +107,28 @@ struct ActivityDetailView: View {
         .navigationTitle(record.title)
         .navigationBarTitleDisplayMode(.inline)
         .task { await load() }
-        .onChange(of: overlay) { updateTimelineOverlay() }
+        .onChange(of: overlay) {
+            timelineKind = prepared?.timelineKind(for: overlay)
+            updateTimelineOverlay()
+        }
+        .onChange(of: timelineKind) { updateTimelineOverlay() }
+        .onChange(of: playing) { options.dimsAhead = playing }
+        .onChange(of: scenePhase) { if scenePhase != .active { playing = false } }
+        .onDisappear { playing = false }
+        .task(id: playing) { await play() }
+        .sheet(isPresented: $showsAnalysis) {
+            if let presentation, let prepared {
+                NavigationStack {
+                    analysis(presentation, prepared)
+                        .safeAreaInset(edge: .bottom) { timeline(prepared) }
+                        .navigationTitle("Analysis")
+                        .navigationBarTitleDisplayMode(.inline)
+                        .toolbar { Button("Done") { showsAnalysis = false } }
+                }
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
+            }
+        }
         .task(id: selection) {
             guard let selection, let prepared else { selectionStats = nil; return }
             let result = await Task.detached(priority: .userInitiated) { prepared.rangeStats(selection) }.value
@@ -116,9 +138,99 @@ struct ActivityDetailView: View {
     }
 
     private func updateTimelineOverlay() {
-        guard let series = prepared?.timelineOverlay(for: overlay) else { timelineOverlay = nil; return }
+        guard let timelineKind, let series = prepared?.timelineOverlays[timelineKind] else { timelineOverlay = nil; return }
         timelineOverlay = TimelineOverlay(kind: series.kind, values: series.values,
-                                          bands: series.bands, bandColors: colors)
+                                          bands: series.bands, bandColors: timelineColors)
+    }
+
+    private var manualScrub: Binding<Double> {
+        Binding(get: { scrub }, set: { playing = false; scrub = $0 })
+    }
+
+    @ViewBuilder private func detailSurface(_ detail: PreparedDetail) -> some View {
+        Group {
+            if let route = detail.route(for: overlay).value {
+                FlyoverMap(route: route, bandColors: colors, scrubSample: manualScrub, options: options)
+                    .ignoresSafeArea(edges: .bottom)
+            } else if let presentation {
+                analysis(presentation, detail)
+            }
+        }
+        .safeAreaInset(edge: .top) {
+            if !showsAnalysis {
+                VStack(spacing: 8) {
+                    if !alternatives.isEmpty, let library {
+                        NavigationLink {
+                            ActivityManagementView(activity: record, library: library)
+                        } label: {
+                            Label("Another recording has additional data. Review sources", systemImage: "square.stack")
+                                .font(.subheadline)
+                        }.buttonStyle(.bordered).padding(.horizontal)
+                    }
+                    if detail.line.value != nil {
+                        StatsPanel(stats: detail.cursorStats(at: Int(scrub)), sport: record.sport, units: units).padding(.horizontal)
+                    }
+                }.padding(.top, 8)
+            }
+        }
+        .safeAreaInset(edge: .bottom) {
+            if !showsAnalysis { timeline(detail) }
+        }
+    }
+
+    private func analysis(_ presentation: DetailAnalysisPresentation, _ detail: PreparedDetail) -> some View {
+        ActivityAnalysisView(presentation: presentation, detail: detail, metrics: metrics, units: units,
+                             scrub: manualScrub, selection: $selection)
+    }
+
+    @ViewBuilder private func timeline(_ detail: PreparedDetail) -> some View {
+        VStack(spacing: 8) {
+            HStack {
+                Button(playing ? "Pause" : "Play", systemImage: playing ? "pause.fill" : "play.fill") {
+                    if scrub >= Double(detail.input.stream.count - 1) { scrub = 0 }
+                    playing.toggle()
+                }
+                Picker("Playback speed", selection: $playbackSpeed) {
+                    ForEach([0.5, 1.0, 2.0, 4.0], id: \.self) { speed in Text("\(speed, specifier: "%g")×").tag(speed) }
+                }.pickerStyle(.menu)
+                Spacer()
+                Text(overlay.label).font(.caption).accessibilityLabel("Route overlay: \(overlay.label)")
+                if detail.line.value != nil {
+                    Button("Analysis", systemImage: "chart.xyaxis.line") { showsAnalysis = true }
+                }
+            }
+            .padding(10)
+            .background(.regularMaterial, in: Capsule())
+            if let data = detail.timeline {
+                ActivityTimeline(data: data, overlay: timelineOverlay, scrubSample: manualScrub,
+                    selection: $selection, selectionStats: selectionStats, axisMode: axis,
+                    collapsesStops: collapsesStops, sport: record.sport, units: units)
+            }
+        }.padding()
+    }
+
+    private var timelineColors: [Color] {
+        switch timelineKind {
+        case .power: EffortPalette.power.map(\.color)
+        case .heartRate: EffortPalette.heartRate.map(\.color)
+        case .pace, .speed: EffortPalette.pace.map(\.color)
+        default: []
+        }
+    }
+
+    private func play() async {
+        guard playing, let prepared, prepared.input.stream.count > 1 else { return }
+        var last = ContinuousClock.now
+        while playing && !Task.isCancelled {
+            do { try await Task.sleep(for: .milliseconds(16)) } catch { return }
+            let now = ContinuousClock.now
+            let elapsed = last.duration(to: now).components
+            let seconds = Double(elapsed.seconds) + Double(elapsed.attoseconds) / 1e18
+            last = now
+            let end = Double(prepared.input.stream.count - 1)
+            scrub = min(end, scrub + seconds * end / 60 * playbackSpeed)
+            if scrub >= end { playing = false }
+        }
     }
 
     private var colors: [Color] {
@@ -135,28 +247,40 @@ struct ActivityDetailView: View {
         guard let library, let id = activity.id else { error = "Open the library and try again."; return }
         error = nil
         prepared = nil
+        presentation = nil
+        playing = false
         summaryOnly = false
         do {
             current = try await library.activity(id)
             async let stream = library.analysisStream(for: id)
             async let recorded = library.recordedActivity(for: id)
             async let profile = library.profile()
+            async let storedMetrics = library.metrics(for: id)
+            async let sourceOffers = library.alternativeSources(for: id)
             let native = try await recorded
             let athlete = try await profile
             units = athlete.units
-            summaryOnly = native.stream.samples.isEmpty
+            metrics = try await storedMetrics
+            alternatives = try await sourceOffers
+            summaryOnly = native.stream.samples.isEmpty || !record.sport.hasFullSupport
             if summaryOnly { return }
             let input = try await DetailInput(stream: stream, sport: record.sport,
                 isIndoor: record.isIndoor, isVirtual: record.isVirtual,
                 lapStarts: DetailInput.lapStarts(of: native.laps, streamStart: stream.start),
                 profile: athlete, activityDate: record.start)
-            let result = await Task.detached(priority: .userInitiated) { DetailPreparation.prepare(input) }.value
+            let result = await Task.detached(priority: .userInitiated) {
+                let detail = DetailPreparation.prepare(input)
+                return (detail, DetailAnalysisPresentation.prepare(detail))
+            }.value
             guard !Task.isCancelled else { return }
-            prepared = result
-            overlay = result.defaultOverlay
+            prepared = result.0
+            presentation = result.1
+            overlay = result.0.defaultOverlay
+            timelineKind = result.0.timelineKind(for: overlay)
+                ?? (result.0.timelineOverlays[.power] != nil ? .power : nil)
             units = input.profile.units
             updateTimelineOverlay()
-            if result.timeline?.distance == nil { axis = .time }
+            if result.0.timeline?.distance == nil { axis = .time }
         } catch { self.error = error.localizedDescription }
     }
 }

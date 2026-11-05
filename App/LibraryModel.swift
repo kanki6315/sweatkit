@@ -10,8 +10,12 @@ final class LibraryModel {
     private(set) var health: HealthConnection?
     private(set) var garmin: GarminConnection?
     private(set) var library: ActivityLibrary?
+    private(set) var staleIDs: Set<SourceIdentity> = []
+    private(set) var isRecomputing = false
     private(set) var possibleDuplicateCount = 0
     private(set) var units = UnitSystem.metric
+    private(set) var weekSummaries: [Date: FeedWeekSummary] = [:]
+    private(set) var revisions: [SourceIdentity: ContentHash] = [:]
     private(set) var removedSources: Set<SourceIdentity> = []
     private(set) var activities: [ActivityRecord] = []
     private(set) var isLoading = false
@@ -49,10 +53,15 @@ final class LibraryModel {
             let profile = try await library.profile()
             let duplicates = try await library.possibleDuplicates()
             let sources = try await library.store.sourceRecords()
+            let weeks = try await library.weeklySummaries(filter)
+            let stale = try await library.staleActivities()
             guard request == generation else { return }
             activities = page.activities
+            staleIDs = Set(stale.map(\.id))
+            weekSummaries = Dictionary(uniqueKeysWithValues: weeks.map { ($0.start, $0) })
             units = profile.units
             possibleDuplicateCount = duplicates.count
+            revisions = Dictionary(uniqueKeysWithValues: sources.map { ($0.identity, $0.currentRevision) })
             removedSources = Set(sources.filter { $0.state == .removedAtSource }.map(\.identity))
             cursor = page.next
             error = nil
@@ -94,6 +103,19 @@ final class LibraryModel {
             }
             await reload()
         }
+    }
+
+    func recompute() async {
+        guard let library, !isRecomputing else { return }
+        isRecomputing = true
+        defer { isRecomputing = false }
+        do {
+            let report = try await library.recompute()
+            await reload()
+            if !report.failures.isEmpty {
+                error = "\(report.failures.count) activities couldn't be recalculated. Their originals are kept; try recalculating again."
+            }
+        } catch { self.error = error.localizedDescription }
     }
 
     func cancelImport() { importTask?.cancel() }

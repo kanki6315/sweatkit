@@ -8,6 +8,7 @@ struct ActivityManagementView: View {
     let activity: ActivityRecord
     let library: ActivityLibrary
     @Environment(\.dismiss) private var dismiss
+    @State private var offers: [AlternativeOffer] = []
     @State private var title = ""
     @State private var busy = false
     @State private var error: String?
@@ -27,6 +28,10 @@ struct ActivityManagementView: View {
                         HStack {
                             VStack(alignment: .leading) {
                                 Text(source.source == .garmin ? "Garmin" : source.source == .healthKit ? "Apple Health" : "Imported FIT file")
+                                if let offer = offers.first(where: { $0.identity == source }) {
+                                    Text("Adds " + offer.channels.map { $0 == .heartRate ? "heart rate" : $0.rawValue }.sorted().joined(separator: ", "))
+                                        .font(.caption).foregroundStyle(.secondary)
+                                }
                                 Text(source.externalID).font(.caption).foregroundStyle(.secondary).lineLimit(2)
                             }
                             Spacer()
@@ -51,6 +56,10 @@ struct ActivityManagementView: View {
         .navigationTitle("Activity info")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear { title = activity.title }
+        .task {
+            do { offers = try await library.alternativeSources(for: id) }
+            catch { self.error = error.localizedDescription }
+        }
     }
 
     private var id: SourceIdentity { activity.id ?? activity.primary }

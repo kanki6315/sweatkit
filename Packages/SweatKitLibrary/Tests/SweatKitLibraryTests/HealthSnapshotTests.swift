@@ -1,4 +1,5 @@
 import Foundation
+import SweatKitIdentity
 import SweatKitIngest
 import SweatKitLibrary
 import SweatKitModel
@@ -24,6 +25,37 @@ import Testing
         #expect(try await library.feed(limit: 10).activities.count == 1)
         try await library.decide(.primary(health.identity), for: imported.activity.id!)
         #expect(try await library.recordedActivity(for: imported.activity.id!) == health.activity)
+    }
+
+    @Test func partialHealthRecordingIsReviewedWithoutMergingAndSurvivesRestart() async throws {
+        let library = try temporary.open()
+        let bytes = try Fixtures.FIT.outdoorRide.data()
+        let full = try FITActivityDecoder.decode(bytes)
+        let samples = full.stream.samples
+        let lower = samples.count / 3
+        let upper = samples.count * 2 / 3
+        let selected = Array(samples[lower..<upper])
+        let start = try #require(selected.first?.timestamp)
+        let end = try #require(selected.last?.timestamp)
+        let partial = snapshot(RecordedActivity(sport: full.sport,
+            stated: StatedSummary(start: start, end: end, timerTime: end.timeIntervalSince(start)),
+            stream: NativeStream(samples: selected)))
+        let garmin = SourceIdentity(source: .garmin, externalID: "full-with-partial-health")
+        try await library.importFile(bytes, as: garmin)
+        try await library.importHealthSnapshot(partial)
+        let pair = IdentityPair(garmin, partial.identity)
+        #expect(try await library.feed(limit: 10).activities.count == 2)
+        #expect(try await library.possibleDuplicates().contains(pair))
+        #expect(try await library.recordedActivity(for: partial.identity) == partial.activity)
+        try await library.link(pair, kind: .keepSeparate)
+
+        let restarted = try temporary.open()
+        try await restarted.importHealthSnapshot(partial)
+        try await restarted.importFile(bytes, as: garmin)
+        #expect(try await restarted.feed(limit: 10).activities.count == 2)
+        #expect(try await restarted.possibleDuplicates().isEmpty)
+        #expect(try await restarted.store.sourceRecord(partial.identity)?.revisions.count == 1)
+        #expect(try await restarted.recordedActivity(for: garmin) == full)
     }
 
     @Test func revisedWorkoutRetainsOriginalAndRebuildsAfterCacheLoss() async throws {
@@ -96,6 +128,26 @@ import Testing
         #expect(result.activity.distance == 100)
         let stream = try await library.analysisStream(for: health.identity)
         #expect((0..<stream.count).allSatisfy { stream.distance[$0] == nil })
+    }
+
+    @Test func alternativeOffersOnlyChannelsMissingFromThePrimary() async throws {
+        let library = try temporary.open()
+        let start = Date(timeIntervalSince1970: 1_700_000_000)
+        let summary = StatedSummary(start: start, end: start.addingTimeInterval(60), timerTime: 60, distance: 100)
+        let first = snapshot(RecordedActivity(sport: .cycling, stated: summary,
+            stream: NativeStream(samples: [NativeSample(timestamp: start, speed: 3)])))
+        let second = snapshot(RecordedActivity(sport: .cycling, stated: summary,
+            stream: NativeStream(samples: [NativeSample(timestamp: start, speed: 3, heartRate: 120)])))
+        try await library.importHealthSnapshot(first)
+        let result = try await library.importHealthSnapshot(second)
+        let id = try #require(result.activity.id)
+        try await library.decide(.primary(first.identity), for: id)
+        let offers = try await library.alternativeSources(for: id)
+        #expect(offers.count == 1)
+        #expect(offers.first?.identity == second.identity)
+        #expect(offers.first?.channels == [.heartRate])
+        try await library.decide(.primary(second.identity), for: id)
+        #expect(try await library.alternativeSources(for: id).isEmpty)
     }
 
 }
