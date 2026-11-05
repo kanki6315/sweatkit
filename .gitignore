@@ -11,3 +11,8 @@ xcuserdata/
 
 # Tool caches
 .impeccable/
+
+# Local release credentials and generated archives/logs
+.release.env
+build/
+__pycache__/

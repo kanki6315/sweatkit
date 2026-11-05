@@ -38,9 +38,12 @@ M0 is closed: all five gates passed. `Spikes/GarminPull/RESULTS.md` and `Spikes/
 Scripts/test-packages.sh                    # swift test in every package
 Scripts/test-packages.sh SweatKitAnalysis   # one package
 xcodegen generate                           # after changing project.yml or adding a package
-xcodebuild -project SweatKit.xcodeproj -scheme SweatKit \
-  -destination 'platform=iOS Simulator,name=iPhone 18 Pro' build
+./release.sh --no-upload                    # tests, Simlock smoke check, archive + IPA
 ```
+
+See `Documentation/RELEASE.md` for release setup and options. Use Simlock for all
+simulator access: run `simlock whoami`, read `simlock instructions`, and select
+devices from `simlock catalog`. Never use raw `xcrun simctl`.
 
 ## Rules
 
