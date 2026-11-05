@@ -15,10 +15,15 @@ A native iOS app for viewing one person's own rides and walks. Local-first, no s
 | `Packages/SweatKitIdentity` | De-duplication, links, decisions, tombstones | Model |
 | `Packages/SweatKitAnalysis` | Metrics from the analysis stream | Model |
 | `Packages/SweatKitRouteMatching` | Route detection, alignment, comparison | Model |
+| `Packages/SweatKitGarmin` | Garmin Personal API client: token exchange, activity listing, original-file download. No sync logic. | Nothing |
+| `Packages/SweatKitFlyover` | The MapKit flyover view and its camera and drawing logic. Takes an already-prepared route. | Model |
+| `Spikes/` | The M0 probe tool and device harness, with their gate results in `RESULTS.md`. Throwaway: nothing depends on them. | |
 | `Fixtures/` | Real FIT files shared by every package's tests | |
 | `project.yml` | XcodeGen spec. `SweatKit.xcodeproj` is generated and not committed. | |
 
-The spec's "Core" package is split into Model, Ingest and Identity so that each can be built and tested alone. Storage and the Garmin and HealthKit adapters do not exist yet.
+The spec's "Core" package is split into Model, Ingest and Identity so that each can be built and tested alone. Storage, Garmin sync and the HealthKit adapter do not exist yet.
+
+M0 is closed: all five gates passed. `Spikes/GarminPull/RESULTS.md` and `Spikes/Flyover/RESULTS.md` hold the evidence, the decisions, and what was left unmeasured.
 
 ## Commands
 
