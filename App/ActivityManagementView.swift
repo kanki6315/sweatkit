@@ -74,7 +74,7 @@ struct ActivityManagementView: View {
             Text("All \(activity.members.count) recordings in this activity will be erased from SweatKit. This cannot be undone, and sync will not import them again. Copies used by another activity are kept.")
         }
         .disabled(busy)
-        .navigationTitle("Activity info")
+        .navigationTitle("Activity details")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear { title = activity.title }
         .task {

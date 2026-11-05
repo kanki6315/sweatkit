@@ -77,7 +77,7 @@ struct ActivityDetailView: View {
                         Text(record.sport.hasFullSupport ? "This recording has no visible per-second samples. Charts, zones and a route cannot be shown. If you expected samples from Apple Health, review read access in Health settings and refresh." : "This sport is shown as a summary. Full detail is available for cycling, walking, running and hiking.")
                     }
                     if let library {
-                        NavigationLink("Activity info and sources") { ActivityManagementView(activity: record, library: library, deleteActivity: deleteActivity) }
+                        NavigationLink("Activity details") { ActivityManagementView(activity: record, library: library, deleteActivity: deleteActivity) }
                     }
                 }.monospacedDigit()
             } else if let prepared {
@@ -103,10 +103,6 @@ struct ActivityDetailView: View {
                 try Task.checkCancellation()
                 matchedRoute = catalog.membership(of: id)
             } catch { matchedRoute = nil }
-        }
-        .onChange(of: overlay) {
-            timelineKind = prepared?.timelineKind(for: overlay)
-            updateTimelineOverlay()
         }
         .onChange(of: timelineKind) { updateTimelineOverlay() }
         .onChange(of: playing) { options.dimsAhead = playing }
@@ -226,37 +222,16 @@ struct ActivityDetailView: View {
                                 .font(.caption).foregroundStyle(.secondary)
                         }.frame(maxWidth: .infinity, alignment: .leading)
                         Menu {
-                            Button("Analysis") { showsAnalysis = true }
                             if let library {
-                                NavigationLink("Activity info and sources") {
+                                NavigationLink("Activity details") {
                                     ActivityManagementView(activity: record, library: library, deleteActivity: deleteActivity)
                                 }
                             }
-                            Picker("Overlay", selection: $overlay) {
-                                ForEach(RouteOverlay.allCases, id: \.self) { item in
-                                    Text(item.label).tag(item).disabled(detail.bands[item]?.value == nil)
-                                }
-                            }
-                            Picker("Timeline series", selection: $timelineKind) {
-                                Text("None").tag(nil as TimelineOverlay.Kind?)
-                                ForEach(TimelineOverlay.Kind.allCases, id: \.self) { kind in
-                                    if detail.timelineOverlays[kind] != nil {
-                                        Text(kind.rawValue.capitalized).tag(Optional(kind))
-                                    }
-                                }
-                            }
-                            Picker("Timeline axis", selection: $axis) {
-                                Text("Distance").tag(TimelineAxisMode.distance)
-                                Text("Time").tag(TimelineAxisMode.time)
-                            }
-                            Toggle("Collapse stops", isOn: $collapsesStops)
-                            Picker("Map", selection: $options.mapStyle) {
-                                Text("Satellite").tag(FlyoverOptions.MapStyle.satellite)
-                                Text("Standard").tag(FlyoverOptions.MapStyle.standard)
-                            }
-                            Picker("Camera", selection: $options.cameraMode) {
-                                Text("Overview").tag(FlyoverOptions.CameraMode.overview)
-                                Text("Follow").tag(FlyoverOptions.CameraMode.follow)
+                            if detail.line.value != nil {
+                                Toggle("Satellite map", isOn: Binding(
+                                    get: { options.mapStyle == .satellite },
+                                    set: { options.mapStyle = $0 ? .satellite : .standard }
+                                ))
                             }
                         } label: { Image(systemName: "ellipsis").frame(width: 44, height: 44) }
                         .accessibilityLabel("Activity options")
@@ -365,27 +340,45 @@ struct ActivityDetailView: View {
         .padding(.bottom, showsAnalysis ? 0 : 8)
     }
 
+    private var timelineMetricLabel: String {
+        guard let timelineKind else { return "Elevation" }
+        return timelineKind == .heartRate ? "Heart rate" : timelineKind.rawValue.capitalized
+    }
+
     private func timelineSelector(_ detail: PreparedDetail) -> some View {
         Menu {
-            Picker("Timeline series", selection: $timelineKind) {
-                Text("Elevation").tag(nil as TimelineOverlay.Kind?)
-                ForEach(TimelineOverlay.Kind.allCases, id: \.self) { kind in
-                    if detail.timelineOverlays[kind] != nil {
-                        Text(kind.rawValue.capitalized).tag(Optional(kind))
+            Section("Chart metric") {
+                Picker("Chart metric", selection: $timelineKind) {
+                    if detail.timeline?.elevation.contains(where: { $0 != nil }) == true {
+                        Text("Elevation").tag(nil as TimelineOverlay.Kind?)
+                    }
+                    ForEach(TimelineOverlay.Kind.allCases, id: \.self) { kind in
+                        if detail.timelineOverlays[kind] != nil {
+                            Text(kind == .heartRate ? "Heart rate" : kind.rawValue.capitalized).tag(Optional(kind))
+                        }
                     }
                 }
             }
             if detail.line.value != nil {
-                Picker("Route colour", selection: $overlay) {
-                    ForEach(RouteOverlay.allCases, id: \.self) { item in
-                        Text(item.label).tag(item).disabled(detail.bands[item]?.value == nil)
+                Section("Route colour") {
+                    Picker("Route colour", selection: $overlay) {
+                        ForEach(RouteOverlay.allCases, id: \.self) { item in
+                            if item == .plain || detail.bands[item]?.value != nil {
+                                Text(item.label).tag(item)
+                            }
+                        }
                     }
+                }
+            }
+            if let timeline = detail.timeline, !timeline.stops.isEmpty {
+                Section("Chart options") {
+                    Toggle("Hide stopped time", isOn: $collapsesStops)
                 }
             }
         } label: {
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 8) {
-                    Text(timelineKind?.rawValue.capitalized ?? "Elevation")
+                    Text(timelineMetricLabel)
                         .font(.subheadline.weight(.semibold))
                     legendRamp(timelineColors)
                     Image(systemName: "chevron.down").font(.caption.weight(.semibold))
@@ -402,8 +395,8 @@ struct ActivityDetailView: View {
             .background(Color(uiColor: .quaternarySystemFill), in: Capsule())
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("Timeline series")
-        .accessibilityValue(timelineKind?.rawValue.capitalized ?? "Elevation")
+        .accessibilityLabel("Chart metric and route colour")
+        .accessibilityValue(timelineMetricLabel)
     }
 
     private func legendRamp(_ palette: [Color]) -> some View {
@@ -574,7 +567,7 @@ private extension RouteOverlay {
         case .heartRate: "Heart rate"
         case .paceOrSpeed: "Pace / speed"
         case .gradient: "Gradient"
-        case .plain: "No overlay"
+        case .plain: "Single colour"
         }
     }
 }
