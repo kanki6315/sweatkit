@@ -125,6 +125,9 @@ struct ActivityAnalysisView: View {
                 : (units == .metric ? "Speed (km/h)" : "Speed (mph)")
         case .cadence: detail.input.sport.family == .cycling ? "Cadence (rpm)" : "Cadence (steps/min)"
         case .elevation: units == .metric ? "Elevation (m)" : "Elevation (ft)"
+        case .runningStrideLength: units == .metric ? "Stride length (m)" : "Stride length (ft)"
+        case .runningGroundContactTime: "Ground contact time (ms)"
+        case .runningVerticalOscillation: units == .metric ? "Vertical oscillation (cm)" : "Vertical oscillation (in)"
         }
     }
     private func value(_ value: Double, kind: DetailChartSeries.Kind) -> Double {
@@ -133,7 +136,9 @@ struct ActivityAnalysisView: View {
             detail.input.sport.family == .onFoot
                 ? (units == .metric ? 1000 : 1609.344) / value / 60
                 : value * (units == .metric ? 3.6 : 2.236936)
-        case .elevation: value * (units == .metric ? 1 : 3.28084)
+        case .elevation, .runningStrideLength: value * (units == .metric ? 1 : 3.28084)
+        case .runningGroundContactTime: value * 1000
+        case .runningVerticalOscillation: value * (units == .metric ? 100 : 39.370079)
         default: value
         }
     }

@@ -30,6 +30,12 @@ public struct NativeSample: Hashable, Codable, Sendable {
     public var cadence: Double?
     /// Degrees Celsius.
     public var temperature: Double?
+    /// Metres per running step.
+    public var runningStrideLength: Double?
+    /// Seconds of contact per step.
+    public var runningGroundContactTime: Double?
+    /// Metres of vertical displacement per stride.
+    public var runningVerticalOscillation: Double?
 
     public init(
         timestamp: Date,
@@ -40,7 +46,10 @@ public struct NativeSample: Hashable, Codable, Sendable {
         heartRate: Double? = nil,
         power: Double? = nil,
         cadence: Double? = nil,
-        temperature: Double? = nil
+        temperature: Double? = nil,
+        runningStrideLength: Double? = nil,
+        runningGroundContactTime: Double? = nil,
+        runningVerticalOscillation: Double? = nil
     ) {
         self.timestamp = timestamp
         self.position = position
@@ -51,6 +60,10 @@ public struct NativeSample: Hashable, Codable, Sendable {
         self.power = power
         self.cadence = cadence
         self.temperature = temperature
+        self.runningStrideLength = runningStrideLength
+        self.runningGroundContactTime = runningGroundContactTime
+        self.runningVerticalOscillation = runningVerticalOscillation
+
     }
 }
 

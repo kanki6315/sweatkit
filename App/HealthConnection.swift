@@ -25,7 +25,9 @@ final class HealthConnection {
         var anchor: HKQueryAnchor?
     }
     private static let quantities: [HKQuantityTypeIdentifier] = [
-        .heartRate, .cyclingPower, .cyclingCadence, .cyclingSpeed, .runningPower, .runningSpeed
+        .heartRate, .cyclingPower, .cyclingCadence, .cyclingSpeed, .runningPower, .runningSpeed,
+        .distanceWalkingRunning, .distanceCycling, .stepCount,
+        .runningStrideLength, .runningGroundContactTime, .runningVerticalOscillation
     ]
     static var observedTypes: [HKSampleType] {
         [HKObjectType.workoutType(), HKSeriesType.workoutRoute()] + quantities.compactMap(HKObjectType.quantityType(forIdentifier:))
@@ -48,6 +50,7 @@ final class HealthConnection {
             state.anchors = [:]
             state.pending.formUnion(state.workouts.keys)
             try save(state)
+            UserDefaults.standard.set(3, forKey: "healthReadSchema")
             enabled = true
             UserDefaults.standard.set(true, forKey: "healthReadRequested")
             running = false
@@ -78,6 +81,11 @@ final class HealthConnection {
             await Task.yield()
         }
         guard enabled, !Task.isCancelled, HKHealthStore.isHealthDataAvailable() else { changesCaptured?(); return }
+        guard UserDefaults.standard.integer(forKey: "healthReadSchema") >= 3 else {
+            status = "Health distance, steps and running form need read access. Tap Review Health access to update permissions and refresh existing workouts."
+            changesCaptured?()
+            return
+        }
         running = true
         syncTask = Task { await synchronize(changesCaptured: changesCaptured) }
         let active = syncTask
@@ -187,20 +195,47 @@ final class HealthConnection {
         default: sport = .other
         }
         let predicate = HKQuery.predicateForObjects(from: workout)
+        let quantityPredicate = NSCompoundPredicate(andPredicateWithSubpredicates: [
+            predicate, HKQuery.predicateForObjects(from: workout.sourceRevision.source)
+        ])
         var native: [NativeSample] = []
         for identifier in Self.quantities {
             try Task.checkCancellation()
             guard let type = HKObjectType.quantityType(forIdentifier: identifier) else { continue }
-            let readings = try await samples(type, predicate: predicate)
-            for case let reading as HKQuantitySample in readings {
-                var point = NativeSample(timestamp: reading.startDate)
+            let unit: HKUnit
+            switch identifier {
+            case .distanceWalkingRunning, .distanceCycling, .runningStrideLength, .runningVerticalOscillation: unit = .meter()
+            case .runningGroundContactTime: unit = .second()
+            case .stepCount: unit = .count()
+            case .heartRate, .cyclingCadence: unit = .count().unitDivided(by: .minute())
+            case .cyclingPower, .runningPower: unit = .watt()
+            default: unit = .meter().unitDivided(by: .second())
+            }
+            let readings = try await quantities(type, predicate: quantityPredicate, unit: unit)
+            if (identifier == .distanceWalkingRunning && sport.family == .onFoot)
+                || (identifier == .distanceCycling && sport == .cycling) {
+                native += HealthQuantityConversion.distance(readings)
+                continue
+            }
+            if identifier == .stepCount && sport.family == .onFoot {
+                native += HealthQuantityConversion.cadence(readings)
+                continue
+            }
+            for reading in readings {
+                var point = NativeSample(timestamp: reading.start)
                 switch identifier {
-                case .heartRate: point.heartRate = reading.quantity.doubleValue(for: .count().unitDivided(by: .minute()))
-                case .cyclingCadence: point.cadence = reading.quantity.doubleValue(for: .count().unitDivided(by: .minute()))
+                case .heartRate: point.heartRate = reading.value
+                case .cyclingCadence: point.cadence = reading.value
                 case .cyclingPower where sport == .cycling, .runningPower where sport != .cycling:
-                    point.power = reading.quantity.doubleValue(for: .watt())
+                    point.power = reading.value
                 case .cyclingSpeed where sport == .cycling, .runningSpeed where sport != .cycling:
-                    point.speed = reading.quantity.doubleValue(for: .meter().unitDivided(by: .second()))
+                    point.speed = reading.value
+                case .runningStrideLength where sport == .running:
+                    if reading.value.isFinite && reading.value >= 0 { point.runningStrideLength = reading.value }
+                case .runningGroundContactTime where sport == .running:
+                    if reading.value.isFinite && reading.value >= 0 { point.runningGroundContactTime = reading.value }
+                case .runningVerticalOscillation where sport == .running:
+                    if reading.value.isFinite && reading.value >= 0 { point.runningVerticalOscillation = reading.value }
                 default: continue
                 }
                 native.append(point)
@@ -250,7 +285,8 @@ final class HealthConnection {
     private static func sampleOrder(_ sample: NativeSample) -> String {
         // Stable tie breaker only; values remain native and are never merged.
         [sample.position?.latitude, sample.position?.longitude, sample.altitude,
-         sample.speed, sample.heartRate, sample.power, sample.cadence]
+         sample.distance, sample.speed, sample.heartRate, sample.power, sample.cadence,
+         sample.runningStrideLength, sample.runningGroundContactTime, sample.runningVerticalOscillation]
             .map { $0.map { String($0.bitPattern, radix: 16) } ?? "" }.joined(separator: ":")
     }
 
@@ -269,6 +305,25 @@ final class HealthConnection {
                 sortDescriptors: [NSSortDescriptor(key: HKSampleSortIdentifierStartDate, ascending: true)]) { _, samples, error in
                 if let error { finish(.failure(error)) }
                 else { finish(.success(samples ?? [])) }
+            }
+        }
+    }
+
+    /// Read individual entries, including condensed Apple Watch quantities.
+    /// Reading only HKQuantitySample.quantity loses their original timestamps.
+    private func quantities(_ type: HKQuantityType, predicate: NSPredicate, unit: HKUnit) async throws -> [HealthQuantityInterval] {
+        let accumulated = Mutex<[HealthQuantityInterval]>([])
+        return try await HealthQueryOperation<[HealthQuantityInterval]>(health: health).run { finish in
+            HKQuantitySeriesSampleQuery(quantityType: type, predicate: predicate) { _, quantity, interval, _, done, error in
+                if let error { finish(.failure(error)); return }
+                let result = accumulated.withLock { values -> [HealthQuantityInterval]? in
+                    if let quantity, let interval {
+                        values.append(HealthQuantityInterval(start: interval.start, end: interval.end,
+                                                             value: quantity.doubleValue(for: unit)))
+                    }
+                    return done ? values : nil
+                }
+                if let result { finish(.success(result)) }
             }
         }
     }

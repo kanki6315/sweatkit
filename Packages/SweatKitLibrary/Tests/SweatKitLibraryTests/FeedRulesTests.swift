@@ -198,7 +198,7 @@ private func row(
         #expect(current["analysis.bestDistances"] == AlgorithmVersion.bestDistances)
         // Analysis's twelve and this package's two.
         #expect(current.count == 14)
-        #expect(PipelineVersions.current.streamRules == 1)
+        #expect(PipelineVersions.current.streamRules == 2)
     }
 
     @Test(arguments: PipelineVersions.current.algorithms.keys.sorted())

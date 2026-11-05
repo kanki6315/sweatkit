@@ -24,7 +24,7 @@ import SweatKitModel
 /// truncation and corruption that decompression lets through.
 enum StreamFileFormat {
     static let magic = Data("SKST".utf8)
-    static let currentVersion: UInt16 = 1
+    static let currentVersion: UInt16 = 2
     static let lzfse: UInt8 = 1
     static let digestLength = 32
 
@@ -43,6 +43,7 @@ enum StreamFileFormat {
     static let channelOrder: [Channel] = [
         .latitude, .longitude, .altitude, .distance, .speed,
         .heartRate, .power, .cadence, .temperature, .gradient,
+        .runningStrideLength, .runningGroundContactTime, .runningVerticalOscillation,
     ]
 
     // MARK: Envelope
@@ -61,12 +62,12 @@ enum StreamFileFormat {
         return writer.data
     }
 
-    static func unwrap(_ file: Data, content: Content) throws(ReadFailure) -> (producerVersion: Int, body: Data) {
+    static func unwrap(_ file: Data, content: Content) throws(ReadFailure) -> (producerVersion: Int, body: Data, formatVersion: UInt16) {
         do {
             var reader = BinaryReader(file)
             guard Data(try reader.readBytes(magic.count)) == magic else { throw ReadFailure.unreadable }
             let version = try reader.read(UInt16.self)
-            guard version <= currentVersion else { throw ReadFailure.unsupportedFormat }
+            guard version >= 1, version <= currentVersion else { throw ReadFailure.unsupportedFormat }
             guard try reader.read(UInt8.self) == content.rawValue else { throw ReadFailure.unreadable }
             guard try reader.read(UInt8.self) == lzfse else { throw ReadFailure.unsupportedFormat }
             let producerVersion = Int(try reader.read(Int64.self))
@@ -77,7 +78,7 @@ enum StreamFileFormat {
             guard UInt64(body.count) == length, Data(SHA256.hash(data: body)) == digest else {
                 throw ReadFailure.unreadable
             }
-            return (producerVersion, body)
+            return (producerVersion, body, version)
         } catch let failure as ReadFailure {
             throw failure
         } catch {
@@ -115,7 +116,8 @@ enum StreamFileFormat {
     }
 
     static func decodeAnalysisStream(_ file: Data) throws(ReadFailure) -> AnalysisStream {
-        let body = try unwrap(file, content: .analysisStream).body
+        let envelope = try unwrap(file, content: .analysisStream)
+        let body = envelope.body
         do {
             var reader = BinaryReader(body)
             let rulesVersion = Int(try reader.read(Int64.self))
@@ -140,7 +142,7 @@ enum StreamFileFormat {
                 throw MalformedStreamFile()
             }
             var stream = AnalysisStream(rulesVersion: rulesVersion, start: start, count: count, pauses: pauses)
-            for channel in channelOrder {
+            for channel in (envelope.formatVersion == 1 ? Array(channelOrder.prefix(10)) : channelOrder) {
                 let length = try reader.readCount(elementSize: MemoryLayout<Double>.size + 1)
                 let values = try reader.readDoubles(length)
                 let qualityBytes = try reader.readBytes(length)
@@ -178,7 +180,7 @@ enum StreamFileFormat {
 
     /// The optional channels of a native sample, in the order they are written.
     private static var sampleChannels: [WritableKeyPath<NativeSample, Double?>] {
-        [\.altitude, \.distance, \.speed, \.heartRate, \.power, \.cadence, \.temperature]
+        [\.altitude, \.distance, \.speed, \.heartRate, \.power, \.cadence, \.temperature, \.runningStrideLength, \.runningGroundContactTime, \.runningVerticalOscillation]
     }
 
     static func encode(_ activity: RecordedActivity, decoderVersion: Int) throws -> Data {
@@ -223,7 +225,7 @@ enum StreamFileFormat {
     }
 
     static func decodeRecordedActivity(_ file: Data) throws(ReadFailure) -> (decoderVersion: Int, activity: RecordedActivity) {
-        let (decoderVersion, body) = try unwrap(file, content: .recordedActivity)
+        let (decoderVersion, body, formatVersion) = try unwrap(file, content: .recordedActivity)
         do {
             var reader = BinaryReader(body)
             guard let sport = Sport(rawValue: try reader.readString()) else { throw MalformedStreamFile() }
@@ -266,7 +268,7 @@ enum StreamFileFormat {
                 next += 1
             }
 
-            for channel in sampleChannels {
+            for channel in (formatVersion == 1 ? Array(sampleChannels.prefix(7)) : sampleChannels) {
                 let present = try presence(try reader.readBytes(sampleCount))
                 let values = try reader.readDoubles(present.count { $0 })
                 var next = 0

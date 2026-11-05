@@ -51,6 +51,9 @@ public enum Channel: String, Codable, Sendable, CaseIterable {
     case cadence
     case temperature
     case gradient
+    case runningStrideLength
+    case runningGroundContactTime
+    case runningVerticalOscillation
 }
 
 /// Where the timer was paused, when the original says.
@@ -97,6 +100,24 @@ public struct AnalysisStream: Hashable, Codable, Sendable {
     /// Rise over run, so 0.05 is a 5% climb.
     public var gradient: Series
 
+    private var storedRunningStrideLength: Series?
+    public var runningStrideLength: Series {
+        get { storedRunningStrideLength ?? Series(missingCount: count) }
+        set { storedRunningStrideLength = newValue.quality.allSatisfy { $0 == .missing } ? nil : newValue }
+    }
+
+    private var storedRunningGroundContactTime: Series?
+    public var runningGroundContactTime: Series {
+        get { storedRunningGroundContactTime ?? Series(missingCount: count) }
+        set { storedRunningGroundContactTime = newValue.quality.allSatisfy { $0 == .missing } ? nil : newValue }
+    }
+
+    private var storedRunningVerticalOscillation: Series?
+    public var runningVerticalOscillation: Series {
+        get { storedRunningVerticalOscillation ?? Series(missingCount: count) }
+        set { storedRunningVerticalOscillation = newValue.quality.allSatisfy { $0 == .missing } ? nil : newValue }
+    }
+
     /// A stream of `count` seconds with every channel missing.
     public init(rulesVersion: Int, start: Date, count: Int, pauses: PauseData = .known(paused: [])) {
         self.rulesVersion = rulesVersion
@@ -129,6 +150,9 @@ public struct AnalysisStream: Hashable, Codable, Sendable {
             case .cadence: cadence
             case .temperature: temperature
             case .gradient: gradient
+            case .runningStrideLength: runningStrideLength
+            case .runningGroundContactTime: runningGroundContactTime
+            case .runningVerticalOscillation: runningVerticalOscillation
             }
         }
         set {
@@ -143,6 +167,9 @@ public struct AnalysisStream: Hashable, Codable, Sendable {
             case .cadence: cadence = newValue
             case .temperature: temperature = newValue
             case .gradient: gradient = newValue
+            case .runningStrideLength: runningStrideLength = newValue
+            case .runningGroundContactTime: runningGroundContactTime = newValue
+            case .runningVerticalOscillation: runningVerticalOscillation = newValue
             }
         }
     }

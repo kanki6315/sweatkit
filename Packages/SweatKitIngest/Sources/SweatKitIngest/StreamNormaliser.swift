@@ -209,6 +209,10 @@ public enum StreamNormaliser {
         case .power: { $0.power }
         case .cadence: { $0.cadence }
         case .temperature: { $0.temperature }
+        case .runningStrideLength: { $0.runningStrideLength }
+        case .runningGroundContactTime: { $0.runningGroundContactTime }
+        case .runningVerticalOscillation: { $0.runningVerticalOscillation }
+
         case .gradient: nil
         }
     }
