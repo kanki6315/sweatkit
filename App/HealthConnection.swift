@@ -11,11 +11,13 @@ import SweatKitModel
 @MainActor @Observable
 final class HealthConnection {
     private(set) var running = false
+    private(set) var lastSyncSucceeded = false
     private(set) var enabled = false
     private(set) var status = "Connect Apple Health to read your workouts."
     private let health = HKHealthStore()
     private let library: ActivityLibrary
     private let stateURL: URL
+    private var backgroundWork: WorkoutBackgroundWork?
     private var syncTask: Task<Void, Never>?
 
     private typealias State = HealthSyncState
@@ -67,18 +69,15 @@ final class HealthConnection {
         HealthBackgroundDelivery.shared.pause()
     }
 
-    func sync(changesCaptured: (@MainActor () -> Void)? = nil) async {
+    func sync(continued: Bool = true, changesCaptured: (@MainActor () -> Void)? = nil) async {
         // A notification may arrive after its type was read by an existing
         // pass. Wait, then fetch again; never acknowledge it using that pass.
         while running {
-            guard let active = syncTask else { changesCaptured?(); return }
-            await withTaskCancellationHandler {
-                await active.value
-            } onCancel: {
-                active.cancel()
-            }
-            if Task.isCancelled { changesCaptured?(); return }
-            await Task.yield()
+            guard syncTask != nil else { changesCaptured?(); return }
+            // Do not cancel another caller's operation when this observer expires.
+            // A cancellable wait also lets an expiring background worker exit promptly.
+            do { try await Task.sleep(for: .milliseconds(250)) }
+            catch { changesCaptured?(); return }
         }
         guard enabled, !Task.isCancelled, HKHealthStore.isHealthDataAvailable() else { changesCaptured?(); return }
         guard UserDefaults.standard.integer(forKey: "healthReadSchema") >= 3 else {
@@ -87,12 +86,25 @@ final class HealthConnection {
             return
         }
         running = true
-        syncTask = Task { await synchronize(changesCaptured: changesCaptured) }
+        lastSyncSucceeded = false
+        syncTask = Task { [self] in
+            let background = WorkoutBackgroundWork(title: "Processing Health workouts", continued: continued) { [weak self] in
+                self?.syncTask?.cancel()
+            }
+            backgroundWork = background
+            defer { backgroundWork = nil }
+            await synchronize(changesCaptured: changesCaptured)
+            background.finish(success: !Task.isCancelled && lastSyncSucceeded)
+        }
         let active = syncTask
-        await withTaskCancellationHandler {
+        if continued {
             await active?.value
-        } onCancel: {
-            active?.cancel()
+        } else {
+            await withTaskCancellationHandler {
+                await active?.value
+            } onCancel: {
+                active?.cancel()
+            }
         }
         syncTask = nil
         running = false
@@ -169,6 +181,7 @@ final class HealthConnection {
                     state.pending.remove(id)
                     try save(state)
                     completed += 1
+                    backgroundWork?.update(completed: completed, total: pending.count)
                     status = "Apple Health: processed \(completed) of \(pending.count) workouts."
                 } catch is CancellationError { throw CancellationError() }
                 catch { failures += 1 }
@@ -180,6 +193,7 @@ final class HealthConnection {
             } else {
                 status = "Apple Health is up to date. \(completed) workouts refreshed."
             }
+            lastSyncSucceeded = failures == 0
         } catch is CancellationError {
             status = "Health refresh paused. Refresh again to resume saved work."
         } catch {
