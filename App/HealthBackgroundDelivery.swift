@@ -14,6 +14,7 @@ enum AppServices {
 final class SweatKitAppDelegate: NSObject, UIApplicationDelegate {
     func application(_ application: UIApplication,
                      didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
+        BackgroundRefresh.registerProcessing()
         HealthBackgroundDelivery.shared.start()
         return true
     }
@@ -93,7 +94,7 @@ final class HealthBackgroundDelivery {
                 let model = AppServices.library
                 await model.open()
                 if let health = model.health {
-                    await health.sync { batch.forEach { $0.complete() } }
+                    await health.sync(continued: false) { batch.forEach { $0.complete() } }
                 }
                 // Open failures and cancellation retain old anchors. A normal
                 // foreground refresh always retries them, with no read prompts.
