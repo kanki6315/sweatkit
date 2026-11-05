@@ -14,12 +14,13 @@ public struct GarminEndpoints: Sendable {
 
     /// `POST /personalapitoken-service/personal-api/personal-api-key/token` with
     /// `Authorization: ApiKey <key>`. This endpoint is on the Personal API page
-    /// and FAQ but not in the OpenAPI document.
+    /// and FAQ but not in the OpenAPI document. Sent like the documented curl
+    /// command, with `Accept: */*`: an `application/json` Accept gets a 406.
     public func token(apiKey: String) throws(GarminError) -> URLRequest {
         var request = URLRequest(url: try url("/personalapitoken-service/personal-api/personal-api-key/token"))
         request.httpMethod = "POST"
         request.setValue("ApiKey \(apiKey)", forHTTPHeaderField: "Authorization")
-        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.setValue("*/*", forHTTPHeaderField: "Accept")
         return request
     }
 

@@ -46,3 +46,37 @@ struct FixedTransport: GarminTransport {
         await #expect(throws: PacedTransport.Stopped.self) { try await transport.send(request) }
     }
 }
+
+@Suite struct BodyCaptureTests {
+    struct BodyTransport: GarminTransport {
+        var status: Int
+        var contentType: String
+        var body: String
+        func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+            let response = HTTPURLResponse(url: request.url ?? URL(filePath: "/"), statusCode: status, httpVersion: nil, headerFields: ["Content-Type": contentType])
+            return (Data(body.utf8), try #require(response))
+        }
+    }
+
+    func saved(status: Int, path: String, contentType: String = "application/json") async throws -> [String] {
+        let folder = FileManager.default.temporaryDirectory.appending(path: "garminpull-bodies-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let transport = PacedTransport(BodyTransport(status: status, contentType: contentType, body: "body"), interval: .zero, saveJSONBodiesTo: folder)
+        _ = try await transport.send(URLRequest(url: try #require(URL(string: "https://example.invalid\(path)"))))
+        return try FileManager.default.contentsOfDirectory(atPath: folder.path()).sorted()
+    }
+
+    @Test func neverSavesASuccessfulTokenBody() async throws {
+        #expect(try await saved(status: 200, path: "/personalapitoken-service/personal-api/personal-api-key/token").isEmpty)
+    }
+
+    @Test func savesErrorBodiesIncludingTheTokenEndpoints() async throws {
+        #expect(try await saved(status: 406, path: "/personalapitoken-service/personal-api/personal-api-key/token") == ["01-personal-api-key-token.error-406.txt"])
+    }
+
+    @Test func savesSuccessfulJSONFromDataEndpoints() async throws {
+        #expect(try await saved(status: 200, path: "/activity-service/activity/1") == ["01-activity-1.json"])
+        #expect(try await saved(status: 200, path: "/download-service/files/activity/1", contentType: "application/zip").isEmpty)
+    }
+}

@@ -21,6 +21,8 @@ func queryItems(_ request: URLRequest) -> [String: String] {
         #expect(request.httpMethod == "POST")
         #expect(request.url?.absoluteString == "https://personal.connectapi.garmin.com/personalapitoken-service/personal-api/personal-api-key/token")
         #expect(request.value(forHTTPHeaderField: "Authorization") == "ApiKey \(key)")
+        // The live endpoint answered `Accept: application/json` with 406.
+        #expect(request.value(forHTTPHeaderField: "Accept") == "*/*")
     }
 
     @Test func newestIsTheDocumentedDefaultPage() throws {

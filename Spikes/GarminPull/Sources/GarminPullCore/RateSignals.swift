@@ -13,7 +13,8 @@ public func rateHeaders(_ headers: [String: String]) -> [String: String] {
 
 /// Wraps a transport so requests go one at a time, at least `interval` apart,
 /// and nothing is sent after the first 429. JSON bodies can be saved to replace
-/// the hand-written test samples; the token response is never saved.
+/// the hand-written test samples, and error bodies to explain refusals. A
+/// successful token response is never saved.
 public actor PacedTransport: GarminTransport {
     public let interval: Duration
     private let base: any GarminTransport
@@ -41,11 +42,16 @@ public actor PacedTransport: GarminTransport {
         lastSent = .now
         let (data, response) = try await base.send(request)
         if response.statusCode == 429 { stopped = true }
-        if let bodies, let path = request.url?.path(), !path.contains("token"),
-           response.value(forHTTPHeaderField: "Content-Type")?.contains("json") == true {
-            saved += 1
-            let name = path.split(separator: "/").suffix(2).joined(separator: "-")
-            try? data.write(to: bodies.appending(path: String(format: "%02d-%@.json", saved, name)))
+        if let bodies, let path = request.url?.path() {
+            let succeeded = (200..<300).contains(response.statusCode)
+            let isJSON = response.value(forHTTPHeaderField: "Content-Type")?.contains("json") == true
+            // Error bodies explain refusals; a successful token body holds the token.
+            if !succeeded || (isJSON && !path.contains("token")) {
+                saved += 1
+                let name = path.split(separator: "/").suffix(2).joined(separator: "-")
+                let suffix = succeeded ? "json" : "error-\(response.statusCode).txt"
+                try? data.write(to: bodies.appending(path: "\(String(format: "%02d", saved))-\(name).\(suffix)"))
+            }
         }
         return (data, response)
     }

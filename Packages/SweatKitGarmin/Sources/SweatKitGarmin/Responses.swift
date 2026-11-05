@@ -14,10 +14,22 @@ struct AccessToken: Sendable, CustomStringConvertible {
 
     var description: String { "AccessToken(expires \(expiresAt))" }
 
-    /// Garmin does not document the token response body. This accepts the common
-    /// OAuth2 spellings and falls back to the documented lifetime.
+    /// The key name reported when the body is a bare token rather than an object.
+    static let bareTokenKey = "<bare token>"
+
+    /// Garmin does not document the token response body. This accepts a JSON
+    /// object with the common OAuth2 spellings, a JSON string, or the token as
+    /// plain text, and falls back to the documented lifetime.
     static func parse(_ data: Data, status: Int, now: Date) throws(GarminError) -> AccessToken {
-        guard let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else {
+        let parsed = try? JSONSerialization.jsonObject(with: data, options: .fragmentsAllowed)
+        if let bare = (parsed as? String) ?? (parsed == nil ? String(data: data, encoding: .utf8) : nil) {
+            let value = bare.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !value.isEmpty, value.unicodeScalars.allSatisfy({ $0.value > 0x20 && $0.value < 0x7F }) else {
+                throw .unexpectedResponse(UnexpectedResponse(status: status, reason: .undecodableBody))
+            }
+            return AccessToken(value: value, expiresAt: now.addingTimeInterval(documentedLifetime), keys: [bareTokenKey])
+        }
+        guard let object = parsed as? [String: Any] else {
             throw .unexpectedResponse(UnexpectedResponse(status: status, reason: .undecodableBody))
         }
         let keys = object.keys.sorted()

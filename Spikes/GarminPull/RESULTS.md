@@ -34,6 +34,7 @@ Docs read on 4 November 2026: the [Personal API](https://developer.garmin.com/gc
 | 8 | Rate limits and history depth "are not documented". | Confirmed. Nothing on any of the three pages, and no `429` in the OpenAPI responses. | No change. Gate 2 measures them. |
 | 9 | Keys expire after 30, 90 or 180 days or 1 year; Garmin emails a week before. | Confirmed. The key is shown once; a lost key has to be deleted and a new one made. Its status and expiry show on Garmin Connect on the web. | No change. The app cannot read the key's expiry from the API; the user has to enter it, or the app counts from the chosen period. |
 | 10 | Not mentioned. | The OpenAPI document lists a second server, `personal.connectapi.garmin.cn`. | Accounts in China use a different host. Not relevant to a personal build. |
+| 11 | Not mentioned. | The documented curl command sends no `Accept` header. **Live:** the token endpoint answered `Accept: application/json` with `406 Not Acceptable` (JSON body, 158 bytes, served through Cloudflare). | The client now sends `Accept: */*` to the token endpoint, as curl does, and accepts a bare token as well as a JSON object, since the body's format is undocumented and the 406 suggests it is not JSON. |
 
 Listing entries (`SummarizedActivityDTO`) carry `activityId`, `startTimeLocal`, `startTimeGMT`, `beginTimestamp`, `duration`, `elapsedDuration`, `movingDuration`, `distance`, `activityType` and `manufacturer`. That is enough for the spec's de-duplication rule and revision triggers without fetching each activity, as the spec assumes.
 

@@ -65,7 +65,22 @@ func sample(_ name: String) throws -> Data {
             try AccessToken.parse(body, status: 200, now: now)
         }
         #expect(throws: GarminError.unexpectedResponse(UnexpectedResponse(status: 200, reason: .undecodableBody))) {
-            try AccessToken.parse(Data("not json".utf8), status: 200, now: now)
+            try AccessToken.parse(Data("<html>an error page</html>".utf8), status: 200, now: now)
+        }
+        #expect(throws: GarminError.unexpectedResponse(UnexpectedResponse(status: 200, reason: .undecodableBody))) {
+            try AccessToken.parse(Data("[1, 2]".utf8), status: 200, now: now)
+        }
+        #expect(throws: GarminError.unexpectedResponse(UnexpectedResponse(status: 200, reason: .undecodableBody))) {
+            try AccessToken.parse(Data(), status: 200, now: now)
+        }
+    }
+
+    @Test func tokenAcceptsABareTokenAsTextOrJSONString() throws {
+        for body in ["eyJhbGciOi.payload.sig\n", #""eyJhbGciOi.payload.sig""#] {
+            let token = try AccessToken.parse(Data(body.utf8), status: 200, now: now)
+            #expect(token.value == "eyJhbGciOi.payload.sig")
+            #expect(token.expiresAt == now.addingTimeInterval(24 * 60 * 60))
+            #expect(token.keys == [AccessToken.bareTokenKey])
         }
     }
 
