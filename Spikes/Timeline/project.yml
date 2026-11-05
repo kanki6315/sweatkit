@@ -1,0 +1,62 @@
+# Throwaway harness for trying the timeline and stats panel. Not part of the app.
+name: TimelineSpike
+options:
+  bundleIdPrefix: com.arjunakankipati
+  deploymentTarget:
+    iOS: "26.0"
+  createIntermediateGroups: true
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    DEVELOPMENT_TEAM: TDBAHN96B3
+packages:
+  SweatKitModel:
+    path: ../../Packages/SweatKitModel
+  SweatKitIngest:
+    path: ../../Packages/SweatKitIngest
+  SweatKitAnalysis:
+    path: ../../Packages/SweatKitAnalysis
+  SweatKitFlyover:
+    path: ../../Packages/SweatKitFlyover
+  SweatKitTimeline:
+    path: ../../Packages/SweatKitTimeline
+targets:
+  TimelineSpike:
+    type: application
+    platform: iOS
+    sources:
+      - Harness
+      - path: ../../Fixtures/fit/outdoor-ride.fit
+        buildPhase: resources
+      - path: ../../Fixtures/fit/zwift-ride.fit
+        buildPhase: resources
+      - path: ../../Fixtures/fit/walk.fit
+        buildPhase: resources
+      - path: ../../Fixtures/fit/walk-pitlane.fit
+        buildPhase: resources
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.arjunakankipati.sweatkit.timelinespike
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_CFBundleDisplayName: Timeline Spike
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        INFOPLIST_KEY_UISupportedInterfaceOrientations: UIInterfaceOrientationPortrait
+        # Lets CADisplayLink run at 120 Hz on ProMotion.
+        INFOPLIST_KEY_CADisableMinimumFrameDurationOnPhone: YES
+        TARGETED_DEVICE_FAMILY: "1"
+    dependencies:
+      - package: SweatKitModel
+        product: SweatKitModel
+      - package: SweatKitIngest
+      - package: SweatKitAnalysis
+      - package: SweatKitFlyover
+      - package: SweatKitTimeline
+schemes:
+  TimelineSpike:
+    build:
+      targets:
+        TimelineSpike: all
+    run:
+      config: Release
