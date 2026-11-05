@@ -15,6 +15,8 @@ let package = Package(
         .package(path: "../SweatKitSync"),
         .package(path: "../SweatKitGarmin"),
         .package(path: "../SweatKitIdentity"),
+        .package(path: "../SweatKitRouteMatching"),
+        .package(path: "../SweatKitTrackCleanup"),
     ],
     targets: [
         .target(
@@ -26,6 +28,8 @@ let package = Package(
                 .product(name: "SweatKitAnalysis", package: "SweatKitAnalysis"),
                 .product(name: "SweatKitSync", package: "SweatKitSync"),
                 .product(name: "SweatKitIdentity", package: "SweatKitIdentity"),
+                .product(name: "SweatKitRouteMatching", package: "SweatKitRouteMatching"),
+                .product(name: "SweatKitTrackCleanup", package: "SweatKitTrackCleanup"),
             ]
         ),
         .testTarget(
@@ -39,6 +43,8 @@ let package = Package(
                 .product(name: "SweatKitAnalysis", package: "SweatKitAnalysis"),
                 .product(name: "SweatKitSync", package: "SweatKitSync"),
                 .product(name: "SweatKitIdentity", package: "SweatKitIdentity"),
+                .product(name: "SweatKitRouteMatching", package: "SweatKitRouteMatching"),
+                .product(name: "SweatKitTrackCleanup", package: "SweatKitTrackCleanup"),
                 .product(name: "SweatKitTestSupport", package: "SweatKitModel"),
             ]
         ),
