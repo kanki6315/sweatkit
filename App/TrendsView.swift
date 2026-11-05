@@ -27,11 +27,10 @@ struct TrendsView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 28) {
-                Button { showFilters = true } label: {
-                    Label("\(sport) · \(dateWindow.lowercased())", systemImage: "chevron.down")
-                        .font(.subheadline.weight(.semibold)).padding(.horizontal, 12).padding(.vertical, 8)
-                        .background(.tint.opacity(0.12), in: Capsule())
-                }
+                Text([sport, dateWindow, setting == "All settings" ? nil : setting]
+                    .compactMap { $0 }.joined(separator: " · "))
+                    .font(.subheadline).foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 if loading { ProgressView("Preparing history…").frame(maxWidth: .infinity) }
                 else if let error {
                     ContentUnavailableView {
@@ -57,7 +56,7 @@ struct TrendsView: View {
                     Text("Empty periods mean no matching activities in this library.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
-            }.padding(.horizontal, 20).padding(.bottom, 24)
+            }.padding(.horizontal, 20).padding(.top, 8).padding(.bottom, 24)
         }
         .background(Color(uiColor: .systemGroupedBackground))
         .navigationTitle("Trends")

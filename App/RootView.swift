@@ -10,22 +10,17 @@ struct RootView: View {
     var body: some View {
         TabView {
             Tab("Activities", systemImage: "list.bullet") {
-                NavigationStack {
+                screen {
                     ActivityFeedView(model: library)
-                        .toolbar {
-                            ToolbarItem(placement: .topBarTrailing) {
-                                Button("Settings", systemImage: "person.crop.circle") { showsSettings = true }
-                            }
-                        }
                 }
             }
             Tab("Routes", systemImage: "point.topleft.down.to.point.bottomright.curvepath") {
-                screen("Routes") {
+                screen {
                     RoutesView(libraryModel: library)
                 }
             }
             Tab("Trends", systemImage: "chart.xyaxis.line") {
-                screen("Trends") {
+                screen {
                     TrendsView(model: library)
                 }
             }
@@ -44,10 +39,9 @@ struct RootView: View {
         }
     }
 
-    private func screen(_ title: String, @ViewBuilder content: () -> some View) -> some View {
+    private func screen(@ViewBuilder content: () -> some View) -> some View {
         NavigationStack {
             content()
-                .navigationTitle(title)
                 .toolbar {
                     ToolbarItem(placement: .topBarTrailing) {
                         Button("Settings", systemImage: "person.crop.circle") {

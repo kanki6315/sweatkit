@@ -44,7 +44,6 @@ struct RoutesView: View {
     @State private var model = RoutesModel()
     @State private var search = ""
     @State private var byName = false
-    @Environment(\.dynamicTypeSize) private var typeSize
     @AppStorage("routes.includeOlderHistory") private var includeOlderHistory = false
     private var routes: [LibraryRoute] {
         let filtered = model.catalog.routes.filter { search.isEmpty || ($0.name.localizedCaseInsensitiveContains(search) || $0.region.localizedCaseInsensitiveContains(search)) }
@@ -60,13 +59,16 @@ struct RoutesView: View {
     var body: some View {
         List {
             Section {
-                Text("\(model.catalog.routes.count) \(model.catalog.routes.count == 1 ? "route" : "routes") · \(model.catalog.routes.reduce(0) { $0 + $1.efforts.count }) efforts · by \(byName ? "name" : "most recent")")
-                    .font(.subheadline).foregroundStyle(Color.secondary)
-                if typeSize.isAccessibilitySize { historyPicker.pickerStyle(.menu) }
-                else { historyPicker.pickerStyle(.segmented) }
-                if model.loading && !model.catalog.routes.isEmpty { ProgressView("Updating routes…") }
-                Text("Routes with five or more outings. Possible matches are optional to review.")
-                    .font(.caption).foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("\(model.catalog.routes.count) \(model.catalog.routes.count == 1 ? "route" : "routes") · \(model.catalog.routes.reduce(0) { $0 + $1.efforts.count }) efforts · by \(byName ? "name" : "most recent")")
+                        .font(.subheadline).foregroundStyle(Color.secondary)
+                    Text(includeOlderHistory ? "All history" : "Past two years")
+                        .font(.caption).foregroundStyle(.secondary)
+                    if model.loading && !model.catalog.routes.isEmpty { ProgressView("Updating routes…") }
+                    Text("Routes with five or more outings. Possible matches are optional to review.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                .padding(.vertical, 4)
             }
             if let error = model.error {
                 Section("Routes couldn’t refresh") {
@@ -124,13 +126,19 @@ struct RoutesView: View {
               }
             }
         }
+        .listStyle(.plain)
+        .navigationTitle("Routes")
         .overlay {
             if model.loading && model.catalog.routes.isEmpty { ProgressView("Finding repeated routes…") }
         }
-        .searchable(text: $search, prompt: "Find a route")
+        .searchable(text: $search, placement: .toolbar, prompt: "Find a route")
         .toolbar { ToolbarItem(placement: .topBarTrailing) {
-            Menu("Sort routes", systemImage: "arrow.up.arrow.down") {
-                Button("Most recent") { byName = false }; Button("Name") { byName = true }
+            Menu("Route options", systemImage: "line.3.horizontal.decrease") {
+                historyPicker
+                Picker("Sort routes", selection: $byName) {
+                    Text("Most recent").tag(false)
+                    Text("Name").tag(true)
+                }
             }
         } }
         .onChange(of: includeOlderHistory) {
