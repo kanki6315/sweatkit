@@ -1,0 +1,1275 @@
+<!doctype html>
+<html lang="en" data-accent="cyan">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SweatKit Screens</title>
+<script>
+  // Resolve appearance before first paint so the board never flashes the wrong scheme.
+  (function () {
+    var pref = 'auto', accent = 'cyan';
+    try { pref = localStorage.getItem('sk-appearance') || 'auto'; accent = localStorage.getItem('sk-accent') || 'cyan'; } catch (e) {}
+    var dark = pref === 'dark' || (pref === 'auto' && matchMedia('(prefers-color-scheme: dark)').matches);
+    document.documentElement.dataset.scheme = dark ? 'dark' : 'light';
+    document.documentElement.dataset.appearance = pref;
+    document.documentElement.dataset.accent = accent;
+  })();
+</script>
+<style>
+:root {
+  color-scheme: light dark;
+  --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", system-ui, sans-serif;
+  --ease: cubic-bezier(0.25, 1, 0.5, 1);
+
+  /* Effort ramp: one meaning everywhere (power Z1-Z7; HR uses Z2-Z6; gradient bands reuse slots). */
+  --z1: oklch(0.74 0.03 250);
+  --z2: oklch(0.66 0.15 252);
+  --z3: oklch(0.73 0.14 165);
+  --z4: oklch(0.86 0.16 95);
+  --z5: oklch(0.74 0.17 55);
+  --z6: oklch(0.63 0.21 27);
+  --z7: oklch(0.60 0.22 345);
+
+  /* z-index scale inside a device */
+  --z-map: 0; --z-fog: 1; --z-marker: 5; --z-panel: 10; --z-sheet: 20; --z-tabbar: 30; --z-status: 40; --z-island: 50; --z-home: 60;
+}
+
+html[data-scheme="light"] {
+  --board-bg: oklch(0.935 0.003 265);
+  --board-ink: oklch(0.20 0.005 265);
+  --board-ink2: oklch(0.42 0.006 265);
+  --board-line: oklch(0.86 0.004 265);
+  --bg: oklch(1 0 0);
+  --bg-grouped: oklch(0.962 0.003 265);
+  --surface: oklch(1 0 0);
+  --fill: oklch(0.915 0.004 265);
+  --fill2: oklch(0.945 0.003 265);
+  --sep: oklch(0.88 0.004 265);
+  --label: oklch(0.17 0.003 265);
+  --label2: oklch(0.43 0.008 265);
+  --label3: oklch(0.56 0.008 265);
+  --glass: oklch(0.985 0.002 265 / 0.64);
+  --glass-edge: oklch(1 0 0 / 0.75);
+  --glass-hi: oklch(1 0 0 / 0.9);
+  --glass-shadow: 0 10px 30px oklch(0.25 0.01 265 / 0.18);
+  --glass-dim: oklch(0.985 0.002 265 / 0.62);
+  --thumb: oklch(1 0 0);
+  --thumb-shadow: 0 1px 4px oklch(0.2 0.01 265 / 0.18);
+  --sky: oklch(0.87 0.025 235);
+  --map-land: oklch(0.955 0.004 120);
+  --map-park: oklch(0.89 0.055 145);
+  --map-water: oklch(0.84 0.055 232);
+  --map-road: oklch(1 0 0);
+  --map-road2: oklch(0.985 0.002 120);
+  --scrim: oklch(0.2 0.01 265 / 0.28);
+  --warn: oklch(0.58 0.14 65);
+}
+html[data-scheme="dark"] {
+  --board-bg: oklch(0.14 0.003 265);
+  --board-ink: oklch(0.95 0.003 265);
+  --board-ink2: oklch(0.74 0.008 265);
+  --board-line: oklch(0.28 0.004 265);
+  --bg: oklch(0 0 0);
+  --bg-grouped: oklch(0 0 0);
+  --surface: oklch(0.215 0.004 265);
+  --fill: oklch(0.31 0.005 265);
+  --fill2: oklch(0.255 0.005 265);
+  --sep: oklch(0.33 0.005 265);
+  --label: oklch(0.985 0 0);
+  --label2: oklch(0.78 0.008 265);
+  --label3: oklch(0.65 0.008 265);
+  --glass: oklch(0.2 0.004 265 / 0.58);
+  --glass-edge: oklch(1 0 0 / 0.14);
+  --glass-hi: oklch(1 0 0 / 0.16);
+  --glass-shadow: 0 10px 30px oklch(0 0 0 / 0.4);
+  --glass-dim: oklch(0.2 0.004 265 / 0.6);
+  --thumb: oklch(0.36 0.005 265);
+  --thumb-shadow: 0 1px 6px oklch(0 0 0 / 0.5);
+  --sky: oklch(0.30 0.03 245);
+  --map-land: oklch(0.255 0.005 265);
+  --map-park: oklch(0.31 0.04 150);
+  --map-water: oklch(0.30 0.045 242);
+  --map-road: oklch(0.40 0.006 265);
+  --map-road2: oklch(0.34 0.006 265);
+  --scrim: oklch(0 0 0 / 0.5);
+  --warn: oklch(0.80 0.14 75);
+}
+
+/* Accent themes: --accent fills, --accent-ink is for text and icons on surfaces. */
+html[data-accent="cyan"] { --accent: oklch(0.83 0.14 212); --on-accent: oklch(0.22 0.04 225); }
+html[data-accent="cyan"][data-scheme="light"] { --accent-ink: oklch(0.50 0.11 226); }
+html[data-accent="cyan"][data-scheme="dark"] { --accent-ink: oklch(0.83 0.14 212); }
+html[data-accent="lime"] { --accent: oklch(0.90 0.20 127); --on-accent: oklch(0.25 0.06 132); }
+html[data-accent="lime"][data-scheme="light"] { --accent-ink: oklch(0.50 0.13 136); }
+html[data-accent="lime"][data-scheme="dark"] { --accent-ink: oklch(0.90 0.20 127); }
+html[data-accent="cobalt"] { --on-accent: oklch(1 0 0); }
+html[data-accent="cobalt"][data-scheme="light"] { --accent: oklch(0.52 0.20 266); --accent-ink: oklch(0.50 0.20 266); }
+html[data-accent="cobalt"][data-scheme="dark"] { --accent: oklch(0.56 0.19 266); --accent-ink: oklch(0.75 0.14 266); }
+html { --accent-soft: color-mix(in oklch, var(--accent) 18%, transparent); }
+
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body {
+  background: var(--board-bg);
+  color: var(--board-ink);
+  font-family: var(--font);
+  -webkit-font-smoothing: antialiased;
+  transition: background-color 220ms var(--ease), color 220ms var(--ease);
+}
+button { font: inherit; color: inherit; }
+
+/* ---------- Board chrome ---------- */
+.board { max-width: 1440px; margin: 0 auto; padding: 56px 40px 120px; }
+.board-head { display: flex; flex-wrap: wrap; gap: 28px 64px; align-items: end; justify-content: space-between; padding-bottom: 36px; border-bottom: 1px solid var(--board-line); }
+.board-head h1 { font-size: 34px; line-height: 1.1; letter-spacing: -0.02em; margin: 0 0 10px; font-weight: 700; text-wrap: balance; }
+.board-head p { margin: 0; max-width: 62ch; color: var(--board-ink2); font-size: 16px; line-height: 1.5; text-wrap: pretty; }
+.controls { display: flex; flex-wrap: wrap; gap: 20px 28px; }
+.control { display: grid; gap: 8px; }
+.control > span { font-size: 13px; color: var(--board-ink2); }
+.seg-board { display: inline-flex; flex-wrap: wrap; padding: 3px; border-radius: 21px; background: color-mix(in oklch, var(--board-ink) 9%, transparent); }
+.seg-board button { white-space: nowrap; border: 0; background: none; padding: 7px 14px; border-radius: 999px; font-size: 14px; font-weight: 500; cursor: pointer; display: inline-flex; align-items: center; gap: 7px; color: var(--board-ink2); transition: background-color 180ms var(--ease), color 180ms var(--ease); }
+.seg-board button[aria-pressed="true"] { background: var(--board-bg); color: var(--board-ink); box-shadow: 0 1px 3px oklch(0.2 0.01 265 / 0.18); }
+.seg-board button:focus-visible { outline: 2px solid var(--accent-ink); outline-offset: 2px; }
+.swatch { width: 12px; height: 12px; border-radius: 50%; box-shadow: inset 0 0 0 1px oklch(0 0 0 / 0.15); }
+
+.group { padding-top: 64px; }
+.group > h2 { font-size: 24px; letter-spacing: -0.015em; margin: 0 0 6px; font-weight: 650; }
+.group > p { margin: 0 0 40px; color: var(--board-ink2); max-width: 70ch; line-height: 1.5; text-wrap: pretty; }
+.shots { display: flex; flex-wrap: wrap; gap: 64px 60px; align-items: flex-start; }
+.shot { margin: 0; width: 424px; }
+.shot .device-wrap { padding: 11px; }
+.shot figcaption { margin-top: 26px; padding: 0 4px; }
+.shot h3 { margin: 0 0 6px; font-size: 18px; font-weight: 650; letter-spacing: -0.01em; }
+.shot figcaption p { margin: 0 0 12px; font-size: 15px; line-height: 1.5; color: var(--board-ink2); text-wrap: pretty; }
+.shot ul { margin: 0; padding-left: 18px; font-size: 14px; line-height: 1.5; color: var(--board-ink2); }
+.shot li + li { margin-top: 4px; }
+.tag { display: inline-block; font-size: 12px; font-weight: 600; padding: 2px 8px; border-radius: 6px; background: color-mix(in oklch, var(--board-ink) 9%, transparent); color: var(--board-ink2); margin-left: 8px; vertical-align: 2px; }
+.hint { font-size: 13px; color: var(--board-ink2); margin-top: 10px; display: flex; gap: 6px; align-items: center; }
+
+/* ---------- Device ---------- */
+.device {
+  position: relative; width: 402px; height: 874px; border-radius: 58px; overflow: hidden; isolation: isolate;
+  background: var(--bg); color: var(--label); font-size: 17px; letter-spacing: -0.012em; line-height: 1.25;
+  box-shadow: 0 0 0 11px oklch(0.23 0.004 265), 0 0 0 12px oklch(0.42 0.004 265), 0 40px 70px -30px oklch(0.1 0.01 265 / 0.5);
+  user-select: none; -webkit-user-select: none;
+  transition: background-color 220ms var(--ease), color 220ms var(--ease);
+}
+.device.grouped { background: var(--bg-grouped); }
+.device.tall { height: auto; padding-bottom: 40px; }
+.device .num, .device .tnum { font-variant-numeric: tabular-nums; }
+.island { position: absolute; top: 11px; left: 50%; translate: -50% 0; width: 124px; height: 36px; border-radius: 20px; background: #000; z-index: var(--z-island); }
+.sb { position: absolute; top: 0; left: 0; right: 0; height: 54px; display: flex; justify-content: space-between; align-items: center; padding: 8px 32px 0 52px; font-weight: 600; font-size: 17px; z-index: var(--z-status); color: var(--label); pointer-events: none; }
+.sb.on-image { color: #fff; text-shadow: 0 0 8px oklch(0 0 0 / 0.35); }
+.sb-icons { display: flex; gap: 6px; align-items: center; }
+.home { position: absolute; bottom: 8px; left: 50%; translate: -50% 0; width: 140px; height: 5px; border-radius: 3px; background: var(--label); z-index: var(--z-home); pointer-events: none; }
+.home.on-image { background: #fff; }
+.ic { display: block; flex: none; }
+
+.glass {
+  background: var(--glass);
+  -webkit-backdrop-filter: blur(24px) saturate(1.8);
+  backdrop-filter: blur(24px) saturate(1.8);
+  box-shadow: inset 0 0 0 0.5px var(--glass-edge), inset 0 1px 0 var(--glass-hi), var(--glass-shadow);
+}
+@media (prefers-reduced-transparency: reduce) {
+  .glass { background: var(--surface); -webkit-backdrop-filter: none; backdrop-filter: none; }
+}
+.gbtn { width: 44px; height: 44px; border-radius: 50%; display: grid; place-items: center; border: 0; padding: 0; color: var(--label); cursor: pointer; }
+.gbtn.accent { background: var(--accent); color: var(--on-accent); box-shadow: var(--glass-shadow); }
+.navrow { position: absolute; top: 56px; left: 16px; right: 16px; display: flex; justify-content: space-between; align-items: center; z-index: var(--z-panel); }
+.navrow .grp { display: flex; gap: 10px; }
+.navrow .pair { display: flex; border-radius: 22px; }
+.navrow .pair .gbtn { background: none; box-shadow: none; }
+
+.titlebar { position: relative; z-index: var(--z-panel); display: flex; align-items: flex-start; gap: 12px; padding: 60px 16px 4px 20px; }
+.titlebar .ttl { flex: 1; min-width: 0; }
+.titlebar h1 { margin: 0; font-size: 34px; font-weight: 700; letter-spacing: -0.02em; line-height: 41px; }
+.titlebar .sub { margin-top: 1px; font-size: 15px; color: var(--label2); display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+.titlebar .sub .token { display: inline-flex; align-items: center; gap: 4px; height: 24px; padding: 0 6px 0 9px; border-radius: 12px; background: var(--accent-soft); color: var(--accent-ink); font-weight: 600; font-size: 13px; border: 0; cursor: pointer; }
+.titlebar .pair { display: flex; border-radius: 22px; margin-top: -1px; flex: none; }
+.titlebar .pair .gbtn { background: none; box-shadow: none; }
+.titlebar .pair .gbtn.on { background: var(--accent); color: var(--on-accent); }
+.menu { position: absolute; top: 108px; right: 16px; width: 248px; border-radius: 26px; padding: 6px 0; z-index: var(--z-sheet); transform-origin: 85% 0; animation: menu-in 200ms var(--ease); }
+.menu[hidden] { display: none; }
+@keyframes menu-in { from { opacity: 0; transform: scale(0.92); } }
+.menu .mh { font-size: 13px; color: var(--label2); padding: 8px 18px 4px; }
+.menu button { display: flex; width: 100%; align-items: center; gap: 10px; border: 0; background: none; padding: 10px 18px; font-size: 17px; text-align: left; cursor: pointer; color: var(--label); }
+.menu button .ck { width: 18px; color: var(--label); }
+.menu button:hover, .menu button:focus-visible { background: color-mix(in oklch, var(--label) 8%, transparent); outline: none; }
+.menu hr { border: 0; height: 0.5px; background: color-mix(in oklch, var(--label) 16%, transparent); margin: 6px 0; }
+.empty { padding: 48px 32px; text-align: center; color: var(--label2); font-size: 15px; line-height: 1.45; }
+@media (prefers-reduced-motion: reduce) { .menu { animation: none; } }
+
+/* Tab bar (iOS 26: floating capsule plus a separate search button) */
+.tabbar { position: absolute; left: 20px; right: 20px; bottom: 26px; display: flex; gap: 12px; z-index: var(--z-tabbar); }
+.tabbar::before { content: ""; position: absolute; left: -20px; right: -20px; bottom: -26px; height: 130px; z-index: -1; pointer-events: none; background: linear-gradient(to top, var(--bg-scroll, var(--bg)) 30%, transparent); }
+.device.grouped .tabbar::before { --bg-scroll: var(--bg-grouped); }
+.tabs { flex: 1; height: 62px; border-radius: 31px; display: flex; padding: 4px; }
+.tab { flex: 1; display: grid; justify-items: center; align-content: center; gap: 2px; font-size: 10px; font-weight: 600; color: var(--label); border-radius: 27px; letter-spacing: 0; }
+.tab.on { background: var(--fill); color: var(--accent-ink); }
+.tabbar .search { width: 62px; height: 62px; }
+
+/* Chips and segmented controls */
+.chips { display: flex; gap: 8px; padding: 14px 20px 6px; overflow: hidden; }
+.chip { flex: none; height: 34px; padding: 0 14px; border-radius: 17px; background: var(--fill2); display: inline-flex; align-items: center; gap: 4px; font-size: 15px; font-weight: 500; color: var(--label); }
+.chip.on { background: var(--accent); color: var(--on-accent); }
+.seg { display: flex; background: var(--fill); border-radius: 999px; padding: 3px; font-size: 13px; font-weight: 600; }
+.seg span { flex: 1; text-align: center; padding: 7px 10px; border-radius: 999px; color: var(--label2); white-space: nowrap; }
+.seg span.on { background: var(--surface); color: var(--label); box-shadow: 0 1px 4px oklch(0 0 0 / 0.14); }
+html[data-scheme="dark"] .seg span.on { background: oklch(0.42 0.005 265); }
+
+/* Inset grouped lists */
+.ilist { margin: 0 16px; background: var(--surface); border-radius: 26px; overflow: hidden; }
+.irow { display: flex; align-items: center; gap: 12px; min-height: 52px; padding: 11px 16px; position: relative; }
+.irow + .irow::before { content: ""; position: absolute; top: 0; right: 0; left: var(--inset, 16px); height: 0.5px; background: var(--sep); }
+.irow .grow { flex: 1; min-width: 0; }
+.irow .t { font-size: 17px; }
+.irow .d { font-size: 13px; color: var(--label2); margin-top: 2px; }
+.irow .v { font-size: 17px; color: var(--label2); }
+.chev { color: var(--label3); }
+.ihead { margin: 26px 32px 8px; font-size: 13px; color: var(--label2); font-weight: 500; }
+.ifoot { margin: 8px 32px 0; font-size: 13px; color: var(--label2); line-height: 1.4; }
+.tile { width: 30px; height: 30px; border-radius: 8px; background: var(--fill); display: grid; place-items: center; color: var(--label); flex: none; }
+
+/* ---------- Map stage ---------- */
+.map { position: absolute; overflow: hidden; background: var(--sky); touch-action: none; }
+.map .world { position: absolute; left: 0; top: 0; width: 2400px; height: 2400px; transform-origin: 0 0; will-change: transform; }
+.map .world.ease { transition: transform 520ms var(--ease); }
+.map .world img, .map .world svg { position: absolute; inset: 0; width: 2400px; height: 2400px; }
+.map .world img { filter: saturate(0.95) contrast(1.02); }
+.map .fog { position: absolute; inset: 0; pointer-events: none; z-index: var(--z-fog);
+  background: linear-gradient(to bottom, var(--sky) 0%, color-mix(in oklch, var(--sky) 70%, transparent) 9%, transparent 30%); }
+.anchor { position: absolute; width: 0; height: 0; }
+.marker { position: absolute; left: 0; top: 0; width: 22px; height: 22px; margin: -11px 0 0 -11px; border-radius: 50%; z-index: var(--z-marker); pointer-events: none;
+  background: var(--mc, var(--z3)); box-shadow: 0 0 0 3.5px #fff, 0 3px 10px oklch(0 0 0 / 0.5); will-change: transform; }
+.marker::after { content: ""; position: absolute; inset: -12px; border-radius: 50%; background: oklch(1 0 0 / 0.22); }
+.marker.ghost { background: transparent; box-shadow: 0 0 0 3px oklch(1 0 0 / 0.95), 0 3px 10px oklch(0 0 0 / 0.4); }
+.marker.ghost::after { inset: 4px; background: oklch(1 0 0 / 0.55); }
+.marker .flag { position: absolute; bottom: 30px; left: 50%; translate: -50% 0; white-space: nowrap; font-size: 13px; font-weight: 600; padding: 5px 10px; border-radius: 12px; color: var(--label); }
+.pin { position: absolute; left: 0; top: 0; z-index: var(--z-marker); pointer-events: none; width: 14px; height: 14px; margin: -7px 0 0 -7px; border-radius: 50%; background: #fff; box-shadow: 0 0 0 3px oklch(0.18 0 0 / 0.75); }
+
+/* ---------- Flyover panels ---------- */
+.stats { position: absolute; top: 56px; left: 10px; right: 10px; border-radius: 32px; padding: 8px 14px 14px 8px; z-index: var(--z-panel); }
+.stats .head { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+.stats .head .ttl { flex: 1; min-width: 0; }
+.stats .head b { display: block; color: var(--label); font-weight: 600; font-size: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.stats .head .ttl span { display: block; font-size: 13px; color: var(--label2); margin-top: 1px; }
+.stats .head .gbtn { width: 40px; height: 40px; }
+.stats .head .gbtn { background: none; }
+.stats .head .gbtn.back { background: color-mix(in oklch, var(--label) 9%, transparent); }
+.stats .big, .stats .small { margin-left: 6px; }
+.big { display: grid; grid-template-columns: 1.15fr 1fr 1fr; gap: 6px; }
+.big .val { font-size: 34px; font-weight: 600; letter-spacing: -0.02em; line-height: 1; display: flex; align-items: baseline; gap: 3px; }
+.big .val small, .small .val small { font-size: 13px; font-weight: 500; color: var(--label2); letter-spacing: 0; }
+.lbl { font-size: 12px; color: var(--label2); margin-top: 4px; display: flex; align-items: center; gap: 5px; }
+.zchip { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 700; color: oklch(0.2 0.02 265); padding: 1px 6px; border-radius: 6px; background: var(--zc); }
+.small { display: grid; grid-template-columns: repeat(5, 1fr); gap: 4px; margin-top: 12px; padding-top: 10px; border-top: 0.5px solid color-mix(in oklch, var(--label) 16%, transparent); }
+.small .val { font-size: 17px; font-weight: 600; display: flex; align-items: baseline; gap: 2px; }
+
+.tsheet { position: absolute; left: 8px; right: 8px; bottom: 8px; border-radius: 40px; padding: 8px 18px 30px; z-index: var(--z-sheet); }
+.grabber { width: 36px; height: 5px; border-radius: 3px; background: color-mix(in oklch, var(--label) 30%, transparent); margin: 0 auto 8px; }
+.tl-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+.legend { display: inline-flex; align-items: center; gap: 8px; height: 30px; padding: 0 10px 0 12px; border-radius: 15px; background: color-mix(in oklch, var(--label) 9%, transparent); font-size: 13px; font-weight: 600; }
+.ramp { display: inline-flex; gap: 1.5px; }
+.ramp i { width: 7px; height: 10px; border-radius: 2px; background: var(--c); }
+.seg.mini { font-size: 12px; background: color-mix(in oklch, var(--label) 9%, transparent); }
+.seg.mini span { padding: 5px 10px; }
+.chart { position: relative; height: 76px; cursor: ew-resize; touch-action: none; }
+.chart svg { position: absolute; inset: 0; overflow: visible; }
+.axis { display: flex; justify-content: space-between; font-size: 11px; color: var(--label2); margin-top: 4px; }
+.tl-ctrl { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
+.tl-ctrl .time { flex: 1; text-align: center; font-size: 15px; font-weight: 600; }
+.tl-ctrl .time span { color: var(--label2); font-weight: 500; }
+.pill { height: 36px; min-width: 48px; padding: 0 12px; border-radius: 18px; border: 0; background: color-mix(in oklch, var(--label) 9%, transparent); font-size: 15px; font-weight: 600; display: inline-flex; align-items: center; justify-content: center; gap: 6px; cursor: pointer; }
+.routeline { display: flex; align-items: center; gap: 12px; margin-top: 14px; padding-top: 12px; border-top: 0.5px solid color-mix(in oklch, var(--label) 16%, transparent); }
+.routeline .grow { flex: 1; }
+.routeline .t { font-size: 15px; font-weight: 600; }
+.routeline .d { font-size: 13px; color: var(--label2); margin-top: 1px; }
+
+/* ---------- Feed ---------- */
+.week { display: flex; justify-content: space-between; align-items: baseline; padding: 22px 20px 8px; }
+.week b { font-size: 20px; font-weight: 700; letter-spacing: -0.015em; }
+.week span { font-size: 13px; color: var(--label2); }
+.feature { margin: 4px 16px 6px; }
+.feature .mapbox { height: 176px; border-radius: 22px; overflow: hidden; position: relative; box-shadow: var(--thumb-shadow); }
+.feature .mapbox svg { display: block; width: 100%; height: 100%; }
+.feature .when { position: absolute; left: 12px; top: 12px; font-size: 13px; font-weight: 600; padding: 4px 10px; border-radius: 12px; }
+.feature .body { display: flex; gap: 12px; padding: 12px 4px 0; align-items: flex-start; }
+.arow { display: flex; gap: 14px; padding: 12px 20px; position: relative; align-items: flex-start; }
+.arow + .arow::before, .feature + .arow::before { content: ""; position: absolute; top: 0; left: 102px; right: 0; height: 0.5px; background: var(--sep); }
+.thumb { width: 68px; height: 68px; border-radius: 14px; overflow: hidden; flex: none; background: var(--thumb); box-shadow: var(--thumb-shadow); }
+.thumb svg { display: block; width: 100%; height: 100%; }
+.arow .grow, .feature .grow { flex: 1; min-width: 0; }
+.atitle { font-size: 17px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ameta { font-size: 13px; color: var(--label2); margin-top: 2px; display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+.astats { font-size: 15px; margin-top: 5px; display: flex; gap: 12px; color: var(--label); }
+.astats span { display: inline-flex; gap: 3px; align-items: baseline; }
+.astats small { font-size: 12px; color: var(--label2); }
+.head-metric { text-align: right; flex: none; padding-top: 1px; }
+.head-metric .v { font-size: 20px; font-weight: 650; letter-spacing: -0.02em; }
+.head-metric .v small { font-size: 13px; font-weight: 500; color: var(--label2); margin-left: 2px; }
+.head-metric .l { font-size: 12px; color: var(--label2); margin-top: 1px; }
+.badges { display: flex; gap: 6px; margin-top: 7px; flex-wrap: wrap; }
+.badge { font-size: 12px; font-weight: 600; height: 22px; padding: 0 8px; border-radius: 7px; display: inline-flex; align-items: center; gap: 4px; background: var(--fill2); color: var(--label2); }
+.src { font-size: 11px; font-weight: 600; letter-spacing: 0.01em; color: var(--label2); padding: 1px 5px; border-radius: 5px; box-shadow: inset 0 0 0 0.5px var(--label3); }
+
+/* ---------- Generic content panels ---------- */
+.panel { position: absolute; left: 0; right: 0; bottom: 0; background: var(--bg-grouped); border-radius: 34px 34px 0 0; z-index: var(--z-panel); }
+.sect-h { display: flex; justify-content: space-between; align-items: baseline; padding: 0 20px; margin: 26px 0 10px; }
+.sect-h h2 { margin: 0; font-size: 20px; font-weight: 700; letter-spacing: -0.015em; }
+.sect-h span { font-size: 15px; color: var(--accent-ink); font-weight: 500; }
+.box { margin: 0 16px; background: var(--surface); border-radius: 26px; padding: 16px; }
+.statgrid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px 10px; }
+.statgrid .v { font-size: 22px; font-weight: 600; letter-spacing: -0.02em; display: flex; align-items: baseline; gap: 3px; }
+.statgrid .v small { font-size: 13px; font-weight: 500; color: var(--label2); letter-spacing: 0; }
+.statgrid .l { font-size: 12px; color: var(--label2); margin-top: 3px; }
+.axis-lbl { font-size: 11px; fill: var(--label2); font-family: var(--font); font-variant-numeric: tabular-nums; }
+.readout { display: flex; gap: 18px; align-items: baseline; }
+.readout .v { font-size: 28px; font-weight: 650; letter-spacing: -0.02em; }
+.readout .l { font-size: 13px; color: var(--label2); }
+.tbl { width: 100%; border-collapse: collapse; font-size: 15px; }
+.tbl th { font-size: 12px; font-weight: 500; color: var(--label2); text-align: right; padding: 0 0 8px; }
+.tbl th:first-child, .tbl td:first-child { text-align: left; }
+.tbl td { text-align: right; padding: 9px 0; border-top: 0.5px solid var(--sep); font-variant-numeric: tabular-nums; }
+.tbl td:first-child { color: var(--label2); font-size: 14px; }
+.tbl .me { font-weight: 600; }
+.key { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--label2); }
+.key i { width: 16px; height: 0; border-top: 2px solid var(--label); }
+.key i.dash { border-top: 2px dashed var(--label3); }
+.suggest { margin: 0 16px 10px; border-radius: 22px; padding: 14px 16px; background: var(--accent-soft); display: flex; gap: 12px; align-items: center; font-size: 15px; line-height: 1.35; }
+.btn-s { border: 0; height: 34px; padding: 0 14px; border-radius: 17px; background: var(--accent); color: var(--on-accent); font-size: 15px; font-weight: 600; cursor: pointer; flex: none; }
+.btn-q { border: 0; height: 34px; padding: 0 14px; border-radius: 17px; background: var(--fill); color: var(--label); font-size: 15px; font-weight: 600; cursor: pointer; flex: none; }
+.swatches { display: flex; gap: 12px; }
+.swatches button { width: 30px; height: 30px; border-radius: 50%; border: 0; padding: 0; cursor: pointer; background: var(--c); box-shadow: inset 0 0 0 1px oklch(0 0 0 / 0.12); }
+.swatches button[aria-pressed="true"] { box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--label); }
+
+@media (max-width: 520px) {
+  .board { padding: 36px 16px 80px; }
+  .shot { width: 100%; }
+  .shot .device-wrap { zoom: 0.8; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .map .world.ease { transition: none; }
+  body, .device { transition: none; }
+}
+</style>
+</head>
+<body>
+<div class="board">
+  <header class="board-head">
+    <div>
+      <h1>SweatKit screens</h1>
+      <p>Every screen in the MVP plan, drawn at iPhone size with one consistent set of sample data: this morning's 58.6 km ride over the Surrey Hills, the seventh time on the Box Hill loop. Drag the timeline on the flyover to scrub it. The accent and appearance switches recolour every screen; the effort colours never change.</p>
+    </div>
+    <div class="controls">
+      <div class="control"><span id="lbl-accent">Accent theme</span>
+        <div class="seg-board" role="group" aria-labelledby="lbl-accent" data-ctl="accent">
+          <button data-v="cyan"><i class="swatch" style="background:oklch(0.83 0.14 212)"></i>Electric Cyan</button>
+          <button data-v="lime"><i class="swatch" style="background:oklch(0.90 0.20 127)"></i>Neon Lime</button>
+          <button data-v="cobalt"><i class="swatch" style="background:oklch(0.52 0.20 266)"></i>Cobalt</button>
+        </div>
+      </div>
+      <div class="control"><span id="lbl-app">Appearance</span>
+        <div class="seg-board" role="group" aria-labelledby="lbl-app" data-ctl="appearance">
+          <button data-v="auto">Auto</button><button data-v="light">Light</button><button data-v="dark">Dark</button>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <section class="group">
+    <h2>Activities</h2>
+    <p>The home tab. A reverse-chronological library from Garmin, Apple Health and imported files, with the newest activity given room to be relived.</p>
+    <div class="shots">
+      <figure class="shot"><div class="device-wrap"><div class="device" id="s-feed"></div></div>
+        <figcaption><h3>Activity feed <span class="tag">Interactive</span></h3>
+          <p>One title bar: the title, sync status and actions share a row, and filters live behind the filter button instead of a chip strip.</p>
+          <ul><li>An active filter shows as a token under the title, with one tap to clear; the filter button turns accent.</li><li>On scroll the title collapses into the bar and the status rides along as its subtitle.</li><li>Today's ride gets a wide map; older rows stay compact for scanning.</li><li>Headline metric is weighted power for rides, pace for walks and runs.</li><li>Record and route marks are plain information. The source label is Garmin's required attribution.</li></ul>
+          <div class="hint">Try the filter button.</div>
+        </figcaption></figure>
+    </div>
+  </section>
+
+  <section class="group">
+    <h2>Activity detail</h2>
+    <p>A full-screen flyover where the timeline is the main control. Glass appears only on the two floating panels, and the timeline lives inside the sheet's smallest detent so glass never stacks on glass.</p>
+    <div class="shots">
+      <figure class="shot"><div class="device-wrap"><div class="device" id="s-fly"></div></div>
+        <figcaption><h3>Flyover <span class="tag">Interactive</span></h3>
+          <p>Drag the profile to scrub. The camera, marker, stats and dimmed route ahead all move together.</p>
+          <ul><li>Back, title and map actions sit in the stats panel's header, so the map gets one floating panel at the top instead of two.</li><li>Fixed-width digits in fixed slots: nothing jitters while scrubbing.</li><li>Power overlay drawn in the same zone colours as the route; the legend chip switches overlays.</li><li>Camera button toggles follow and overview. With Reduce Motion on, it starts in overview.</li></ul>
+          <div class="hint">Try play, the km / time switch and the camera button.</div>
+        </figcaption></figure>
+      <figure class="shot"><div class="device-wrap"><div class="device tall grouped" id="s-analysis"></div></div>
+        <figcaption><h3>Analysis sheet <span class="tag">Full scroll</span></h3>
+          <p>The same sheet pulled to its large detent. Everything deeper than the flyover: summary, route standing, zones, power curve and laps.</p>
+          <ul><li>Every figure follows the spec's metric rules; one that can't be computed shows a dash with the reason, never a zero.</li><li>The route line opens the comparison against the best effort.</li><li>Time in zones uses the same seven colours as the map.</li></ul>
+        </figcaption></figure>
+      <figure class="shot"><div class="device-wrap"><div class="device grouped" id="s-indoor"></div></div>
+        <figcaption><h3>Indoor ride</h3>
+          <p>Zwift and trainer rides have no usable route, so charts fill the screen and the timeline behaves exactly the same.</p>
+          <ul><li>Power, heart rate and cadence share one cursor.</li><li>Same stats panel and sheet as the flyover, so nothing has to be relearned.</li></ul>
+        </figcaption></figure>
+    </div>
+  </section>
+
+  <section class="group">
+    <h2>Routes</h2>
+    <p>Repeated courses found automatically. A route forms the second time a course is ridden; anything ambiguous waits for a decision instead of being guessed.</p>
+    <div class="shots">
+      <figure class="shot"><div class="device-wrap"><div class="device grouped" id="s-routes"></div></div>
+        <figcaption><h3>Routes list</h3>
+          <p>Each route shows its shape, effort count, best time and a strip of every effort's time.</p>
+          <ul><li>Possible matches GPS can't separate are asked about inline, not in a modal.</li><li>Footer says how many activities are waiting for a second effort.</li></ul>
+        </figcaption></figure>
+      <figure class="shot"><div class="device-wrap"><div class="device grouped" id="s-route"></div></div>
+        <figcaption><h3>Route page</h3>
+          <p>The course on the map, its best, latest and median times, and every effort by date.</p>
+          <ul><li>Dot chart switches between moving time, power, heart rate and efficiency.</li><li>Faster is up, so improvement reads as rising.</li></ul>
+        </figcaption></figure>
+      <figure class="shot"><div class="device-wrap"><div class="device grouped" id="s-compare"></div></div>
+        <figcaption><h3>Comparison <span class="tag">Interactive</span></h3>
+          <p>Today against the best effort. The ghost marker runs on the same clock, so the gap on the map is the real gap.</p>
+          <ul><li>Time gap and paired power are aligned by route distance; the ghost by time.</li><li>Climbs are labelled so it's clear where the time went.</li><li>Differences are signed and neutral: no red and green verdicts.</li></ul>
+        </figcaption></figure>
+    </div>
+  </section>
+
+  <section class="group">
+    <h2>Trends and settings</h2>
+    <p>The long view, and the few things the app needs to know about you.</p>
+    <div class="shots">
+      <figure class="shot"><div class="device-wrap"><div class="device tall grouped" id="s-trends"></div></div>
+        <figcaption><h3>Trends <span class="tag">Full scroll</span></h3>
+          <p>Volume, power curve, threshold power, efficiency, records and a load calendar, all behind one set of filters.</p>
+          <ul><li>Volume compares each week with the same week last year.</li><li>Efficiency is labelled as output per heartbeat, not a fitness score.</li><li>Days with unavailable load are marked rather than shown as rest.</li></ul>
+        </figcaption></figure>
+      <figure class="shot"><div class="device-wrap"><div class="device" id="s-settings"></div></div>
+        <figcaption><h3>Settings</h3>
+          <p>Opened from the profile button as a sheet: sources, sync, athlete profile, units and appearance.</p>
+          <ul><li>Key expiry and iCloud copy status are visible before they become problems.</li><li>A threshold suggestion from recent history, offered inline.</li><li>The accent swatches here drive the whole board.</li></ul>
+        </figcaption></figure>
+    </div>
+  </section>
+</div>
+
+<script>
+'use strict';
+/* =========================================================
+   Utilities
+   ========================================================= */
+const W = 402, FTP = 265, WORLD = 2400;
+const REDUCE_MOTION = matchMedia('(prefers-reduced-motion: reduce)').matches;
+function rng(a) { return function () { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+function smooth(a, w) { const o = new Array(a.length); for (let i = 0; i < a.length; i++) { let s = 0, n = 0; for (let j = i - w; j <= i + w; j++) if (j >= 0 && j < a.length) { s += a[j]; n++; } o[i] = s / n; } return o; }
+function noise(n, seed, w) { const r = rng(seed); const a = smooth(Array.from({ length: n }, () => r() * 2 - 1), w); const m = Math.max(...a.map(Math.abs)); return a.map(v => v / m); }
+function dur(s, forceH) { s = Math.round(s); const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), x = s % 60; return (h || forceH) ? `${h}:${String(m).padStart(2, '0')}:${String(x).padStart(2, '0')}` : `${m}:${String(x).padStart(2, '0')}`; }
+function hm(s) { const h = Math.floor(s / 3600), m = Math.round(s % 3600 / 60); return h ? `${h}:${String(m).padStart(2, '0')}` : `${m} min`; }
+const fmt = (v, d = 0) => v.toLocaleString('en-GB', { minimumFractionDigits: d, maximumFractionDigits: d });
+const signed = (s) => (s > 0 ? '+' : s < 0 ? '−' : '±') + dur(Math.abs(s));
+const zoneOf = (p) => { const r = p / FTP; return [0.55, 0.75, 0.9, 1.05, 1.2, 1.5].filter(t => r >= t).length; };
+const ZC = i => `var(--z${i + 1})`;
+const pts = (xs, ys) => xs.map((x, i) => `${x.toFixed(1)},${ys[i].toFixed(1)}`).join(' ');
+const pathD = (xs, ys) => xs.map((x, i) => (i ? 'L' : 'M') + x.toFixed(1) + ' ' + ys[i].toFixed(1)).join('');
+function runs(z) { const out = []; let s = 0; for (let i = 1; i <= z.length; i++) if (i === z.length || z[i] !== z[s]) { out.push([s, Math.min(i, z.length - 1), z[s]]); s = i; } return out; }
+
+/* Icons: SF Symbol stand-ins, 24-unit grid */
+const IC = {
+  chevL: '<path d="M14.5 5.5 8 12l6.5 6.5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>',
+  chevR: '<path d="m9.5 5.5 6.5 6.5-6.5 6.5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>',
+  chevD: '<path d="m6.5 9.5 5.5 5.5 5.5-5.5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>',
+  more: '<circle cx="5.5" cy="12" r="1.9" fill="currentColor"/><circle cx="12" cy="12" r="1.9" fill="currentColor"/><circle cx="18.5" cy="12" r="1.9" fill="currentColor"/>',
+  filter: '<path d="M4 7h16M7 12h10M10 17h4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>',
+  search: '<circle cx="10.5" cy="10.5" r="6.2" fill="none" stroke="currentColor" stroke-width="2.1"/><path d="m15.2 15.2 4.8 4.8" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"/>',
+  play: '<path d="M8 5.2v13.6c0 .8.9 1.3 1.6.8l10.2-6.8c.6-.4.6-1.2 0-1.6L9.6 4.4C8.9 3.9 8 4.4 8 5.2z" fill="currentColor"/>',
+  pause: '<rect x="6.5" y="5" width="4" height="14" rx="1.2" fill="currentColor"/><rect x="13.5" y="5" width="4" height="14" rx="1.2" fill="currentColor"/>',
+  layers: '<path d="m12 4 8.5 4.3L12 12.6 3.5 8.3 12 4Z" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"/><path d="m3.5 12.2 8.5 4.3 8.5-4.3M3.5 16l8.5 4.3 8.5-4.3" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"/>',
+  follow: '<path d="M4.5 11.2 19.5 4.5l-6.7 15-1.9-6.4-6.4-1.9Z" fill="currentColor"/>',
+  overview: '<path d="M4 9V5.5C4 4.7 4.7 4 5.5 4H9M15 4h3.5c.8 0 1.5.7 1.5 1.5V9M20 15v3.5c0 .8-.7 1.5-1.5 1.5H15M9 20H5.5c-.8 0-1.5-.7-1.5-1.5V15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><circle cx="12" cy="12" r="2.6" fill="currentColor"/>',
+  route: '<circle cx="6" cy="18" r="2.3" fill="currentColor"/><circle cx="18" cy="6" r="2.3" fill="currentColor"/><path d="M8.3 18H15a3.5 3.5 0 0 0 0-7H9a3.5 3.5 0 0 1 0-7h6.7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>',
+  bars: '<path d="M5 20v-7M10 20V6M15 20v-9M20 20V9" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"/>',
+  list: '<circle cx="6.5" cy="15.5" r="3.7" fill="none" stroke="currentColor" stroke-width="1.9"/><circle cx="17.5" cy="15.5" r="3.7" fill="none" stroke="currentColor" stroke-width="1.9"/><path d="m6.5 15.5 3.6-7h5.4l2 7M10.1 8.5l3 7H6.5M12.6 5.2h3.1" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/>',
+  walk: '<circle cx="13" cy="4.3" r="1.9" fill="currentColor"/><path d="m10.5 21 2.3-6.2-2.6-3 1.2-4.3 3.8 3.2 3 .9M8.6 12.2 10.7 8M12.8 14.8 15 21" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/>',
+  star: '<path d="m12 3.8 2.5 5.1 5.6.8-4 3.9 1 5.6L12 16.6l-5.1 2.6 1-5.6-4-3.9 5.6-.8L12 3.8Z" fill="currentColor"/>',
+  check: '<path d="m5 12.5 4.5 4.5L19 7.5" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>',
+  sync: '<path d="M19 12a7 7 0 0 1-12.2 4.7M5 12a7 7 0 0 1 12.2-4.7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M17.5 3.5v4h-4M6.5 20.5v-4h4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>',
+  info: '<circle cx="12" cy="12" r="8.5" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M12 11v5.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><circle cx="12" cy="7.8" r="1.2" fill="currentColor"/>',
+  q: '<circle cx="12" cy="12" r="8.5" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M9.6 9.6a2.5 2.5 0 1 1 3.4 2.3c-.6.3-1 .8-1 1.5v.6" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/><circle cx="12" cy="16.9" r="1.15" fill="currentColor"/>',
+  heart: '<path d="M12 20s-7.5-4.6-7.5-10A4.3 4.3 0 0 1 12 7.4 4.3 4.3 0 0 1 19.5 10c0 5.4-7.5 10-7.5 10Z" fill="currentColor"/>',
+  bolt: '<path d="M13.5 2.8 5.6 13.2h5.6l-1 8 7.9-10.4h-5.6l1-8Z" fill="currentColor"/>',
+  cloud: '<path d="M7.5 18.5a4.5 4.5 0 0 1-.4-9A5.5 5.5 0 0 1 17.6 9a4.8 4.8 0 0 1-.6 9.5H7.5Z" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"/>',
+  doc: '<path d="M7 3.5h6.5L18 8v12.5H7Z" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"/><path d="M13.5 3.5V8H18" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"/>',
+  person: '<circle cx="12" cy="8.2" r="3.6" fill="none" stroke="currentColor" stroke-width="1.9"/><path d="M5 20c.8-3.6 3.6-5.5 7-5.5s6.2 1.9 7 5.5" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/>',
+  eyeoff: '<path d="M3 12s3.3-6 9-6 9 6 9 6-3.3 6-9 6-9-6-9-6Z" fill="none" stroke="currentColor" stroke-width="1.9"/><circle cx="12" cy="12" r="2.7" fill="none" stroke="currentColor" stroke-width="1.9"/><path d="m4 4 16 16" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/>',
+  watch: '<rect x="6.5" y="6.5" width="11" height="11" rx="3" fill="none" stroke="currentColor" stroke-width="1.9"/><path d="M9 6.5 9.5 3h5l.5 3.5M9 17.5 9.5 21h5l.5-3.5" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"/>',
+  mountain: '<path d="m3 19 6.2-9.5 4 5.5 2.6-3.2L21 19H3Z" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"/>',
+  sort: '<path d="M8 5v14M4.5 8.5 8 5l3.5 3.5M16 19V5M12.5 15.5 16 19l3.5-3.5" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/>',
+  ruler: '<path d="M5 12h14M5 9v6M19 9v6" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/>',
+  swatch: '<circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" stroke-width="1.9"/><path d="M12 4a8 8 0 0 1 0 16Z" fill="currentColor"/>',
+};
+const ic = (n, s = 22, extra = '') => `<svg class="ic" width="${s}" height="${s}" viewBox="0 0 24 24" aria-hidden="true" ${extra}>${IC[n]}</svg>`;
+
+/* Device chrome */
+function statusBar(onImage) {
+  return `<div class="island"></div><div class="sb ${onImage ? 'on-image' : ''}"><span class="tnum">9:41</span><span class="sb-icons">
+    <svg width="19" height="12" viewBox="0 0 19 12" aria-hidden="true"><rect x="0" y="8" width="3.2" height="4" rx="1" fill="currentColor"/><rect x="5" y="5.5" width="3.2" height="6.5" rx="1" fill="currentColor"/><rect x="10" y="3" width="3.2" height="9" rx="1" fill="currentColor"/><rect x="15" y="0" width="3.2" height="12" rx="1" fill="currentColor"/></svg>
+    <svg width="17" height="12" viewBox="0 0 17 12" aria-hidden="true"><path d="M8.5 2.5c2.3 0 4.4.9 6 2.4l1.2-1.2A10.2 10.2 0 0 0 8.5.8C5.7.8 3.2 1.9 1.3 3.7l1.2 1.2a8.5 8.5 0 0 1 6-2.4Zm0 3.4c1.4 0 2.6.5 3.6 1.4l1.2-1.2a6.8 6.8 0 0 0-9.6 0l1.2 1.2c1-.9 2.2-1.4 3.6-1.4Zm0 3.4c-.5 0-1 .2-1.3.5l1.3 1.4 1.3-1.4c-.3-.3-.8-.5-1.3-.5Z" fill="currentColor"/></svg>
+    <svg width="27" height="13" viewBox="0 0 27 13" aria-hidden="true"><rect x="0.5" y="0.5" width="23" height="12" rx="3.8" fill="none" stroke="currentColor" opacity="0.4"/><rect x="2.2" y="2.2" width="17" height="8.6" rx="2.4" fill="currentColor"/><path d="M25 4.4v4.2c.8-.3 1.4-1.2 1.4-2.1S25.8 4.7 25 4.4Z" fill="currentColor" opacity="0.45"/></svg>
+  </span></div>`;
+}
+const home = (onImage) => `<div class="home ${onImage ? 'on-image' : ''}"></div>`;
+function tabBar(active) {
+  const t = (k, label, icon) => `<div class="tab ${active === k ? 'on' : ''}">${ic(icon, 24)}<span>${label}</span></div>`;
+  return `<div class="tabbar"><div class="tabs glass">${t('a', 'Activities', 'list')}${t('r', 'Routes', 'route')}${t('t', 'Trends', 'bars')}</div><div class="gbtn glass search">${ic('search', 24)}</div></div>`;
+}
+
+/* =========================================================
+   Sample data: today's ride, generated once and shared by every screen
+   ========================================================= */
+function genRide() {
+  const N = 587, step = 0.1, total = 58.6;
+  const bump = (x, c, w, h) => h * Math.exp(-(((x - c) / w) ** 2));
+  const n1 = noise(N, 3, 4), nP = noise(N, 7, 2), nS = noise(N, 11, 3), nC = noise(N, 13, 2), nR = noise(N, 21, 6);
+  const d = [], ele = [];
+  for (let i = 0; i < N; i++) {
+    const x = i * step; d.push(x);
+    ele.push(72 + 24 * Math.sin(x / 3.3) + 12 * Math.sin(x / 1.15 + 1.3) + bump(x, 16.4, 1.5, 170) + bump(x, 34, 2.4, 270) + bump(x, 46.5, 1.3, 155) + 6 * n1[i]);
+  }
+  const grade = ele.map((e, i) => { const a = ele[Math.max(0, i - 1)], b = ele[Math.min(N - 1, i + 1)]; return (b - a) / ((Math.min(N - 1, i + 1) - Math.max(0, i - 1)) * step * 1000) * 100; });
+  const r = rng(99);
+  const power = grade.map((g, i) => {
+    let p = g > -1.5 ? 164 + (g > 0 ? g * 23.5 : g * 19) + 48 * nP[i] : Math.max(0, 22 + 40 * nP[i]);
+    if (r() < 0.012) p += 180 + r() * 140; // short surges
+    return clamp(Math.round(p), 0, 640);
+  });
+  const speed = grade.map((g, i) => clamp(g >= 0 ? 30.5 - g * 2.45 + 2.4 * nS[i] : 30.5 - g * 3.1 + 2.4 * nS[i], 9, 62));
+  let dt = speed.map(s => step / s * 3600);
+  const target = 7354; // 2:02:34 moving
+  const k = target / dt.reduce((a, b) => a + b, 0);
+  dt = dt.map(v => v * k);
+  const spd = speed.map(s => s / k);
+  const t = []; let acc = 0; for (let i = 0; i < N; i++) { t.push(acc); acc += dt[i]; }
+  t[N - 1] = target;
+  const hr = []; let h = 98;
+  power.forEach(p => { h += ((96 + p * 0.26) - h) * 0.22; hr.push(Math.round(clamp(h, 90, 186))); });
+  const cad = power.map((p, i) => p > 25 ? Math.round(88 - Math.max(0, grade[i]) * 1.6 + 3 * nC[i]) : (p > 0 ? 58 : 0));
+
+  // Plane coordinates: an irregular loop with switchbacks on Box Hill.
+  const x = [], y = [];
+  for (let i = 0; i < N; i++) {
+    const f = d[i] / total, ang = -Math.PI / 2 + f * Math.PI * 2;
+    let rad = 300 * (1 + 0.2 * Math.sin(2 * f * Math.PI * 2 + 0.6) + 0.09 * Math.sin(3 * f * Math.PI * 2 + 2.1) + 0.04 * Math.sin(7 * f * Math.PI * 2 + 0.4)) + 14 * nR[i];
+    if (d[i] > 13.8 && d[i] < 16.4) rad += 13 * Math.sin((d[i] - 13.8) * 12) * Math.sin((d[i] - 13.8) / 2.6 * Math.PI);
+    x.push(1200 + rad * Math.cos(ang) * 1.18); y.push(1200 + rad * Math.sin(ang) * 0.92);
+  }
+  // Camera heading: bearing to a point ~2 km ahead, smoothed so switchbacks don't whip the view.
+  const raw = x.map((_, i) => { const j = Math.min(N - 1, i + 20), a = Math.max(0, j - 20); return [x[j] - x[a === j ? i : Math.max(i, a)], y[j] - y[a === j ? i : Math.max(i, a)]]; });
+  const vx = smooth(raw.map(v => v[0] / (Math.hypot(...v) || 1)), 14), vy = smooth(raw.map(v => v[1] / (Math.hypot(...v) || 1)), 14);
+  const rot = []; let prev = null;
+  for (let i = 0; i < N; i++) { let a = -90 - Math.atan2(vy[i], vx[i]) * 180 / Math.PI; if (prev !== null) a += 360 * Math.round((prev - a) / 360); rot.push(a); prev = a; }
+
+  const p10 = smooth(power, 2).map(Math.round);
+  const zone = p10.map(zoneOf);
+  // Summary metrics
+  const T = target;
+  let asc = 0, ref = ele[0]; ele.forEach(e => { if (e - ref > 3) { asc += e - ref; ref = e; } else if (ref - e > 3) ref = e; });
+  const avgP = power.reduce((s, p, i) => s + p * dt[i], 0) / T;
+  const p30 = smooth(power, 1);
+  const wp = Math.pow(p30.reduce((s, p, i) => s + p ** 4 * dt[i], 0) / T, 0.25);
+  const IF = wp / FTP, load = T / 3600 * IF * IF * 100, work = power.reduce((s, p, i) => s + p * dt[i], 0) / 1000;
+  const avgHR = hr.reduce((s, v, i) => s + v * dt[i], 0) / T;
+  const zt = new Array(7).fill(0); power.forEach((p, i) => zt[zoneOf(p)] += dt[i]);
+  // Power curve on a 1 Hz expansion
+  const sec = []; const rj = rng(5); power.forEach((p, i) => { for (let s = 0; s < Math.round(dt[i]); s++) sec.push(Math.max(0, p * (1 + (rj() - 0.5) * 0.3))); });
+  const pre = [0]; sec.forEach(v => pre.push(pre[pre.length - 1] + v));
+  const DUR = [5, 15, 30, 60, 120, 300, 600, 1200, 1800, 3600, 5400];
+  const curve = DUR.map(L => { let b = 0; for (let s = 0; s + L <= sec.length; s += (L > 600 ? 5 : 1)) b = Math.max(b, (pre[s + L] - pre[s]) / L); return b; });
+  // Laps every 10 km
+  const laps = []; for (let a = 0; a < N - 1; a += 100) { const b = Math.min(N - 1, a + 100); let ps = 0, hs = 0, ts = 0; for (let i = a; i < b; i++) { ps += power[i] * dt[i]; hs += hr[i] * dt[i]; ts += dt[i]; } laps.push({ n: laps.length + 1, km: d[b] - d[a], s: t[b] - t[a], p: ps / ts, h: hs / ts }); }
+  const xs = x.slice().sort((a, b) => a - b), ys = y.slice().sort((a, b) => a - b);
+  return { N, d, t, ele, grade, power, p10, zone, hr, cad, spd, x, y, rot, total, T, asc, avgP, wp, IF, load, work, avgHR, zt, DUR, curve, laps, cx: (xs[0] + xs[N - 1]) / 2, cy: (ys[0] + ys[N - 1]) / 2, lapIdx: [100, 200, 300, 400, 500] };
+}
+const R = genRide();
+
+// The best effort on the same route, defined by its time gap to today along route distance.
+const smoothstep = v => v * v * (3 - 2 * v);
+const GAP = R.d.map(dd => 72 * Math.pow(smoothstep(dd / R.total), 1.15) - 26 * Math.sin(Math.PI * Math.min(dd, 24) / 24)); // + = today behind
+const T_BEST = R.t.map((tt, i) => tt - GAP[i]);
+const P_BEST = smooth(R.power, 3).map((p, i) => p * 1.025 + 14 * noise(R.N, 31, 3)[i]);
+const BEST90 = R.curve.map((v, i) => i === 7 ? 286 : v * [1.08, 1.06, 1.05, 1.04, 1.03, 1, 1.02, 1, 1.03, 1.03, 1.04][i]);
+const BEST = { s: 7282, wp: R.wp + 5, hr: R.avgHR + 2, date: '12 Sep' };
+
+function genIndoor() {
+  const N = 374, out = { N, t: [], d: [], power: [], hr: [], cad: [], ele: [] };
+  const nz = noise(N, 41, 1), nc = noise(N, 43, 2);
+  let h = 96, dist = 0;
+  for (let i = 0; i < N; i++) {
+    const s = i * 10, m = s / 60; let p;
+    if (m < 10) p = 140 + m * 7; else if (m < 58) { const c = (m - 10) % 12; p = c < 8 ? 292 : 158; } else p = 135;
+    p = Math.round(p + 12 * nz[i]); h += ((96 + p * 0.26) - h) * 0.16;
+    out.t.push(s); out.power.push(p); out.hr.push(Math.round(h)); out.cad.push(Math.round(p > 200 ? 94 + 3 * nc[i] : 86 + 3 * nc[i]));
+    out.ele.push(30 + 22 * Math.sin(i / 40) + 10 * Math.sin(i / 13 + 1) + 40 * Math.exp(-(((i - 250) / 30) ** 2)));
+    dist += (p > 200 ? 37 : 30) / 360; out.d.push(dist);
+  }
+  const k = 36.2 / dist; out.d = out.d.map(v => v * k); out.total = 36.2; out.T = 3738; out.t[N - 1] = 3738;
+  out.p10 = smooth(out.power, 1).map(Math.round); out.zone = out.p10.map(zoneOf); out.spd = out.power.map(p => p > 200 ? 36.4 : 31.2);
+  out.grade = out.ele.map((e, i) => i ? (e - out.ele[i - 1]) / ((out.d[i] - out.d[i - 1]) * 10 || 1) : 0); out.lapIdx = [60, 132, 204, 276, 348];
+  return out;
+}
+const IN = genIndoor();
+
+/* =========================================================
+   Satellite terrain texture: fields, hedgerows, woodland, villages, hillshade
+   ========================================================= */
+function makeNoise2D(seed) {
+  const r = rng(seed), P = 256, g = new Float32Array(P * P); for (let i = 0; i < g.length; i++) g[i] = r();
+  return (x, y) => { const xi = Math.floor(x), yi = Math.floor(y), xf = x - xi, yf = y - yi, u = xf * xf * (3 - 2 * xf), v = yf * yf * (3 - 2 * yf);
+    const i0 = (yi & 255) * P, i1 = ((yi + 1) & 255) * P, a = g[i0 + (xi & 255)], b = g[i0 + ((xi + 1) & 255)], c = g[i1 + (xi & 255)], dd = g[i1 + ((xi + 1) & 255)];
+    return a + (b - a) * u + (c - a) * v + (a - b - c + dd) * u * v; };
+}
+function fbm(nf, x, y, o) { let s = 0, a = 0.5, f = 1, n = 0; for (let i = 0; i < o; i++) { s += a * nf(x * f, y * f); n += a; a *= 0.5; f *= 2; } return s / n; }
+
+function buildTerrain() {
+  const S = 2048, sc = S / WORLD, cv = document.createElement('canvas'); cv.width = cv.height = S;
+  const g = cv.getContext('2d'), r = rng(1234);
+  g.fillStyle = '#5d6a3b'; g.fillRect(0, 0, S, S);
+  const pal = ['#6b7a45', '#7c8a4f', '#5f6f3c', '#879356', '#a59e6c', '#b5aa78', '#8a7457', '#71804a', '#94985f', '#667544'];
+  const cell = 8 * sc, n = Math.ceil(S / cell) + 1, jit = [];
+  for (let j = 0; j <= n; j++) { jit.push([]); for (let i = 0; i <= n; i++) jit[j].push([i * cell + (r() - 0.5) * cell * 0.7, j * cell + (r() - 0.5) * cell * 0.7]); }
+  g.lineWidth = 0.9; g.strokeStyle = 'rgba(38,48,24,0.7)';
+  for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) {
+    if (r() < 0.35 && i > 0) continue; // merge some cells into larger fields
+    g.fillStyle = pal[Math.floor(r() * pal.length)];
+    g.beginPath(); g.moveTo(...jit[j][i]); g.lineTo(...jit[j][i + 1]); g.lineTo(...jit[j + 1][i + 1]); g.lineTo(...jit[j + 1][i]); g.closePath(); g.fill(); g.stroke();
+  }
+  // Roads, including one under the route so the line sits on tarmac.
+  g.lineCap = 'round'; g.lineJoin = 'round';
+  const road = (arr, w, c) => { g.strokeStyle = c; g.lineWidth = w; g.beginPath(); arr.forEach(([a, b], i) => i ? g.lineTo(a * sc, b * sc) : g.moveTo(a * sc, b * sc)); g.stroke(); };
+  for (let k = 0; k < 9; k++) { const a = []; let px = r() * WORLD, py = 0, dir = Math.PI / 2 + (r() - 0.5); for (let s = 0; s < 70; s++) { a.push([px, py]); dir += (r() - 0.5) * 0.35; px += Math.cos(dir) * 40; py += Math.sin(dir) * 40; } road(a, 2.6, 'rgba(206,199,180,0.9)'); }
+  for (let k = 0; k < 9; k++) { const a = []; let px = 0, py = r() * WORLD, dir = (r() - 0.5); for (let s = 0; s < 70; s++) { a.push([px, py]); dir += (r() - 0.5) * 0.35; px += Math.cos(dir) * 40; py += Math.sin(dir) * 40; } road(a, 1.8, 'rgba(196,190,170,0.8)'); }
+  road(R.x.map((v, i) => [v, R.y[i]]), 3, 'rgba(214,207,188,0.95)');
+  // Villages
+  for (let v = 0; v < 26; v++) { const cx = r() * S, cy = r() * S, m = 20 + r() * 50; for (let b = 0; b < m; b++) { const a = r() * 6.28, dd = Math.sqrt(r()) * (14 + m * 0.4); g.fillStyle = r() < 0.5 ? '#a49a8e' : (r() < 0.5 ? '#8f5e4a' : '#c2bcb2'); g.fillRect(cx + Math.cos(a) * dd, cy + Math.sin(a) * dd, 2 + r() * 3, 2 + r() * 3); } }
+  // Pixel pass: woodland, hillshade, grain
+  const img = g.getImageData(0, 0, S, S), px = img.data;
+  const nh = makeNoise2D(7), nw = makeNoise2D(8), G = 512, hgt = new Float32Array(G * G), wood = new Float32Array(G * G);
+  for (let j = 0; j < G; j++) for (let i = 0; i < G; i++) { const u = i / G * 9, v = j / G * 9; hgt[j * G + i] = fbm(nh, u, v, 5); wood[j * G + i] = fbm(nw, u * 1.8 + 3, v * 1.8 + 7, 4); }
+  const shade = new Float32Array(G * G);
+  for (let j = 0; j < G; j++) for (let i = 0; i < G; i++) { const dx = hgt[j * G + Math.min(G - 1, i + 1)] - hgt[j * G + Math.max(0, i - 1)], dy = hgt[Math.min(G - 1, j + 1) * G + i] - hgt[Math.max(0, j - 1) * G + i]; shade[j * G + i] = clamp(1 + (-dx * 0.7 - dy * 0.7) * 26, 0.55, 1.35); }
+  const rg = rng(77);
+  for (let y = 0; y < S; y++) { const gy = Math.min(G - 1, (y / S * G) | 0); for (let x = 0; x < S; x++) {
+    const gi = gy * G + Math.min(G - 1, (x / S * G) | 0), o = (y * S + x) * 4; let rr = px[o], gg = px[o + 1], bb = px[o + 2];
+    const w = wood[gi] + hgt[gi] * 0.25;
+    if (w > 0.62) { const t = clamp((w - 0.62) * 14, 0, 1), dot = rg() * 26; rr = rr * (1 - t) + (38 + dot) * t; gg = gg * (1 - t) + (52 + dot) * t; bb = bb * (1 - t) + (30 + dot * 0.6) * t; }
+    const sh = shade[gi], gr = (rg() - 0.5) * 12;
+    px[o] = clamp(rr * sh + gr, 0, 255); px[o + 1] = clamp(gg * sh + gr, 0, 255); px[o + 2] = clamp(bb * sh + gr, 0, 255);
+  } }
+  g.putImageData(img, 0, 0);
+  return cv.toDataURL('image/jpeg', 0.86);
+}
+const TERRAIN = buildTerrain();
+
+/* =========================================================
+   Flyover map: pitched plane with CSS 3D, markers billboarded via projection
+   ========================================================= */
+class FlyMap {
+  constructor(stage, act, o = {}) {
+    this.s = stage; this.a = act;
+    this.o = Object.assign({ pitch: 60, scale: 1.2, ax: 0.5, ay: 0.49, persp: 640, mode: 'follow', colour: 'zones', ovPitch: 46, ovScale: 0.5, ovRot: -18, dim: true }, o);
+    stage.classList.add('map');
+    stage.style.perspective = this.o.persp + 'px';
+    stage.style.perspectiveOrigin = `${this.o.ax * 100}% ${this.o.ay * 100 - 14}%`;
+    const a = act, all = pts(a.x, a.y);
+    const wd = this.o.colour === 'plain' ? 2.2 : 1;
+    let lines = `<polyline points="${all}" fill="none" stroke="oklch(0.12 0 0 / 0.5)" stroke-width="${10 * wd}" stroke-linecap="round" stroke-linejoin="round"/>`;
+    if (this.o.colour === 'zones') runs(a.zone).forEach(([s, e, z]) => { lines += `<polyline points="${pts(a.x.slice(s, e + 1), a.y.slice(s, e + 1))}" fill="none" style="stroke:${ZC(z)}" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>`; });
+    else lines += `<polyline points="${all}" fill="none" stroke="#fff" stroke-width="${5.5 * wd}" stroke-linecap="round" stroke-linejoin="round"/>`;
+    lines += `<polyline class="dim" points="" fill="none" stroke="oklch(0.78 0.005 265 / 0.62)" stroke-width="6.5" stroke-linecap="round" stroke-linejoin="round"/>`;
+    this.world = document.createElement('div'); this.world.className = 'world';
+    this.world.innerHTML = `<img src="${TERRAIN}" alt="" draggable="false"><svg viewBox="0 0 ${WORLD} ${WORLD}" aria-hidden="true">${lines}</svg><div class="anchor" data-a="me"></div><div class="anchor" data-a="ghost"></div><div class="anchor" data-a="start" style="left:${a.x[0]}px;top:${a.y[0]}px"></div>`;
+    stage.appendChild(this.world);
+    stage.insertAdjacentHTML('beforeend', '<div class="fog"></div>');
+    this.dimLine = this.world.querySelector('.dim');
+    this.anchors = {}; this.world.querySelectorAll('.anchor').forEach(n => this.anchors[n.dataset.a] = n);
+    this.markers = {};
+    this.i = 0;
+  }
+  addMarker(key, cls = '', html = '') { const m = document.createElement('div'); m.className = 'marker ' + cls; m.innerHTML = html; this.s.appendChild(m); this.markers[key] = m; return m; }
+  addPin(key) { const m = document.createElement('div'); m.className = 'pin'; this.s.appendChild(m); this.markers[key] = m; return m; }
+  camera() {
+    const a = this.a, o = this.o, sw = this.s.offsetWidth, sh = this.s.offsetHeight; let mx, my, rot, pitch, sc;
+    if (o.mode === 'follow') { mx = a.x[this.i]; my = a.y[this.i]; rot = a.rot[this.i]; pitch = o.pitch; sc = o.scale; }
+    else { mx = a.cx; my = a.cy; const cur = a.rot[this.i]; rot = o.ovRot + 360 * Math.round((cur - o.ovRot) / 360); pitch = o.ovPitch; sc = o.ovScale; }
+    this.world.style.transform = `translate(${sw * o.ax}px, ${sh * o.ay}px) rotateX(${pitch}deg) scale(${sc}) rotateZ(${rot}deg) translate(${-mx}px, ${-my}px)`;
+  }
+  setIndex(i, ghostXY) {
+    this.i = i; const a = this.a;
+    const an = this.anchors.me; an.style.left = a.x[i] + 'px'; an.style.top = a.y[i] + 'px';
+    if (ghostXY) { this.anchors.ghost.style.left = ghostXY[0] + 'px'; this.anchors.ghost.style.top = ghostXY[1] + 'px'; }
+    if (this.o.dim) this.dimLine.setAttribute('points', pts(a.x.slice(i), a.y.slice(i)));
+    if (this.markers.me && a.zone) this.markers.me.style.setProperty('--mc', ZC(a.zone[i]));
+    this.camera(); this.project();
+  }
+  project() {
+    const sr = this.s.getBoundingClientRect(), k = sr.width / this.s.offsetWidth || 1;
+    for (const key in this.markers) { const ar = this.anchors[key].getBoundingClientRect(); this.markers[key].style.transform = `translate(${(ar.left - sr.left) / k}px, ${(ar.top - sr.top) / k}px)`; }
+  }
+  setMode(m, animate) {
+    this.o.mode = m;
+    if (animate && !REDUCE_MOTION) { this.world.classList.add('ease'); const t0 = performance.now(); const loop = () => { this.project(); if (performance.now() - t0 < 600) requestAnimationFrame(loop); else this.world.classList.remove('ease'); }; requestAnimationFrame(loop); }
+    this.camera(); this.project();
+  }
+}
+
+/* =========================================================
+   Timeline (base elevation profile + one overlay, zone coloured)
+   ========================================================= */
+const CW = 350, CH = 76;
+function indexAt(act, axis, f) { if (axis === 'dist') return clamp(Math.round(f * (act.N - 1)), 0, act.N - 1); const T = f * act.T; let lo = 0, hi = act.N - 1; while (hi - lo > 1) { const m = (lo + hi) >> 1; if (act.t[m] <= T) lo = m; else hi = m; } return lo; }
+const xOf = (act, axis, i) => (axis === 'dist' ? act.d[i] / act.total : act.t[i] / act.T) * CW;
+function profileSVG(act, axis) {
+  const xs = act.d.map((_, i) => xOf(act, axis, i));
+  const mn = Math.min(...act.ele), mx = Math.max(...act.ele);
+  const ey = act.ele.map(e => CH - 6 - (e - mn) / (mx - mn) * (CH - 22));
+  const p = smooth(act.p10, 1), py = p.map(v => CH - 4 - clamp(v / 560, 0, 1) * (CH - 10));
+  let s = `<path d="${pathD(xs, ey)} L${CW} ${CH} L0 ${CH}Z" style="fill:var(--label);opacity:.13"/><path d="${pathD(xs, ey)}" fill="none" style="stroke:var(--label);opacity:.32" stroke-width="1.2"/>`;
+  runs(act.zone).forEach(([a, b, z]) => { s += `<polyline points="${pts(xs.slice(a, b + 1), py.slice(a, b + 1))}" fill="none" style="stroke:${ZC(z)}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`; });
+  (act.lapIdx || []).forEach(li => { const lx = xOf(act, axis, li); s += `<line x1="${lx}" x2="${lx}" y1="${CH - 5}" y2="${CH + 2}" style="stroke:var(--label2)" stroke-width="1.2"/>`; });
+  return s;
+}
+function axisLabels(act, axis) {
+  if (axis === 'dist') { const st = act.total > 40 ? 10 : 5, out = []; for (let k = 0; k <= act.total; k += st) out.push(k); return out.map((k, i) => `<span>${k}${i === out.length - 1 ? ' km' : ''}</span>`).join(''); }
+  const st = act.T > 5400 ? 1800 : 900, out = []; for (let k = 0; k <= act.T; k += st) out.push(k); return out.map(k => `<span>${hm(k).replace(' min', 'm')}</span>`).join('');
+}
+function timelineSheet(act, extra = '') {
+  return `<div class="tsheet glass">
+    <div class="grabber"></div>
+    <div class="tl-top">
+      <span class="legend">Power <span class="ramp">${[0,1,2,3,4,5,6].map(z => `<i style="--c:${ZC(z)}"></i>`).join('')}</span>${ic('chevD', 14)}</span>
+      <span class="seg mini" data-axis><span class="on" data-v="dist">km</span><span data-v="time">Time</span></span>
+    </div>
+    <div class="chart" role="slider" aria-label="Timeline" tabindex="0"><svg viewBox="0 0 ${CW} ${CH}" width="${CW}" height="${CH}" aria-hidden="true"><g class="prof">${profileSVG(act, 'dist')}</g>
+      <rect class="tl-dim" x="0" y="0" width="0" height="${CH}" style="fill:var(--glass-dim)"/>
+      <line class="cur" x1="0" x2="0" y1="-4" y2="${CH + 2}" style="stroke:var(--accent)" stroke-width="2.5" stroke-linecap="round"/>
+      <circle class="knob" cx="0" cy="-6" r="7" style="fill:var(--accent);stroke:var(--surface)" stroke-width="2.5"/></svg></div>
+    <div class="axis num" data-axislbl>${axisLabels(act, 'dist')}</div>
+    <div class="tl-ctrl">
+      <button class="gbtn accent" data-play aria-label="Play">${ic('play', 20)}</button>
+      <button class="pill num" data-speed>1×</button>
+      <div class="time num" data-time></div>
+      <button class="pill" data-cam aria-label="Camera mode">${ic('follow', 18)}</button>
+    </div>${extra}
+  </div>`;
+}
+
+class Scrubber {
+  constructor(root, act, onIndex, opts = {}) {
+    this.root = root; this.a = act; this.on = onIndex; this.axis = 'dist'; this.i = 0; this.speed = 1; this.playing = false; this.opts = opts;
+    this.chart = root.querySelector('.chart'); this.cur = root.querySelector('.cur'); this.knob = root.querySelector('.knob'); this.dimR = root.querySelector('.tl-dim');
+    this.timeEl = root.querySelector('[data-time]');
+    const set = e => { const r = this.chart.getBoundingClientRect(); this.set(indexAt(act, this.axis, clamp((e.clientX - r.left) / r.width, 0, 1)), true); };
+    this.chart.addEventListener('pointerdown', e => { this.chart.setPointerCapture(e.pointerId); this.stop(); set(e); this.drag = true; });
+    this.chart.addEventListener('pointermove', e => { if (this.drag) set(e); });
+    this.chart.addEventListener('pointerup', () => this.drag = false);
+    this.chart.addEventListener('keydown', e => { if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') { e.preventDefault(); this.set(clamp(this.i + (e.key === 'ArrowRight' ? 5 : -5), 0, act.N - 1)); } });
+    root.querySelectorAll('[data-axis] span').forEach(sp => sp.addEventListener('click', () => {
+      this.axis = sp.dataset.v; root.querySelectorAll('[data-axis] span').forEach(x => x.classList.toggle('on', x === sp));
+      root.querySelector('.prof').innerHTML = profileSVG(act, this.axis); root.querySelector('[data-axislbl]').innerHTML = axisLabels(act, this.axis); this.set(this.i);
+    }));
+    const play = root.querySelector('[data-play]');
+    if (play) play.addEventListener('click', () => this.playing ? this.stop() : this.start());
+    const sp = root.querySelector('[data-speed]');
+    if (sp) sp.addEventListener('click', () => { const seq = [1, 2, 4, 0.5]; this.speed = seq[(seq.indexOf(this.speed) + 1) % 4]; sp.textContent = (this.speed === 0.5 ? '0.5' : this.speed) + '×'; });
+  }
+  set(i) {
+    this.i = i; const x = xOf(this.a, this.axis, i);
+    this.cur.setAttribute('x1', x); this.cur.setAttribute('x2', x); this.knob.setAttribute('cx', x);
+    this.dimR.setAttribute('x', x); this.dimR.setAttribute('width', Math.max(0, CW - x));
+    this.chart.setAttribute('aria-valuetext', `${fmt(this.a.d[i], 1)} km, ${dur(this.a.t[i], true)}`);
+    if (this.timeEl) this.timeEl.innerHTML = `${dur(this.a.t[i], true)} <span>/ ${dur(this.a.T, true)}</span>`;
+    this.on(i);
+  }
+  start() {
+    this.playing = true; const btn = this.root.querySelector('[data-play]'); btn.innerHTML = ic('pause', 20); btn.setAttribute('aria-label', 'Pause');
+    if (this.i >= this.a.N - 1) this.i = 0;
+    let last = performance.now(), f = this.a.t[this.i] / this.a.T;
+    const tick = now => { if (!this.playing) return; f += (now - last) / 60000 * this.speed; last = now; // whole activity in ~60 s at 1×
+      if (f >= 1) { this.set(this.a.N - 1); this.stop(); return; } this.set(indexAt(this.a, 'time', f)); requestAnimationFrame(tick); };
+    requestAnimationFrame(tick);
+  }
+  stop() { this.playing = false; const btn = this.root.querySelector('[data-play]'); if (btn) { btn.innerHTML = ic('play', 20); btn.setAttribute('aria-label', 'Play'); } }
+}
+
+/* Stats panel at the cursor */
+function statsPanel(title, when, actions = ['more']) {
+  const lbl = { more: 'More', layers: 'Map style' };
+  return `<div class="stats glass">
+    <div class="head"><button class="gbtn back" aria-label="Back">${ic('chevL')}</button><div class="ttl"><b>${title}</b><span>${when}</span></div>${actions.map(a => `<button class="gbtn" aria-label="${lbl[a]}">${ic(a)}</button>`).join('')}</div>
+    <div class="big">
+      <div><div class="val num"><span data-k="p" style="min-width:2.1ch">0</span><small>W</small></div><div class="lbl">3 s power <span class="zchip" data-k="z">Z1</span></div></div>
+      <div><div class="val num"><span data-k="hr">0</span><small>bpm</small></div><div class="lbl">Heart rate</div></div>
+      <div><div class="val num"><span data-k="spd">0</span><small>km/h</small></div><div class="lbl">Speed</div></div>
+    </div>
+    <div class="small">
+      <div><div class="val num"><span data-k="d">0</span><small>km</small></div><div class="lbl">Distance</div></div>
+      <div><div class="val num"><span data-k="t">0</span></div><div class="lbl">Elapsed</div></div>
+      <div><div class="val num"><span data-k="cad">0</span><small>rpm</small></div><div class="lbl">Cadence</div></div>
+      <div><div class="val num"><span data-k="ele">0</span><small>m</small></div><div class="lbl">Elevation</div></div>
+      <div><div class="val num"><span data-k="g">0</span><small>%</small></div><div class="lbl">Gradient</div></div>
+    </div></div>`;
+}
+function fillStats(root, a, i) {
+  const q = k => root.querySelector(`[data-k="${k}"]`), z = a.zone[i];
+  q('p').textContent = a.power[i]; q('hr').textContent = a.hr[i]; q('spd').textContent = fmt(a.spd[i], 1);
+  q('d').textContent = fmt(a.d[i], 1); q('t').textContent = dur(a.t[i], true); q('cad').textContent = a.cad[i];
+  q('ele').textContent = Math.round(a.ele[i]); q('g').textContent = fmt(a.grade[i], 1);
+  const zc = q('z'); zc.textContent = 'Z' + (z + 1); zc.style.setProperty('--zc', ZC(z));
+}
+
+/* =========================================================
+   Standard-map thumbnails (feed and routes)
+   ========================================================= */
+function routeShape(seed, kind, w, h) {
+  const r = rng(seed), n = 90, pts2 = [];
+  const k1 = 0.15 + r() * 0.25, k2 = r() * 0.15, ph = r() * 6;
+  for (let i = 0; i <= n; i++) {
+    const f = i / n;
+    if (kind === 'out') { const u = f < 0.5 ? f * 2 : 2 - f * 2; pts2.push([w * 0.18 + u * w * 0.64, h * 0.62 - Math.sin(u * 5 + ph) * h * 0.12 - u * h * 0.18 + (f < 0.5 ? -2 : 2)]); }
+    else { const a = -Math.PI / 2 + f * Math.PI * 2, rad = 1 + k1 * Math.sin(2 * a + ph) + k2 * Math.sin(5 * a + ph * 2); pts2.push([w / 2 + Math.cos(a) * rad * w * 0.3, h / 2 + Math.sin(a) * rad * h * 0.3]); }
+  }
+  return pts2;
+}
+function stdMap(w, h, seed, kind, colour, P, Z) {
+  const r = rng(seed + 500); P = P || routeShape(seed, kind, w, h);
+  let s = `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="xMidYMid slice" aria-hidden="true"><rect width="${w}" height="${h}" style="fill:var(--map-land)"/>`;
+  s += `<path d="M${w * (0.1 + r() * 0.3)} ${h * 0.15} q ${w * 0.3} ${-h * 0.1} ${w * 0.45} ${h * 0.25} t ${w * 0.1} ${h * 0.5} q ${-w * 0.35} ${h * 0.15} ${-w * 0.5} ${-h * 0.2}Z" style="fill:var(--map-park)"/>`;
+  s += `<path d="M-10 ${h * (0.7 + r() * 0.2)} C ${w * 0.3} ${h * 0.55}, ${w * 0.6} ${h * 1.05}, ${w + 10} ${h * 0.8}" fill="none" style="stroke:var(--map-water)" stroke-width="${w > 100 ? 10 : 5}"/>`;
+  for (let k = 0; k < 3; k++) { const y0 = r() * h, y1 = r() * h; s += `<path d="M-5 ${y0} Q ${w / 2} ${(y0 + y1) / 2 + (r() - 0.5) * h * 0.4} ${w + 5} ${y1}" fill="none" style="stroke:var(--map-road)" stroke-width="${k < 1 ? 2.4 : 1.2}"/>`; }
+  for (let k = 0; k < 2; k++) { const x0 = r() * w, x1 = r() * w; s += `<path d="M${x0} -5 Q ${(x0 + x1) / 2 + (r() - 0.5) * w * 0.4} ${h / 2} ${x1} ${h + 5}" fill="none" style="stroke:var(--map-road2)" stroke-width="1.2"/>`; }
+  const sw = w > 100 ? 4.5 : 3;
+  s += `<polyline points="${P.map(p => p.join(',')).join(' ')}" fill="none" stroke="oklch(0.15 0 0 / 0.35)" stroke-width="${sw + 2.5}" stroke-linecap="round" stroke-linejoin="round"/>`;
+  if (colour === 'plain') s += `<polyline points="${P.map(p => p.join(',')).join(' ')}" fill="none" style="stroke:var(--label)" stroke-width="${sw}" stroke-linecap="round" stroke-linejoin="round"/>`;
+  else {
+    const zs = Z || noise(P.length, seed + 9, 10).map(v => colour === 'pace' ? clamp(Math.round(2 + v * 2.2), 1, 5) : clamp(Math.round(2.4 + v * 2.6), 0, 6));
+    runs(zs).forEach(([a, b, z]) => { s += `<polyline points="${P.slice(a, b + 1).map(p => p.join(',')).join(' ')}" fill="none" style="stroke:${ZC(z)}" stroke-width="${sw}" stroke-linecap="round" stroke-linejoin="round"/>`; });
+  }
+  s += `<circle cx="${P[0][0]}" cy="${P[0][1]}" r="${sw * 0.9}" fill="#fff" stroke="oklch(0.15 0 0 / 0.6)" stroke-width="1.5"/></svg>`;
+  return s;
+}
+function heroMap(w, h) {
+  const xs = R.x, ys = R.y, x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
+  const k = Math.min((w - 60) / (x1 - x0), (h - 40) / (y1 - y0)), ox = (w - (x1 - x0) * k) / 2, oy = (h - (y1 - y0) * k) / 2;
+  const P = [], Z = []; for (let i = 0; i < R.N; i += 3) { P.push([ox + (xs[i] - x0) * k, oy + (ys[i] - y0) * k]); Z.push(R.zone[i]); }
+  return stdMap(w, h, 3, 'loop', 'zones', P, Z);
+}
+function sparkThumb(seed) {
+  const n = 60, v = noise(n, seed, 2).map((x, i) => 0.45 + 0.35 * Math.sign(Math.sin(i / 4.5)) * 0.8 + 0.12 * x);
+  const xs = v.map((_, i) => 6 + i / (n - 1) * 56), ys = v.map(x => 60 - x * 48), z = v.map(x => clamp(Math.round(x * 6), 0, 6));
+  let s = `<svg viewBox="0 0 68 68" aria-hidden="true"><rect width="68" height="68" style="fill:var(--fill2)"/>`;
+  runs(z).forEach(([a, b, zz]) => { s += `<polyline points="${pts(xs.slice(a, b + 1), ys.slice(a, b + 1))}" fill="none" style="stroke:${ZC(zz)}" stroke-width="2.2" stroke-linejoin="round"/>`; });
+  return s + '</svg>';
+}
+
+/* =========================================================
+   Screens
+   ========================================================= */
+const FEED = [
+  { wk: 'This week' },
+  { feat: true, title: 'Morning ride, Dorking', sport: 'Ride', when: 'Today, 07:05', km: R.total, s: R.T, asc: R.asc, hv: Math.round(R.wp), hu: 'W', hl: 'weighted', src: 'Garmin', badges: [['star', '5 min record'], ['route', '7th on Box Hill loop']] },
+  { title: 'Evening walk, Barnes', sport: 'Walk', when: 'Tue 3 Nov', km: 5.8, s: 3520, asc: 32, hv: '10:07', hu: '/km', hl: 'pace', src: 'Health', seed: 4, kind: 'out', colour: 'pace', badges: [['route', '22nd on Barnes river walk']] },
+  { title: 'Zwift ride, Watopia', sport: 'Virtual ride', when: 'Mon 2 Nov', km: 36.2, s: 3738, asc: 410, hv: 236, hu: 'W', hl: 'weighted', src: 'Garmin', spark: 17 },
+  { wk: 'Last week', range: '26 Oct – 1 Nov' },
+  { title: 'Morning ride, Richmond Park', sport: 'Ride', when: 'Sat 1 Nov', km: 32.4, s: 4012, asc: 214, hv: 214, hu: 'W', hl: 'weighted', src: 'Garmin', seed: 8, badges: [['route', '14th on Richmond Park lap']] },
+  { title: 'Lunch run, Putney', sport: 'Run', when: 'Thu 30 Oct', km: 8.1, s: 2472, asc: 41, hv: '5:05', hu: '/km', hl: 'pace', src: 'Health', seed: 12, kind: 'loop', colour: 'pace' },
+  { title: 'Morning ride, Kingston', sport: 'Ride', when: 'Wed 29 Oct', km: 41.8, s: 5390, asc: 286, hv: 205, hu: 'W', hl: 'weighted', src: 'FIT', seed: 21 },
+];
+function weekTotals(items) { let km = 0, s = 0, a = 0; items.forEach(f => { km += f.km; s += f.s; a += f.asc; }); return `${fmt(km, 1)} km · ${hm(s)} · ${fmt(Math.round(a))} m`; }
+function titleBar(title, sub, buttons) {
+  return `<header class="titlebar"><div class="ttl"><h1>${title}</h1><div class="sub">${sub}</div></div><div class="pair glass">${buttons}</div></header>`;
+}
+const SPORTS = { all: 'All sports', rides: 'Rides', foot: 'Walks and runs' }, PLACES = { any: 'Indoor and outdoor', out: 'Outdoor', in: 'Indoor' };
+const feedFilter = { sport: 'all', place: 'any' };
+function feedMatch(f) {
+  const ride = /ride/i.test(f.sport), indoor = /virtual/i.test(f.sport);
+  return (feedFilter.sport === 'all' || (feedFilter.sport === 'rides') === ride) && (feedFilter.place === 'any' || (feedFilter.place === 'in') === indoor);
+}
+function feedRows() {
+  const list = FEED.filter(f => f.wk || feedMatch(f));
+  let rows = '';
+  list.forEach((f, i) => {
+    if (f.wk) { const items = []; for (let j = i + 1; j < list.length && !list[j].wk; j++) items.push(list[j]); if (items.length) rows += `<div class="week"><b>${f.wk}</b><span class="num">${weekTotals(items)}</span></div>`; return; }
+    const stats = `<div class="astats num"><span>${fmt(f.km, 1)}<small>km</small></span><span>${hm(f.s)}</span><span>${fmt(Math.round(f.asc))}<small>m</small></span></div>`;
+    const metric = `<div class="head-metric num"><div class="v">${f.hv}<small>${f.hu}</small></div><div class="l">${f.hl}</div></div>`;
+    const badges = f.badges ? `<div class="badges">${f.badges.map(([icn, t]) => `<span class="badge">${ic(icn, 12)}${t}</span>`).join('')}</div>` : '';
+    if (f.feat) {
+      rows += `<div class="feature"><div class="mapbox">${heroMap(370, 176)}<span class="when glass">${f.when}</span></div>
+        <div class="body"><div class="grow"><div class="atitle">${f.title}</div><div class="ameta">${f.sport} <span class="src">${f.src}</span></div>${stats}${badges}</div>${metric}</div></div>`;
+      return;
+    }
+    rows += `<div class="arow"><div class="thumb">${f.spark ? sparkThumb(f.spark) : stdMap(68, 68, f.seed, f.kind || 'loop', f.colour || 'zones')}</div>
+      <div class="grow"><div class="atitle">${f.title}</div><div class="ameta">${f.sport} · ${f.when} <span class="src">${f.src}</span></div>${stats}${badges}</div>${metric}</div>`;
+  });
+  return rows || '<div class="empty">No activities match these filters.</div>';
+}
+function renderFeed(el) {
+  const opt = (group, k, label) => `<button data-g="${group}" data-v="${k}" role="menuitemradio"><span class="ck">${ic('check', 18)}</span>${label}</button>`;
+  el.innerHTML = `${statusBar()}
+    ${titleBar('Activities', '', `<button class="gbtn" data-filter aria-label="Filter activities" aria-haspopup="menu" aria-expanded="false">${ic('filter')}</button><button class="gbtn" aria-label="Profile and settings">${ic('person')}</button>`)}
+    <div class="menu glass" role="menu" hidden>
+      <div class="mh">Sport</div>${Object.entries(SPORTS).map(([k, l]) => opt('sport', k, l)).join('')}<hr>
+      <div class="mh">Where</div>${Object.entries(PLACES).map(([k, l]) => opt('place', k, l)).join('')}<hr>
+      <button data-range role="menuitem"><span class="ck"></span>Date range…</button>
+    </div>
+    <div class="feedrows"></div>${tabBar('a')}${home()}`;
+  const menu = el.querySelector('.menu'), fbtn = el.querySelector('[data-filter]');
+  const draw = () => {
+    const active = [feedFilter.sport !== 'all' && SPORTS[feedFilter.sport], feedFilter.place !== 'any' && PLACES[feedFilter.place]].filter(Boolean);
+    el.querySelector('.titlebar .sub').innerHTML = active.length
+      ? `<button class="token" data-clear aria-label="Clear filters">${active.join(' · ')}<svg class="ic" width="14" height="14" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7l10 10M17 7 7 17" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg></button><span>Synced 4 min ago</span>`
+      : `${ic('check', 14)}Synced 4 min ago`;
+    fbtn.classList.toggle('on', active.length > 0);
+    menu.querySelectorAll('[data-g]').forEach(b => { const on = feedFilter[b.dataset.g] === b.dataset.v; b.setAttribute('aria-checked', on); b.querySelector('.ck').style.visibility = on ? 'visible' : 'hidden'; });
+    el.querySelector('.feedrows').innerHTML = feedRows();
+    const clr = el.querySelector('[data-clear]'); if (clr) clr.addEventListener('click', () => { feedFilter.sport = 'all'; feedFilter.place = 'any'; draw(); });
+  };
+  const open = v => { menu.hidden = !v; fbtn.setAttribute('aria-expanded', v); };
+  fbtn.addEventListener('click', e => { e.stopPropagation(); open(menu.hidden); });
+  menu.addEventListener('click', e => { const b = e.target.closest('[data-g]'); if (!b) return; feedFilter[b.dataset.g] = b.dataset.v; draw(); open(false); });
+  el.addEventListener('click', e => { if (!menu.hidden && !menu.contains(e.target) && !fbtn.contains(e.target)) open(false); });
+  draw();
+}
+
+function renderFly(el) {
+  el.innerHTML = `${statusBar(true)}<div class="stage" style="position:absolute;inset:0"></div>
+    ${statsPanel('Morning ride, Dorking', 'Today, 07:05 · Ride', ['layers', 'more'])}
+    ${timelineSheet(R, `<div class="routeline">${ic('route', 20)}<div class="grow"><div class="t">7th time on Box Hill loop</div><div class="d num">2nd fastest · ${dur(R.T - BEST.s)} behind best</div></div>${ic('chevR', 16, 'class="ic chev"')}</div>`)}
+    ${home(true)}`;
+  const map = new FlyMap(el.querySelector('.stage'), R, { mode: REDUCE_MOTION ? 'overview' : 'follow' });
+  map.addMarker('me');
+  const sc = new Scrubber(el, R, i => { map.setIndex(i); fillStats(el, R, i); });
+  const cam = el.querySelector('[data-cam]');
+  const camIcon = () => { cam.innerHTML = ic(map.o.mode === 'follow' ? 'follow' : 'overview', 18); cam.setAttribute('aria-label', map.o.mode === 'follow' ? 'Camera: follow' : 'Camera: overview'); };
+  cam.addEventListener('click', () => { map.setMode(map.o.mode === 'follow' ? 'overview' : 'follow', true); camIcon(); });
+  camIcon();
+  sc.set(Math.round(R.N * 0.57)); // on the Leith Hill climb
+}
+
+function zoneRows(zt, T) {
+  const names = ['Recovery', 'Endurance', 'Tempo', 'Threshold', 'VO2 max', 'Anaerobic', 'Neuromuscular'];
+  const lim = [0, 0.55, 0.75, 0.9, 1.05, 1.2, 1.5].map(v => Math.round(v * FTP));
+  const mx = Math.max(...zt);
+  return zt.map((s, z) => `<div style="display:grid;grid-template-columns:30px 1fr 64px 44px;align-items:center;gap:10px;padding:7px 0">
+    <span class="zchip" style="--zc:${ZC(z)};justify-content:center">Z${z + 1}</span>
+    <div><div style="font-size:15px">${names[z]} <span style="color:var(--label2);font-size:13px" class="num">${z < 6 ? `${lim[z]}–${lim[z + 1] - 1}` : `${lim[6]}+`} W</span></div>
+      <div style="height:6px;border-radius:3px;background:var(--fill2);margin-top:5px"><div style="height:100%;width:${(s / mx * 100).toFixed(1)}%;border-radius:3px;background:${ZC(z)}"></div></div></div>
+    <span class="num" style="text-align:right;font-size:15px">${dur(s, s >= 3600)}</span><span class="num" style="text-align:right;color:var(--label2);font-size:13px">${Math.round(s / T * 100)}%</span></div>`).join('');
+}
+function powerCurveSVG(series, w, h, opts = {}) {
+  const DUR = R.DUR, lx = d => Math.log(d / DUR[0]) / Math.log(DUR[DUR.length - 1] / DUR[0]) * (w - 40) + 34;
+  const all = series.flatMap(s => s.v), mx = Math.ceil(Math.max(...all) / 100) * 100, mn = 100;
+  const ly = v => 8 + (1 - (v - mn) / (mx - mn)) * (h - 30);
+  let s = `<svg viewBox="0 0 ${w} ${h}" width="${w}" height="${h}" aria-hidden="true">`;
+  for (let v = mn; v <= mx; v += 100) s += `<line x1="34" x2="${w}" y1="${ly(v)}" y2="${ly(v)}" style="stroke:var(--sep)" stroke-width="0.8"/><text class="axis-lbl" x="0" y="${ly(v) + 4}">${v}</text>`;
+  [[5, '5s'], [60, '1m'], [300, '5m'], [1200, '20m'], [3600, '1h']].forEach(([d, l]) => s += `<text class="axis-lbl" x="${lx(d)}" y="${h - 4}" text-anchor="middle">${l}</text>`);
+  if (opts.ftp) s += `<line x1="34" x2="${w}" y1="${ly(opts.ftp)}" y2="${ly(opts.ftp)}" style="stroke:var(--label2)" stroke-dasharray="2 3" stroke-width="1"/><text class="axis-lbl" x="40" y="${ly(opts.ftp) + 14}">Threshold ${opts.ftp} W</text>`;
+  series.forEach(sr => s += `<path d="${pathD(DUR.map(lx), sr.v.map(ly))}" fill="none" style="stroke:${sr.dash ? 'var(--label3)' : 'var(--label)'}" stroke-width="${sr.dash ? 1.6 : 2.2}" ${sr.dash ? 'stroke-dasharray="4 4"' : ''} stroke-linecap="round"/>`);
+  if (opts.mark) { const [d, v, t] = opts.mark; s += `<circle cx="${lx(d)}" cy="${ly(v)}" r="5" style="fill:var(--label);stroke:var(--surface)" stroke-width="2"/><text class="axis-lbl" x="${lx(d) + 4}" y="${ly(v) - 26}" text-anchor="end" style="fill:var(--label);font-weight:600">${t}</text><line x1="${lx(d)}" x2="${lx(d)}" y1="${ly(v) - 22}" y2="${ly(v) - 7}" style="stroke:var(--label)" stroke-width="1"/>`; }
+  return s + '</svg>';
+}
+function renderAnalysis(el) {
+  const best90 = BEST90;
+  const st = (v, u, l) => `<div><div class="v num">${v}${u ? `<small>${u}</small>` : ''}</div><div class="l">${l}</div></div>`;
+  const laps = R.laps.map(l => `<tr><td>${l.n}</td><td>${fmt(l.km, 1)} km</td><td>${dur(l.s)}</td><td>${Math.round(l.p)} W</td><td>${Math.round(l.h)}</td></tr>`).join('');
+  el.innerHTML = `${statusBar(true)}<div class="stage" style="position:absolute;left:0;right:0;top:0;height:180px"></div>
+    <div style="position:relative;margin-top:66px;background:var(--bg-grouped);border-radius:34px 34px 0 0;z-index:10;padding-top:8px;min-height:800px">
+      <div class="grabber"></div>
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;padding:10px 20px 0">
+        <div><div style="font-size:28px;font-weight:700;letter-spacing:-0.02em">Morning ride, Dorking</div><div style="font-size:15px;color:var(--label2);margin-top:4px;display:flex;gap:6px;align-items:center">Today, 07:05 · Ride <span class="src">Garmin</span></div></div>
+        <button class="gbtn" style="background:var(--fill);width:36px;height:36px" aria-label="Collapse">${ic('chevD', 18)}</button>
+      </div>
+      <div class="ilist" style="margin-top:18px"><div class="irow">${ic('route', 22)}<div class="grow"><div class="t" style="font-weight:600">7th time on Box Hill loop</div><div class="d num">2nd fastest · ${dur(R.T - BEST.s)} behind best · Compare</div></div>${ic('chevR', 16, 'class="ic chev"')}</div></div>
+      <div class="sect-h"><h2>Summary</h2></div>
+      <div class="box statgrid">
+        ${st(dur(R.T, true), '', 'Moving time')}${st(fmt(R.total, 1), 'km', 'Distance')}${st(fmt(Math.round(R.asc)), 'm', 'Ascent')}
+        ${st(Math.round(R.wp), 'W', 'Weighted power')}${st(Math.round(R.avgP), 'W', 'Average power')}${st(fmt(R.IF, 2), '', 'Intensity')}
+        ${st(Math.round(R.load), '', 'Load')}${st(fmt(Math.round(R.work)), 'kJ', 'Work')}${st(Math.round(R.avgHR), 'bpm', 'Average HR')}
+        ${st(fmt(R.total / R.T * 3600, 1), 'km/h', 'Average speed')}${st(Math.round(R.wp / R.avgP * 100) / 100, '', 'Variability')}
+        ${st(Math.max(...R.power), 'W', 'Max power')}
+      </div>
+      <div class="sect-h"><h2>Time in power zones</h2><span>Threshold ${FTP} W</span></div>
+      <div class="box" style="padding:10px 16px">
+        <div style="display:flex;height:12px;border-radius:6px;overflow:hidden;gap:2px;margin:6px 0 8px">${R.zt.map((s, z) => `<i style="flex:${s};background:${ZC(z)}"></i>`).join('')}</div>
+        ${zoneRows(R.zt, R.T)}
+      </div>
+      <div class="sect-h"><h2>Power curve</h2><span>90 days ${ic('chevD', 12, 'style="display:inline;vertical-align:-1px"')}</span></div>
+      <div class="box"><div style="display:flex;gap:16px;margin-bottom:10px"><span class="key"><i></i>This ride</span><span class="key"><i class="dash"></i>Best, last 90 days</span></div>
+        ${powerCurveSVG([{ v: best90, dash: true }, { v: R.curve }], 338, 180, { mark: [300, R.curve[5], `5 min record · ${Math.round(R.curve[5])} W`] })}</div>
+      <div class="sect-h"><h2>Laps</h2><span>Auto, 10 km</span></div>
+      <div class="box"><table class="tbl"><thead><tr><th>Lap</th><th>Distance</th><th>Time</th><th>Power</th><th>HR</th></tr></thead><tbody>${laps}</tbody></table></div>
+    </div>`;
+  const map = new FlyMap(el.querySelector('.stage'), R, { ay: 0.62, scale: 1.2, dim: false });
+  map.setIndex(Math.round(R.N * 0.57));
+}
+
+function renderIndoor(el) {
+  const a = IN, w = 402, top = 250, hgt = 108;
+  const xs = a.t.map(t => t / a.T * w);
+  const chart = (vals, mn, mx, label, unit, zoneFill, y0) => {
+    const ys = vals.map(v => y0 + hgt - 14 - clamp((v - mn) / (mx - mn), 0, 1) * (hgt - 30));
+    let s = `<text class="axis-lbl" x="16" y="${y0 + 14}" style="font-weight:600;fill:var(--label)">${label}</text><text class="axis-lbl" x="${w - 16}" y="${y0 + 14}" text-anchor="end">${unit}</text>`;
+    if (zoneFill) runs(a.zone).forEach(([s0, e, z]) => { s += `<path d="M${xs[s0]} ${y0 + hgt - 10} ${xs.slice(s0, e + 1).map((x, k) => `L${x.toFixed(1)} ${ys[s0 + k].toFixed(1)}`).join(' ')} L${xs[e]} ${y0 + hgt - 10}Z" style="fill:${ZC(z)}"/>`; });
+    else s += `<path d="${pathD(xs, ys)}" fill="none" style="stroke:var(--label)" stroke-width="1.8"/>`;
+    return s;
+  };
+  const ci = 236, cx = xs[ci];
+  const svg = `<svg style="position:absolute;left:0;top:${top}px" width="${w}" height="${hgt * 3}" viewBox="0 0 ${w} ${hgt * 3}" aria-hidden="true">
+    ${chart(a.power, 80, 340, 'Power', 'W', true, 0)}${chart(a.hr, 90, 180, 'Heart rate', 'bpm', false, hgt)}${chart(a.cad, 70, 105, 'Cadence', 'rpm', false, hgt * 2)}
+    <line class="icur" x1="${cx}" x2="${cx}" y1="18" y2="${hgt * 3 - 8}" style="stroke:var(--accent)" stroke-width="2"/></svg>`;
+  el.innerHTML = `${statusBar()}
+    ${statsPanel('Zwift ride, Watopia', 'Mon 2 Nov, 18:30 · Virtual ride')}${svg}${timelineSheet(a, `<div class="routeline">${ic('info', 20)}<div class="grow"><div class="t">Indoor ride, no map</div><div class="d">4 × 8 min intervals detected as laps</div></div></div>`)}${home()}`;
+  const icur = el.querySelector('.icur');
+  const sc = new Scrubber(el, a, i => { fillStats(el, a, i); icur.setAttribute('x1', xs[i]); icur.setAttribute('x2', xs[i]); });
+  el.querySelector('[data-cam]').style.visibility = 'hidden';
+  sc.set(ci);
+}
+
+const ROUTES = [
+  { name: 'Box Hill loop', meta: `Ride · 58.6 km · ${fmt(Math.round(R.asc))} m`, n: 7, best: 7282, seed: 3, strip: [7907, 7699, 7491, 7541, 7390, 7282, 7354] },
+  { name: 'Richmond Park lap', meta: 'Ride · 10.7 km · 64 m', n: 14, best: 1188, seed: 8, strip: [1290, 1262, 1240, 1255, 1231, 1220, 1236, 1212, 1198, 1225, 1205, 1188, 1210, 1196] },
+  { name: 'Barnes river walk', meta: 'Walk · 5.8 km · 32 m', n: 22, best: 3250, seed: 4, kind: 'out', strip: [3600, 3520, 3480, 3550, 3400, 3420, 3380, 3350, 3500, 3330, 3300, 3420, 3290, 3310, 3280, 3350, 3270, 3260, 3300, 3250, 3290, 3520] },
+  { name: 'Watopia Figure 8', meta: 'Virtual ride · 29.6 km · 412 m', n: 6, best: 3151, seed: 30, strip: [3420, 3340, 3290, 3230, 3180, 3151] },
+  { name: 'Putney run', meta: 'Run · 8.1 km · 41 m', n: 9, best: 2398, seed: 12, strip: [2620, 2580, 2540, 2510, 2490, 2460, 2430, 2398, 2472] },
+];
+function strip(v, w = 120, h = 20) { const mn = Math.min(...v), mx = Math.max(...v); return `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" aria-hidden="true">${v.map((x, i) => `<circle cx="${4 + i / (v.length - 1) * (w - 8)}" cy="${4 + (x - mn) / (mx - mn || 1) * (h - 8)}" r="${i === v.length - 1 ? 3 : 2.2}" style="fill:${i === v.length - 1 ? 'var(--label)' : 'var(--label3)'}"/>`).join('')}</svg>`; }
+function renderRoutes(el) {
+  const rows = ROUTES.map(r => `<div class="irow" style="--inset:96px;align-items:flex-start;padding:12px 16px"><div class="thumb">${stdMap(68, 68, r.seed, r.kind || 'loop', 'plain')}</div>
+    <div class="grow"><div class="atitle">${r.name}</div><div class="ameta">${r.meta}</div><div class="ameta num" style="margin-top:6px;color:var(--label)">${r.n} efforts · best ${dur(r.best)}</div><div style="margin-top:4px">${strip(r.strip)}</div></div>${ic('chevR', 16, 'class="ic chev" style="margin-top:24px"')}</div>`).join('');
+  el.innerHTML = `${statusBar()}
+    ${titleBar('Routes', '5 routes · 58 efforts · by most recent', `<button class="gbtn" aria-label="Sort">${ic('sort')}</button><button class="gbtn" aria-label="Profile and settings">${ic('person')}</button>`)}
+    <div class="ihead">Needs a decision</div>
+    <div class="ilist"><div class="irow" style="align-items:flex-start;padding:14px 16px">${ic('q', 22, 'style="color:var(--warn);margin-top:1px"')}<div class="grow"><div class="t" style="font-weight:600;font-size:16px">Ride on 28 Oct</div><div class="d" style="font-size:14px;line-height:1.35;margin-top:3px">Matches Richmond Park lap except one stretch that runs 14 m to the side. Same route, or a parallel road?</div>
+      <div style="display:flex;gap:8px;margin-top:10px"><button class="btn-s">Same route</button><button class="btn-q">Keep separate</button></div></div></div></div>
+    <div class="ihead">Your routes</div>
+    <div class="ilist">${rows}</div>
+    <div class="ifoot">3 activities become routes when a second effort matches.</div>
+    ${tabBar('r')}${home()}`;
+}
+
+const EFFORTS = [
+  { d: new Date(2026, 4, 3), s: 7907, p: 221, h: 151 }, { d: new Date(2026, 5, 7), s: 7699, p: 228, h: 149 }, { d: new Date(2026, 6, 5), s: 7491, p: 233, h: 150 },
+  { d: new Date(2026, 6, 26), s: 7541, p: 230, h: 148 }, { d: new Date(2026, 7, 23), s: 7390, p: 238, h: 151 }, { d: new Date(2026, 8, 12), s: 7282, p: Math.round(BEST.wp), h: Math.round(BEST.hr), best: true },
+  { d: new Date(2026, 10, 4), s: R.T, p: Math.round(R.wp), h: Math.round(R.avgHR), today: true },
+];
+function dotChart(w, h) {
+  const t0 = new Date(2026, 3, 15).getTime(), t1 = new Date(2026, 10, 20).getTime(), mn = 7200, mx = 8000;
+  const x = d => 40 + (d.getTime() - t0) / (t1 - t0) * (w - 48), y = s => 10 + (s - mn) / (mx - mn) * (h - 34);
+  let s = `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" aria-hidden="true">`;
+  [7200, 7500, 7800].forEach(v => s += `<line x1="40" x2="${w}" y1="${y(v)}" y2="${y(v)}" style="stroke:var(--sep)" stroke-width="0.8"/><text class="axis-lbl" x="0" y="${y(v) + 4}">${hm(v)}</text>`);
+  ['May', 'Jul', 'Sep', 'Nov'].forEach((m, k) => s += `<text class="axis-lbl" x="${x(new Date(2026, 4 + k * 2, 1))}" y="${h - 4}" text-anchor="middle">${m}</text>`);
+  const med = 7491; s += `<line x1="40" x2="${w}" y1="${y(med)}" y2="${y(med)}" style="stroke:var(--label3)" stroke-dasharray="3 4"/><text class="axis-lbl" x="44" y="${y(med) - 5}">median</text>`;
+  EFFORTS.forEach(e => {
+    if (e.best) s += `<circle cx="${x(e.d)}" cy="${y(e.s)}" r="7.5" fill="none" style="stroke:var(--label)" stroke-width="2"/><text class="axis-lbl" x="${x(e.d)}" y="${y(e.s) - 13}" text-anchor="middle" style="fill:var(--label);font-weight:600">Best</text>`;
+    s += `<circle cx="${x(e.d)}" cy="${y(e.s)}" r="${e.today ? 6 : 4.5}" style="fill:${e.today || e.best ? 'var(--label)' : 'var(--label3)'}"/>`;
+    if (e.today) s += `<text class="axis-lbl" x="${x(e.d) - 10}" y="${y(e.s) + 4}" text-anchor="end" style="fill:var(--label);font-weight:600">Today</text>`;
+  });
+  return s + '</svg>';
+}
+function renderRoute(el) {
+  const sorted = EFFORTS.slice().sort((a, b) => a.s - b.s);
+  const rows = sorted.slice(0, 4).map((e, k) => `<div class="irow" style="--inset:52px"><span class="num" style="width:24px;color:var(--label2);font-weight:600">${k + 1}</span>
+    <div class="grow"><div class="t num" style="font-weight:${e.today ? 650 : 500}">${dur(e.s, true)} ${e.today ? '<span class="badge" style="margin-left:6px;vertical-align:1px">Today</span>' : ''}</div><div class="d num">${e.d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })} · ${e.p} W · ${e.h} bpm</div></div>
+    <span class="num" style="color:var(--label2);font-size:15px">${e.best ? 'Best' : signed(e.s - sorted[0].s)}</span>${ic('chevR', 16, 'class="ic chev"')}</div>`).join('');
+  el.innerHTML = `${statusBar(true)}<div class="stage" style="position:absolute;left:0;right:0;top:0;height:330px"></div>
+    <div class="navrow"><button class="gbtn glass" aria-label="Back to routes">${ic('chevL')}</button><div class="pair glass"><button class="gbtn" aria-label="More">${ic('more')}</button></div></div>
+    <div class="panel" style="top:300px">
+      <div style="padding:18px 20px 0"><div style="font-size:28px;font-weight:700;letter-spacing:-0.02em">Box Hill loop</div><div style="font-size:15px;color:var(--label2);margin-top:4px">Ride · 58.6 km · ${fmt(Math.round(R.asc))} m · first ridden 3 May</div></div>
+      <div class="statgrid num" style="grid-template-columns:0.6fr 1fr 1fr 1fr;padding:16px 20px 0">
+        <div><div class="v">7</div><div class="l">Efforts</div></div><div><div class="v">${dur(7282)}</div><div class="l">Best</div></div><div><div class="v">${dur(R.T)}</div><div class="l">Latest</div></div><div><div class="v">${dur(7491)}</div><div class="l">Median</div></div>
+      </div>
+      <div style="padding:18px 16px 0"><div class="seg"><span class="on">Moving time</span><span>Power</span><span>Heart rate</span><span>Efficiency</span></div></div>
+      <div class="box" style="margin-top:12px;padding:14px 12px 8px">${dotChart(346, 150)}</div>
+      <div class="sect-h" style="margin-top:20px"><h2>Efforts</h2><span>By time ${ic('chevD', 12, 'style="display:inline;vertical-align:-1px"')}</span></div>
+      <div class="ilist">${rows}</div>
+    </div>${tabBar('r')}${home()}`;
+  const map = new FlyMap(el.querySelector('.stage'), R, { mode: 'overview', colour: 'plain', ay: 0.56, ovScale: 0.3, ovPitch: 42, dim: false });
+  map.addPin('start'); map.setIndex(0);
+}
+
+function renderCompare(el) {
+  const w = 362, gh = 132, ph = 96;
+  const xs = R.d.map(d => d / R.total * w), gmax = 80;
+  const gy = g => gh / 2 + g / gmax * (gh / 2 - 10); // behind plots below the line
+  const gp = pathD(xs, GAP.map(gy));
+  const climbs = [[13.6, 16.6, 'Box Hill'], [30.5, 34.4, 'Leith Hill'], [44.6, 46.8, 'Ranmore']];
+  let gsvg = `<svg width="${w}" height="${gh}" viewBox="0 0 ${w} ${gh}" aria-hidden="true">`;
+  climbs.forEach(([a, b, n]) => gsvg += `<rect x="${a / R.total * w}" y="0" width="${(b - a) / R.total * w}" height="${gh}" style="fill:var(--fill2)"/><text class="axis-lbl" x="${(a + b) / 2 / R.total * w}" y="12" text-anchor="middle">${n}</text>`);
+  gsvg += `<line x1="0" x2="${w}" y1="${gh / 2}" y2="${gh / 2}" style="stroke:var(--label3)" stroke-width="1"/>
+    <path d="${gp} L${w} ${gh / 2} L0 ${gh / 2}Z" style="fill:var(--label);opacity:.12"/><path d="${gp}" fill="none" style="stroke:var(--label)" stroke-width="2"/>
+    <text class="axis-lbl" x="${w - 2}" y="${gh / 2 - 6}" text-anchor="end">ahead</text><text class="axis-lbl" x="${w - 2}" y="${gh / 2 + 15}" text-anchor="end">behind</text>
+    <line class="gcur" x1="0" x2="0" y1="0" y2="${gh}" style="stroke:var(--accent)" stroke-width="2"/></svg>`;
+  const ps = smooth(R.power, 5), pb = smooth(P_BEST, 5), pyy = v => ph - 4 - clamp((v - 40) / 360, 0, 1) * (ph - 10);
+  const psvg = `<svg width="${w}" height="${ph}" viewBox="0 0 ${w} ${ph}" aria-hidden="true"><path d="${pathD(xs, pb.map(pyy))}" fill="none" style="stroke:var(--label3)" stroke-dasharray="4 3" stroke-width="1.5"/><path d="${pathD(xs, ps.map(pyy))}" fill="none" style="stroke:var(--label)" stroke-width="1.8"/><line class="gcur" x1="0" x2="0" y1="0" y2="${ph}" style="stroke:var(--accent)" stroke-width="2"/></svg>`;
+  const spT = R.total / R.T * 3600, spB = R.total / BEST.s * 3600;
+  const row = (l, a, b, d) => `<tr><td>${l}</td><td class="me">${a}</td><td>${b}</td><td>${d}</td></tr>`;
+  el.innerHTML = `${statusBar(true)}<div class="stage" style="position:absolute;left:0;right:0;top:0;height:300px"></div>
+    <div class="navrow"><button class="gbtn glass" aria-label="Back">${ic('chevL')}</button><div class="pair glass"><button class="gbtn" aria-label="Choose effort">${ic('sort')}</button></div></div>
+    <div class="panel" style="top:272px;padding-bottom:110px">
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:16px 20px 0">
+        <div><div style="font-size:22px;font-weight:700;letter-spacing:-0.015em">Today vs best</div><div style="font-size:13px;color:var(--label2);margin-top:2px">Box Hill loop · 4 Nov vs ${BEST.date}</div></div>
+        <div class="seg" style="width:150px"><span class="on">Moving</span><span>Elapsed</span></div>
+      </div>
+      <div class="readout num" style="padding:12px 20px 0"><div><div class="v" data-gap>0:00</div><div class="l" data-gapl>behind</div></div><div><div class="v" data-gapm>0 m</div><div class="l">best is ahead</div></div><div style="margin-left:auto;text-align:right"><div class="v" data-km>0.0</div><div class="l">km</div></div></div>
+      <div style="padding:10px 20px 0">${gsvg}</div>
+      <div style="display:flex;gap:16px;padding:8px 20px 4px"><span class="key"><i></i>Today power</span><span class="key"><i class="dash"></i>Best</span></div>
+      <div style="padding:0 20px">${psvg}</div>
+      <div class="box" style="margin-top:12px;padding:12px 16px"><table class="tbl"><thead><tr><th></th><th>Today</th><th>Best</th><th>Diff</th></tr></thead><tbody>
+        ${row('Moving time', dur(R.T, true), dur(BEST.s, true), signed(R.T - BEST.s))}
+        ${row('Weighted power', Math.round(R.wp) + ' W', Math.round(BEST.wp) + ' W', '−5 W')}
+        ${row('Average HR', Math.round(R.avgHR), Math.round(BEST.hr), '−2')}
+        ${row('Speed', fmt(spT, 1), fmt(spB, 1), '−' + fmt(spB - spT, 1))}
+        ${row('Efficiency', fmt(R.wp / R.avgHR, 2), fmt(BEST.wp / BEST.hr, 2), (R.wp / R.avgHR - BEST.wp / BEST.hr >= 0 ? '+' : '−') + fmt(Math.abs(R.wp / R.avgHR - BEST.wp / BEST.hr), 2))}
+      </tbody></table></div>
+    </div>
+    <div class="tsheet glass" style="padding:12px 16px 30px"><div class="tl-ctrl" style="margin:0;gap:12px">
+      <button class="gbtn accent" data-play aria-label="Play">${ic('play', 20)}</button>
+      <div class="grow" style="flex:1"><div class="chart" style="height:40px" role="slider" aria-label="Comparison timeline" tabindex="0"><svg viewBox="0 0 ${CW} ${CH}" width="100%" height="40" preserveAspectRatio="none" aria-hidden="true"><g class="prof">${profileSVG(R, 'dist')}</g><rect class="tl-dim" x="0" y="0" width="0" height="${CH}" style="fill:var(--glass-dim)"/><line class="cur" x1="0" x2="0" y1="0" y2="${CH}" style="stroke:var(--accent)" stroke-width="4"/><circle class="knob" r="0"/></svg></div></div>
+      <div class="time num" data-time style="flex:none;font-size:13px"></div></div></div>
+    ${home()}`;
+  const map = new FlyMap(el.querySelector('.stage'), R, { ay: 0.6, scale: 2, pitch: 58 });
+  map.addMarker('ghost', 'ghost', '<span class="flag glass">Best</span>'); map.addMarker('me');
+  const q = s => el.querySelector(s);
+  const sc = new Scrubber(el, R, i => {
+    const T = R.t[i]; let j = 0; while (j < R.N - 2 && T_BEST[j + 1] <= T) j++;
+    const f = clamp((T - T_BEST[j]) / ((T_BEST[j + 1] - T_BEST[j]) || 1), 0, 1);
+    const gx = R.x[j] + (R.x[j + 1] - R.x[j]) * f, gy2 = R.y[j] + (R.y[j + 1] - R.y[j]) * f;
+    map.setIndex(i, [gx, gy2]);
+    const g = GAP[i], dm = Math.round(((R.d[j] + (R.d[j + 1] - R.d[j]) * f) - R.d[i]) * 1000);
+    q('[data-gap]').textContent = dur(Math.abs(g)); q('[data-gapl]').textContent = g >= 0 ? 'behind best' : 'ahead of best';
+    q('[data-gapm]').textContent = `${fmt(Math.abs(dm))} m`; q('[data-gapm]').nextElementSibling.textContent = dm >= 0 ? 'best is ahead' : 'best is behind';
+    q('[data-km]').textContent = fmt(R.d[i], 1);
+    el.querySelectorAll('.gcur').forEach(l => { l.setAttribute('x1', xs[i]); l.setAttribute('x2', xs[i]); });
+    q('[data-time]').textContent = dur(T, true);
+  });
+  sc.set(Math.round(R.N * 0.6));
+}
+
+function renderTrends(el) {
+  const w = 338;
+  // Volume
+  const wk = [118.4, 142.0, 96.3, 188.2, 174.5, 132.8, 161.0, 0, 154.7, 120.1, 168.2, R.total + 36.2];
+  const ly = [102, 131, 120, 140, 96, 150, 128, 88, 110, 132, 121, 98];
+  const vh = 150, mx = 200, bw = 18, gap = (w - 30 - bw * 12) / 11, by = v => vh - 22 - v / mx * (vh - 34);
+  let vs = `<svg width="${w}" height="${vh}" viewBox="0 0 ${w} ${vh}" aria-hidden="true">`;
+  [0, 100, 200].forEach(v => vs += `<line x1="30" x2="${w}" y1="${by(v)}" y2="${by(v)}" style="stroke:var(--sep)" stroke-width="0.8"/><text class="axis-lbl" x="0" y="${by(v) + 4}">${v}</text>`);
+  wk.forEach((v, k) => { const x = 30 + k * (bw + gap), cur = k === 11;
+    if (v > 0) vs += `<rect x="${x}" y="${by(v)}" width="${bw}" height="${by(0) - by(v)}" rx="4" style="fill:var(--label);opacity:${cur ? 1 : 0.42}"/>`;
+    else vs += `<text class="axis-lbl" x="${x + bw / 2}" y="${by(0) - 5}" text-anchor="middle">–</text>`;
+    vs += `<line x1="${x - 2}" x2="${x + bw + 2}" y1="${by(ly[k])}" y2="${by(ly[k])}" style="stroke:var(--label)" stroke-width="2" stroke-linecap="round"/>`; });
+  ['Aug', 'Sep', 'Oct', 'Nov'].forEach((m, k) => vs += `<text class="axis-lbl" x="${30 + (k * 3 + 1) * (bw + gap) + bw / 2}" y="${vh - 4}" text-anchor="middle">${m}</text>`);
+  vs += '</svg>';
+  // Power curve windows
+  const c6 = R.curve.map((v, i) => v * [1.05, 1.04, 1.03, 1.02, 1.01, 1, 1.01, 1, 1.02, 1.02, 1.03][i]), c90 = BEST90;
+  // Threshold over 12 months: user-set steps and the rolling estimate
+  const th = [248, 248, 252, 252, 252, 258, 258, 258, 262, 265, 265, 265], est = [244, 249, 251, 255, 257, 256, 260, 263, 264, 268, 271, 272];
+  const thh = 120, tx = k => 34 + k / 11 * (w - 40), tyy = v => 10 + (1 - (v - 240) / 40) * (thh - 34);
+  let ts = `<svg width="${w}" height="${thh}" viewBox="0 0 ${w} ${thh}" aria-hidden="true">`;
+  [240, 260, 280].forEach(v => ts += `<line x1="34" x2="${w}" y1="${tyy(v)}" y2="${tyy(v)}" style="stroke:var(--sep)" stroke-width="0.8"/><text class="axis-lbl" x="0" y="${tyy(v) + 4}">${v}</text>`);
+  ts += `<path d="${th.map((v, k) => (k ? `H${tx(k)}V${tyy(v)}` : `M${tx(0)} ${tyy(v)}`)).join('')}" fill="none" style="stroke:var(--label)" stroke-width="2.2"/>`;
+  ts += `<path d="${pathD(est.map((_, k) => tx(k)), est.map(tyy))}" fill="none" style="stroke:var(--label3)" stroke-dasharray="4 4" stroke-width="1.6"/>`;
+  ['Dec', 'Mar', 'Jun', 'Sep'].forEach((m, k) => ts += `<text class="axis-lbl" x="${tx(k * 3)}" y="${thh - 4}" text-anchor="middle">${m}</text>`);
+  ts += '</svg>';
+  // Efficiency dots
+  const er = rng(61), eh = 130, ex = k => 34 + k / 31 * (w - 40), ey = v => 10 + (1 - (v - 1.4) / 0.3) * (eh - 34);
+  const ev = Array.from({ length: 32 }, (_, k) => 1.46 + k * 0.0052 + (er() - 0.5) * 0.07);
+  let es = `<svg width="${w}" height="${eh}" viewBox="0 0 ${w} ${eh}" aria-hidden="true">`;
+  [1.4, 1.5, 1.6, 1.7].forEach(v => es += `<line x1="34" x2="${w}" y1="${ey(v)}" y2="${ey(v)}" style="stroke:var(--sep)" stroke-width="0.8"/><text class="axis-lbl" x="0" y="${ey(v) + 4}">${v.toFixed(1)}</text>`);
+  ev.forEach((v, k) => es += `<circle cx="${ex(k)}" cy="${ey(v)}" r="3.6" style="fill:var(--label3)"/>`);
+  es += `<line x1="${ex(0)}" x2="${ex(31)}" y1="${ey(1.46)}" y2="${ey(1.46 + 31 * 0.0052)}" style="stroke:var(--label)" stroke-width="2.2" stroke-linecap="round"/>`;
+  ['Jun', 'Aug', 'Oct'].forEach((m, k) => es += `<text class="axis-lbl" x="${ex(4 + k * 11)}" y="${eh - 4}" text-anchor="middle">${m}</text>`);
+  es += '</svg>';
+  // Calendar heat map of daily load
+  const cr = rng(88), weeks = 18; let cal = `<div style="display:grid;grid-template-columns:22px repeat(${weeks},1fr);gap:3px;align-items:center">`;
+  const dn = ['M', '', 'W', '', 'F', '', 'S'];
+  for (let d = 0; d < 7; d++) { cal += `<span style="font-size:10px;color:var(--label2)">${dn[d]}</span>`; for (let k = 0; k < weeks; k++) {
+    const future = k === weeks - 1 && d > 2; let v = cr(); const rest = v < 0.38; const unav = !rest && cr() < 0.05;
+    const load = rest ? 0 : Math.round(30 + cr() * 150); const bin = load === 0 ? 0 : load < 60 ? 1 : load < 100 ? 2 : load < 140 ? 3 : 4;
+    const bg = future ? 'transparent' : unav ? 'var(--fill2)' : bin === 0 ? 'var(--fill2)' : `color-mix(in oklab, var(--z5) ${[0, 30, 55, 80, 100][bin]}%, var(--fill2))`;
+    cal += `<span style="aspect-ratio:1;border-radius:4px;background:${bg};display:grid;place-items:center">${unav ? '<i style="width:4px;height:4px;border-radius:50%;background:var(--label2)"></i>' : ''}</span>`; } }
+  cal += '</div>';
+  const rec = (t, v, d, isNew) => `<div class="irow"><div class="grow"><div class="t">${t}</div><div class="d">${d}</div></div><span class="num" style="font-size:17px;font-weight:600">${v}</span>${isNew ? `<span class="badge">${ic('star', 11)}New</span>` : ''}</div>`;
+  el.innerHTML = `${statusBar()}
+    ${titleBar('Trends', `<button class="token" aria-label="Change scope">Rides · last 12 months${ic('chevD', 14)}</button>`, `<button class="gbtn" aria-label="Filter trends">${ic('filter')}</button><button class="gbtn" aria-label="Profile and settings">${ic('person')}</button>`)}
+    <div class="sect-h"><h2>Volume</h2><span>Weekly ${ic('chevD', 12, 'style="display:inline;vertical-align:-1px"')}</span></div>
+    <div style="padding:0 16px 10px"><div class="seg"><span class="on">Distance</span><span>Time</span><span>Ascent</span><span>Load</span></div></div>
+    <div class="box"><div class="readout num" style="margin-bottom:12px"><div><div class="v">${fmt(wk[11], 1)}</div><div class="l">km this week</div></div><div><div class="v" style="font-size:20px;color:var(--label2)">${fmt(wk[10], 1)}</div><div class="l">last week</div></div><div><div class="v" style="font-size:20px;color:var(--label2)">${fmt(ly[11], 1)}</div><div class="l">same week 2025</div></div></div>${vs}
+      <div style="display:flex;gap:16px;margin-top:8px"><span class="key"><i style="border-top-width:6px;width:10px;opacity:.42"></i>Week</span><span class="key"><i></i>Same week last year</span></div></div>
+    <div class="sect-h"><h2>Power curve</h2></div>
+    <div style="padding:0 16px 10px"><div class="seg"><span class="on">90 days</span><span>This year</span><span>All time</span></div></div>
+    <div class="box"><div style="display:flex;gap:16px;margin-bottom:10px"><span class="key"><i></i>Last 6 weeks</span><span class="key"><i class="dash"></i>Last 90 days</span></div>${powerCurveSVG([{ v: c90, dash: true }, { v: c6 }], w, 180, { ftp: FTP })}</div>
+    <div class="sect-h"><h2>Threshold power</h2></div>
+    <div class="box"><div class="readout num" style="margin-bottom:10px"><div><div class="v">${FTP} W</div><div class="l">set since 14 Oct</div></div><div><div class="v" style="font-size:20px;color:var(--label2)">272 W</div><div class="l">estimate from best 20 min</div></div></div>${ts}
+      <div style="display:flex;gap:16px;margin-top:8px"><span class="key"><i></i>Your threshold</span><span class="key"><i class="dash"></i>Estimate</span></div></div>
+    <div class="sect-h"><h2>Efficiency</h2></div>
+    <div class="box"><div style="font-size:13px;color:var(--label2);margin-bottom:10px;line-height:1.4">Weighted power per heartbeat on steady rides over 20 minutes. Compares output on similar efforts; it isn't a fitness score.</div>${es}</div>
+    <div class="sect-h"><h2>Records</h2><span>This year ${ic('chevD', 12, 'style="display:inline;vertical-align:-1px"')}</span></div>
+    <div class="ilist">${rec('Best 5 min power', `${Math.round(R.curve[5])} W`, 'Today · Box Hill loop', true)}${rec('Best 20 min power', `${Math.round(BEST90[7])} W`, '23 Aug · Box Hill loop')}${rec('Longest ride', '142.3 km', '19 Jul · London to Brighton')}${rec('Most ascent', '2,180 m', '6 Jun · Surrey Hills sportive')}${rec('Fastest 5 km run', '24:48', '30 Oct · Putney run')}</div>
+    <div class="sect-h"><h2>Load calendar</h2></div>
+    <div class="box">${cal}<div style="display:flex;justify-content:space-between;align-items:center;margin-top:12px;font-size:12px;color:var(--label2)"><span style="display:flex;gap:4px;align-items:center">Less ${[0, 30, 55, 80, 100].map(p => `<i style="width:11px;height:11px;border-radius:3px;background:${p ? `color-mix(in oklab, var(--z5) ${p}%, var(--fill2))` : 'var(--fill2)'}"></i>`).join('')} More</span><span style="display:flex;gap:5px;align-items:center"><i style="width:4px;height:4px;border-radius:50%;background:var(--label2)"></i>Load unavailable</span></div></div>
+    <div style="height:110px"></div>${tabBar('t')}`;
+  el.querySelector('.tabbar').style.position = 'absolute';
+}
+
+function renderSettings(el) {
+  const row = (icon, t, d, v, chev = true, extra = '') => `<div class="irow" style="--inset:58px"><span class="tile">${ic(icon, 18)}</span><div class="grow"><div class="t">${t}</div>${d ? `<div class="d">${d}</div>` : ''}</div>${v ? `<span class="v num">${v}</span>` : ''}${extra}${chev ? ic('chevR', 16, 'class="ic chev"') : ''}</div>`;
+  const cur = document.documentElement.dataset.accent;
+  el.innerHTML = `${statusBar(true)}<div style="position:absolute;inset:0;background:var(--scrim)"></div>
+    <div style="position:absolute;left:0;right:0;top:58px;bottom:0;background:var(--bg-grouped);border-radius:38px 38px 0 0;overflow:hidden;z-index:10">
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:14px 16px 6px"><span style="width:44px"></span><b style="font-size:17px;font-weight:600">Settings</b><button class="gbtn accent" aria-label="Done">${ic('check', 20)}</button></div>
+      <div class="ihead" style="margin-top:12px">Sources</div>
+      <div class="ilist">${row('watch', 'Garmin Connect', 'Synced 4 min ago · key expires in 23 days')}${row('heart', 'Apple Health', 'Workouts, routes, heart rate, power')}${row('doc', 'Import files', 'FIT files or a Garmin export (.zip)')}</div>
+      <div class="ihead">Athlete profile</div>
+      <div class="suggest"><div style="flex:1">Your best 20 minutes in the last 90 days suggests a threshold of <b class="num">272 W</b>.</div><button class="btn-s">Review</button></div>
+      <div class="ilist">${row('bolt', 'Threshold power', 'Since 14 Oct · 3 earlier values', `${FTP} W`)}${row('heart', 'Threshold heart rate', '', '171 bpm')}${row('person', 'Weight', '', '72.0 kg')}</div>
+      <div class="ihead">Sync and storage</div>
+      <div class="ilist">${row('sync', 'Deep scan', 'Weekly, last run 3 days ago', '', false)}${row('cloud', 'iCloud', '1,284 of 1,286 originals copied', '', true)}</div>
+      <div class="ihead">Display</div>
+      <div class="ilist">${row('ruler', 'Units', '', 'Metric')}<div class="irow" style="--inset:58px"><span class="tile">${ic('swatch', 18)}</span><div class="grow"><div class="t">Accent</div></div>
+        <div class="swatches" data-swatches><button data-v="cyan" style="--c:oklch(0.83 0.14 212)" aria-label="Electric Cyan"></button><button data-v="lime" style="--c:oklch(0.90 0.20 127)" aria-label="Neon Lime"></button><button data-v="cobalt" style="--c:oklch(0.52 0.20 266)" aria-label="Cobalt"></button></div></div>
+        ${row('eyeoff', 'Hidden activities', '', '3')}</div>
+    </div>${home()}`;
+  el.querySelectorAll('[data-swatches] button').forEach(b => b.addEventListener('click', () => setAccent(b.dataset.v)));
+}
+
+/* =========================================================
+   Board controls
+   ========================================================= */
+function syncControls() {
+  const r = document.documentElement.dataset;
+  document.querySelectorAll('[data-ctl="accent"] button').forEach(b => b.setAttribute('aria-pressed', b.dataset.v === r.accent));
+  document.querySelectorAll('[data-ctl="appearance"] button').forEach(b => b.setAttribute('aria-pressed', b.dataset.v === r.appearance));
+  document.querySelectorAll('[data-swatches] button').forEach(b => b.setAttribute('aria-pressed', b.dataset.v === r.accent));
+}
+function setAccent(v) { document.documentElement.dataset.accent = v; try { localStorage.setItem('sk-accent', v); } catch (e) {} syncControls(); }
+function setAppearance(v) {
+  const r = document.documentElement.dataset; r.appearance = v;
+  r.scheme = v === 'dark' || (v === 'auto' && matchMedia('(prefers-color-scheme: dark)').matches) ? 'dark' : 'light';
+  try { localStorage.setItem('sk-appearance', v); } catch (e) {} syncControls();
+}
+document.querySelectorAll('[data-ctl="accent"] button').forEach(b => b.addEventListener('click', () => setAccent(b.dataset.v)));
+document.querySelectorAll('[data-ctl="appearance"] button').forEach(b => b.addEventListener('click', () => setAppearance(b.dataset.v)));
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { if (document.documentElement.dataset.appearance === 'auto') setAppearance('auto'); });
+
+renderFeed(document.getElementById('s-feed'));
+renderFly(document.getElementById('s-fly'));
+renderAnalysis(document.getElementById('s-analysis'));
+renderIndoor(document.getElementById('s-indoor'));
+renderRoutes(document.getElementById('s-routes'));
+renderRoute(document.getElementById('s-route'));
+renderCompare(document.getElementById('s-compare'));
+renderTrends(document.getElementById('s-trends'));
+renderSettings(document.getElementById('s-settings'));
+syncControls();
+</script>
+</body>
+</html>
