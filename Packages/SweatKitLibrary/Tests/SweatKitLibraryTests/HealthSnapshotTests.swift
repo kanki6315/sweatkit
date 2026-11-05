@@ -1,4 +1,5 @@
 import Foundation
+import SweatKitAnalysis
 import SweatKitIdentity
 import SweatKitIngest
 import SweatKitLibrary
@@ -119,6 +120,68 @@ import Testing
         #expect(try await library.store.sourceRecord(health.identity)?.revisions.count == 2)
         try await library.importHealthSnapshot(health)
         #expect(try await library.store.sourceRecord(health.identity)?.revisions.count == 2)
+    }
+
+    @Test func thinnerRefreshKeepsOriginalAndRestoringAccessDoesNotDuplicate() async throws {
+        let library = try temporary.open()
+        let start = Date(timeIntervalSince1970: 1_700_000_000)
+        let rich = snapshot(RecordedActivity(sport: .running,
+            stated: .init(start: start, end: start.addingTimeInterval(60), timerTime: 60),
+            laps: [RecordedLap(start: start, end: start.addingTimeInterval(30))],
+            segments: [RecordedLap(start: start.addingTimeInterval(10), end: start.addingTimeInterval(20))],
+            stream: .init(samples: [NativeSample(timestamp: start, heartRate: 119)])))
+        try await library.importHealthSnapshot(rich)
+        let original = try #require(try await library.store.sourceRecord(rich.identity)?.currentRevision)
+        var thin = rich
+        thin.activity.stream.samples = []
+        try await library.importHealthSnapshot(thin)
+        #expect(try await library.store.original(original) != nil)
+        try await library.importHealthSnapshot(rich)
+        #expect(try await library.feed(limit: 10).activities.count == 1)
+        #expect(try await library.recordedActivity(for: rich.identity) == rich.activity)
+        #expect(try await library.store.sourceRecord(rich.identity)?.revisions.count == 2)
+    }
+
+    @Test func healthPauseIntervalsAndSplitsUseTimerRatherThanMovingSeconds() throws {
+        let start = Date(timeIntervalSince1970: 1_700_000_000)
+        // 1,201 elapsed seconds, a 30-second pause, and 2 m per active second.
+        // Cumulative distance at t=1200 is 2*(1200-30) = 2,340 m.
+        let intervals = (0..<1200).map { second in
+            HealthQuantityInterval(start: start.addingTimeInterval(Double(second)),
+                end: start.addingTimeInterval(Double(second + 1)),
+                value: (300..<330).contains(second) ? 0 : 2)
+        }
+        var points = HealthQuantityConversion.distance(intervals)
+        points += (0..<1201).map { second in
+            // A recorded stationary speed wins over distance-derived speed.
+            NativeSample(timestamp: start.addingTimeInterval(Double(second)),
+                speed: (600..<610).contains(second) ? 0 : 2,
+                heartRate: (300..<330).contains(second) ? 80 : 119)
+        }
+        let activity = RecordedActivity(sport: .walking,
+            stated: .init(start: start, end: start.addingTimeInterval(1201), timerTime: 1171),
+            timerEvents: [.init(kind: .stop, timestamp: start.addingTimeInterval(300)),
+                          .init(kind: .start, timestamp: start.addingTimeInterval(330))],
+            stream: .init(samples: points))
+        let stream = try #require(StreamNormaliser.analysisStream(from: activity))
+        let metrics = ActivityAnalysis.metrics(for: ActivityInput(sport: .walking,
+            recording: .stream(stream), activityDate: start))
+        #expect(metrics.time.elapsed.value == 1201)
+        #expect(metrics.time.timer.value == 1171)
+        #expect(metrics.time.moving.value == 1161)
+        let expectedHR = (1171.0 * 119.0 + 30.0 * 80.0) / 1201.0
+        let actualHR = try #require(metrics.heartRate.average.value)
+        #expect(abs(actualHR - expectedHR) < 0.000001)
+        #expect(metrics.distance.value == 2340)
+        let splits = try #require(metrics.splits.value)
+        // The kilometre boundaries are t=530 and t=1030; pause is in split 1.
+        #expect(splits.map(\.duration) == [500, 500, 171])
+        #expect(splits.allSatisfy { $0.averageHeartRate.value == 119 })
+        #expect(splits.map(\.distance) == [1000, 1000, 340])
+        #expect(splits[0].pace.value == 500)
+        #expect(splits[1].pace.value == 500)
+        #expect(abs(try #require(splits[2].pace.value) - 171 / 0.34) < 0.000001)
+        #expect(abs(try #require(FeedRules.averagePace(metrics).value) - 1161 / 2.34) < 0.000001)
     }
 
     @Test func checkpointKeepsPendingSnapshotsAcrossRestartAndRetry() throws {

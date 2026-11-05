@@ -145,6 +145,9 @@ public struct RecordedActivity: Hashable, Codable, Sendable {
     /// Empty when the original has no pause events.
     public var timerEvents: [TimerEvent]
     public var laps: [RecordedLap]
+    /// Source-defined periods of interest, separate from distance laps.
+    /// Optional so older stored recordings decode without migration.
+    public var segments: [RecordedLap]?
     public var stream: NativeStream
 
     public init(
@@ -154,6 +157,7 @@ public struct RecordedActivity: Hashable, Codable, Sendable {
         stated: StatedSummary = StatedSummary(),
         timerEvents: [TimerEvent] = [],
         laps: [RecordedLap] = [],
+        segments: [RecordedLap]? = nil,
         stream: NativeStream = NativeStream()
     ) {
         self.sport = sport
@@ -162,6 +166,7 @@ public struct RecordedActivity: Hashable, Codable, Sendable {
         self.stated = stated
         self.timerEvents = timerEvents
         self.laps = laps
+        self.segments = segments
         self.stream = stream
     }
 }

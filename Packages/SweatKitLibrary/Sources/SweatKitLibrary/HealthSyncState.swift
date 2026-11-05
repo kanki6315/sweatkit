@@ -8,6 +8,15 @@ public struct HealthSyncState: Codable, Sendable, Equatable {
     public var anchors: [String: Data] = [:]
     public var workouts: [UUID: DateInterval] = [:]
     public var pending: Set<UUID> = []
+    /// Independent of read authorization: adapter fixes need fresh snapshots,
+    /// not another permission prompt. Optional for existing checkpoint files.
+    public var snapshotAdapterVersion: Int?
+
+    public mutating func refreshSnapshots(forAdapterVersion version: Int) {
+        guard (snapshotAdapterVersion ?? 0) < version else { return }
+        pending.formUnion(workouts.keys)
+        snapshotAdapterVersion = version
+    }
 
     public init() {}
 
