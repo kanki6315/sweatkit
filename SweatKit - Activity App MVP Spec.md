@@ -489,7 +489,7 @@ Each metric has fixture files with expected results worked out independently und
 
 ## Repeated-route comparison
 
-The app groups activities that follow the same course into a route automatically, then lets any two efforts on it be compared point for point. No setup is needed: a commute or a regular loop becomes a route the second time it is done.
+The app groups activities that follow the same course into a route automatically, then lets any two efforts on it be compared point for point. No setup is needed: a commute or regular loop appears after five confirmed outings. By default, only the past two years are searched; All history is an explicit, remembered option. Uncertain matches do not count toward the minimum.
 
 Matching has two separate steps. Detection finds activities that plausibly share a course. Alignment then works out which point on one effort corresponds to which point on the route, and an activity joins a route only if alignment succeeds.
 
@@ -514,7 +514,7 @@ Detection is cheap and deliberately loose. Cell overlap ignores order, so it can
 | Ends | How close the mapping gets to each end of the reference line | The first mapped point is within 25 m of the start, and the last is within 25 m of the end |
 | Coverage | Share of the timed section's length that was mapped | At least 95%, with no unmapped stretch longer than 50 m |
 | Length ratio | Distance travelled between the two marks of the timed section, against the section's length | Within 3% |
-| Side offset | Average sideways distance from the reference line over any 200 m stretch, with its sign | No stretch more than 10 m to one side |
+| Side offset | Average sideways distance from the reference line over any 200 m stretch, with its sign | No stretch more than 10 m to one side, except localized drift as described below |
 
 Coverage and the length ratio are measured over the timed section, which is defined below, and not over the whole line. The ends rule already lets a full effort start up to 25 m late and stop up to 25 m early, so that slack is not counted against the effort a second time. This is what lets a start 20 m late join a route of any length. Riding before the first mark or on past the second does not count towards the length ratio.
 
@@ -525,10 +525,11 @@ Coverage and the length ratio are measured over the timed section, which is defi
 | Reject | Proximity is under 70%, or the ends or coverage fail |
 
 - Proximity alone is not confidence. A road 20 m away passes a 30 m test, so a consistent offset to one side is treated as the signature of a parallel course.
-- Where GPS accuracy cannot tell two courses apart, the app asks. It does not guess.
+- Localized drift can pass when the worst 200 m average offset is at most 18 m, no more than 15% of the timed distance exceeds a 10 m offset, proximity is at least 97%, coverage at least 99%, and the length ratio is within 2%. Sustained parallel tracks still require review.
+- Where GPS accuracy cannot tell two courses apart, the app offers optional review.
 - The ordered mapping handles places visited twice. On an out-and-back or a lapped circuit, the same spot maps to different route distances on each pass.
 - A reversed ride fails alignment, so it becomes a separate route. A climb and its descent are not comparable.
-- An activity with no match waits as a possible new route until a second one aligns with it.
+- An activity with no match waits as a possible new route until five outings are confirmed on it.
 
 **Cases the tests must cover**
 
@@ -541,7 +542,9 @@ Coverage and the length ratio are measured over the timed section, which is defi
 
 **Running and control**
 
-- Matching runs in the background after each import and over the whole library on first launch.
+- Matching runs in the background after imports, within the selected history window. Calculated geometry and alignments are cached locally; activity changes, route decisions, and algorithm upgrades invalidate the cache.
+- Routes are grouped by cached locality, with fixed geographic buckets when place names are unavailable and a separate virtual region. Names use locality, distance, and shape; explicit user names take precedence.
+- Reviews appear only for routes with five confirmed outings, collapsed below confirmed routes in each region and grouped by route. Review details show the outing date, the actual reason, and an overlaid track comparison. Leaving a review undecided does not block browsing.
 - Virtual rides match the same way, because Zwift's coordinates are consistent between rides.
 - The user can rename a route, merge two routes, remove an activity from a route and pick a different reference effort.
 - Every threshold here is a starting value to tune against real history.

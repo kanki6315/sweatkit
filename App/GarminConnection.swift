@@ -10,12 +10,14 @@ import SweatKitModel
 final class GarminConnection {
     private(set) var connected = false
     private(set) var running = false
+    private(set) var lastSyncSucceeded = false
     private(set) var lifetime: GarminKeyLifetime?
     private(set) var keyRefused = false
     var canSync: Bool { connected && !keyRefused && !running }
     private var credential: GarminCredential?
     private(set) var status = "Connect Garmin in Settings to sync your activities."
     private var engine: GarminSync?
+    private var backgroundWork: WorkoutBackgroundWork?
     private var task: Task<Void, Never>?
     private let library: ActivityLibrary
     private let bridge: PersistentGarminLibrary
@@ -65,15 +67,23 @@ final class GarminConnection {
         return false
     }
 
-    func sync(_ run: SyncRun = .routine) async {
+    func sync(_ run: SyncRun = .routine, continued: Bool = true) async {
         if !connected && !running { restoreCredential() }
         guard canSync, let engine else { return }
         running = true
         status = "Syncing Garmin: 0 added, 0 updated. You can keep browsing; completed work is saved."
-        task = Task {
+        lastSyncSucceeded = false
+        task = Task { [self] in
+            let background = WorkoutBackgroundWork(title: "Syncing Garmin workouts", continued: continued) { [weak self] in
+                self?.task?.cancel()
+            }
+            backgroundWork = background
+            defer { backgroundWork = nil }
             let report = await engine.run(run) { [weak self] progress in
                 await self?.showProgress(progress)
             }
+            lastSyncSucceeded = report.outcome == .completed && report.outstanding == 0
+            background.finish(success: lastSyncSucceeded)
             switch report.outcome {
             case .completed:
                 status = "Garmin sync finished. \(report.added.count) added, \(report.revised.count) updated."
@@ -97,16 +107,21 @@ final class GarminConnection {
             }
         }
         let runningTask = task
-        await withTaskCancellationHandler {
+        if continued {
             await runningTask?.value
-        } onCancel: {
-            runningTask?.cancel()
+        } else {
+            await withTaskCancellationHandler {
+                await runningTask?.value
+            } onCancel: {
+                runningTask?.cancel()
+            }
         }
         task = nil
         running = false
     }
 
     private func showProgress(_ progress: SyncProgress) {
+        backgroundWork?.update(completed: progress.added + progress.updated, total: progress.added + progress.updated + 1)
         status = "Syncing Garmin: \(progress.added) added, \(progress.updated) updated. You can keep browsing; completed work is saved."
     }
 

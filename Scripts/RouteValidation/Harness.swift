@@ -18,39 +18,26 @@ import SweatKitModel
             .task {
                 do {
                     let root = URL.documentsDirectory.appending(path: "RouteHarnessLibrary")
-                    if ProcessInfo.processInfo.arguments.contains("empty") || ProcessInfo.processInfo.arguments.contains("review") { try? FileManager.default.removeItem(at: root) }
+                    try? FileManager.default.removeItem(at: root)
+                    UserDefaults.standard.set(false, forKey: "routes.includeOlderHistory")
                     let library = try ActivityLibrary(root: root)
-                    try? FileManager.default.removeItem(at: root.appending(path: "route-decisions-v1.json"))
-                    if ProcessInfo.processInfo.arguments.contains("review") {
-                        for index in 0..<2 {
-                            let start = Date(timeIntervalSince1970: 1_800_000_000 + Double(index) * 86400)
-                            let samples = (0...100).map { second in
+                    if !ProcessInfo.processInfo.arguments.contains("empty") {
+                        let count = ProcessInfo.processInfo.arguments.contains("review") ? 6 : 5
+                        for index in 0..<count {
+                            let start = Date().addingTimeInterval(-Double(index + 1) * 86400)
+                            let offset = index == 5 ? -14.0 : 0
+                            let samples = (0...1000).map { second in
                                 NativeSample(timestamp: start.addingTimeInterval(Double(second)),
-                                    position: Coordinate(latitude: (5 + Double(index) * 14) / 111_195, longitude: (10 + Double(second) * 20) / 111_195),
-                                    distance: Double(second) * 20, speed: 20)
+                                    position: Coordinate(latitude: 42.34 + offset / 111_195, longitude: -71.12 + Double(second) * 2 / 82_200),
+                                    distance: Double(second) * 2, speed: 2)
                             }
-                            let activity = RecordedActivity(sport: .cycling, stated: StatedSummary(start: start, end: start.addingTimeInterval(100), timerTime: 100), stream: NativeStream(samples: samples))
-                            try await library.importHealthSnapshot(HealthSnapshot(workoutID: UUID(), activity: activity, sourceName: "Synthetic review fixture", sourceBundleIdentifier: "test.routes.review"))
+                            let activity = RecordedActivity(sport: .cycling, stated: StatedSummary(start: start, end: start.addingTimeInterval(1000), timerTime: 1000), stream: NativeStream(samples: samples))
+                            let snapshot = HealthSnapshot(workoutID: UUID(), activity: activity, sourceName: "Synthetic route fixture", sourceBundleIdentifier: "test.routes")
+                            try await library.importHealthSnapshot(snapshot)
+                            if let request = try await library.localityRequest(for: snapshot.identity) {
+                                try await library.setLocality("Brookline", for: request)
+                            }
                         }
-                    } else if !ProcessInfo.processInfo.arguments.contains("empty") {
-                        let url = Bundle.main.url(forResource: "outdoor-ride", withExtension: "fit")!
-                        let data = try Data(contentsOf: url)
-                        try await library.importFile(data)
-                        var recorded = try FITActivityDecoder.decode(data)
-                        let shift = 86400.0 * 7
-                        recorded.stated.start = recorded.stated.start?.addingTimeInterval(shift)
-                        recorded.stated.end = recorded.stated.end?.addingTimeInterval(shift)
-                        for i in recorded.stream.samples.indices { recorded.stream.samples[i].timestamp += shift }
-                        for i in recorded.timerEvents.indices { recorded.timerEvents[i].timestamp += shift }
-                        let start = recorded.stated.start!
-                        recorded.stated.end = recorded.stated.end.map { start.addingTimeInterval($0.timeIntervalSince(start) * 0.9) }
-                        recorded.stated.timerTime = recorded.stated.timerTime.map { $0 * 0.9 }
-                        for i in recorded.stream.samples.indices {
-                            recorded.stream.samples[i].timestamp = start.addingTimeInterval(recorded.stream.samples[i].timestamp.timeIntervalSince(start) * 0.9)
-                            recorded.stream.samples[i].speed = recorded.stream.samples[i].speed.map { $0 / 0.9 }
-                        }
-                        for i in recorded.timerEvents.indices { recorded.timerEvents[i].timestamp = start.addingTimeInterval(recorded.timerEvents[i].timestamp.timeIntervalSince(start) * 0.9) }
-                        try await library.importHealthSnapshot(HealthSnapshot(workoutID: UUID(uuidString: "11111111-1111-1111-1111-111111111111")!, activity: recorded, sourceName: "Fixture", sourceBundleIdentifier: "test.routes"))
                     }
                     if ProcessInfo.processInfo.arguments.contains("error") { try Data("invalid".utf8).write(to: root.appending(path: "route-decisions-v1.json")) }
                     await model.useFixtureLibrary(library)

@@ -32,9 +32,24 @@ final class LibraryModel {
     var recordBadges: [SourceIdentity: [TrendRecord]] = [:]
     var historyRefreshTask: Task<Void, Never>?
     var routeRefreshTask: Task<Void, Never>?
+    private var activationTask: Task<Void, Never>?
     private var importTask: Task<Void, Never>?
     private let localityResolver = ActivityLocalityResolver()
     var hasMore: Bool { cursor != nil }
+
+    /// Scene phase changes cancel SwiftUI tasks. This owner survives those changes.
+    func refreshOnActivation() {
+        guard activationTask == nil else { return }
+        activationTask = Task {
+            defer { activationTask = nil }
+            await open()
+            async let garminRefresh: Void? = garmin?.sync(continued: false)
+            async let healthRefresh: Void? = health?.sync(continued: false)
+            _ = await (garminRefresh, healthRefresh)
+            if !Task.isCancelled { await cloud?.sync() }
+            await reload()
+        }
+    }
 
     func open() async {
         guard library == nil else { return }
@@ -108,7 +123,11 @@ final class LibraryModel {
         isImporting = true
         outcomes = []
         importProgress = nil
-        importTask = Task {
+        importTask = Task { [self] in
+            let background = WorkoutBackgroundWork(title: "Importing workouts", continued: true) { [weak self] in
+                self?.importTask?.cancel()
+            }
+            defer { background.finish(success: !Task.isCancelled && outcomes.allSatisfy { $0.failure == nil }) }
             let scoped = urls.filter { $0.startAccessingSecurityScopedResource() }
             defer {
                 scoped.forEach { $0.stopAccessingSecurityScopedResource() }
@@ -116,7 +135,10 @@ final class LibraryModel {
                 importTask = nil
             }
             outcomes = await library.importFiles(urls.map(ImportFile.init(url:))) { [self] progress in
-                Task { @MainActor in self.importProgress = progress }
+                Task { @MainActor in
+                    self.importProgress = progress
+                    background.update(completed: progress.completed, total: progress.total)
+                }
             }
             await reload()
         }

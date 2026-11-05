@@ -41,14 +41,10 @@ struct RootView: View {
         .tint((AppTheme(rawValue: accent) ?? .cyan).color)
         .task(id: scenePhase) {
             if scenePhase == .active {
-                await library.open()
-                async let garminRefresh: Void? = library.garmin?.sync()
-                async let healthRefresh: Void? = library.health?.sync()
-                _ = await (garminRefresh, healthRefresh)
-                await library.cloud?.sync()
-                await library.reload()
+                library.refreshOnActivation()
             } else if scenePhase == .background {
                 BackgroundRefresh.schedule()
+                BackgroundRefresh.scheduleProcessing()
             }
         }
         .sheet(isPresented: $showsSettings) {
