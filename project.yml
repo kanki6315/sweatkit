@@ -33,6 +33,10 @@ packages:
     path: Packages/SweatKitTimeline
   SweatKitPalette:
     path: Packages/SweatKitPalette
+  SweatKitDetail:
+    path: Packages/SweatKitDetail
+  SweatKitSync:
+    path: Packages/SweatKitSync
 targets:
   SweatKit:
     type: application
@@ -60,6 +64,8 @@ targets:
       - package: SweatKitTrackCleanup
       - package: SweatKitTimeline
       - package: SweatKitPalette
+      - package: SweatKitDetail
+      - package: SweatKitSync
 schemes:
   SweatKit:
     build:

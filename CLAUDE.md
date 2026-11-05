@@ -20,6 +20,8 @@ A native iOS app for viewing one person's own rides and walks. Local-first, no s
 | `Packages/SweatKitTrackCleanup` | Turns a stream's positions into a cleaned track for route matching and a simplified line for the flyover, each point keeping its sample index. | Model |
 | `Packages/SweatKitFlyover` | The MapKit flyover view and its camera and drawing logic. Takes an already-prepared route. | Model |
 | `Packages/SweatKitTimeline` | The detail screen's scrubbing timeline and stats panel. Takes already-prepared series and the same scrub binding as the flyover. | Model |
+| `Packages/SweatKitDetail` | Prepares one activity's stream for the detail screen: the coloured route, the timeline's series, stats at the cursor and over a range. A layer above the leaf packages. | Model, Analysis, TrackCleanup, Flyover, Timeline |
+| `Packages/SweatKitSync` | Garmin reconciliation: quick sync, deep scan, backfill and deletion inference, behind interfaces for Garmin and for the library. No storage of its own. | Model, Garmin |
 | `Packages/SweatKitPalette` | The colours of the data: power, heart-rate, pace and gradient ramps in band order, and the map line's casing. `DESIGN.md` records the values and how they were measured. | Nothing |
 | `Spikes/` | The M0 probe tool and the device harnesses for the flyover and the timeline, with gate results in `RESULTS.md` and device checklists in each `README.md`. Throwaway: nothing depends on them. | |
 | `Fixtures/` | Real FIT files shared by every package's tests | |
@@ -41,7 +43,8 @@ xcodebuild -project SweatKit.xcodeproj -scheme SweatKit \
 
 ## Rules
 
-- Packages other than Model never depend on each other. Anything two of them need goes in Model.
+- Leaf packages depend only on Model and never on each other. Anything two of them need goes in Model.
+- Two kinds of package sit above the leaves and may depend on them: layers that join several, which today is `SweatKitDetail`, and packages built on one specific leaf, which today is `SweatKitSync` on `SweatKitGarmin`. The app depends on everything. Do not add another layer without saying why a leaf will not do.
 - Model is the shared contract. Change it only by adding to it, and say so in the summary of the work, because other packages are built against it in parallel.
 - Analysis, Route Matching and Identity are pure Swift: no interface, network, storage or FIT SDK code.
 - Tests use Swift Testing. Fixtures come from `Fixtures` in `SweatKitTestSupport`; see `Fixtures/README.md` for what each file holds and how to add one.
