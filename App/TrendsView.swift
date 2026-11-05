@@ -99,7 +99,7 @@ struct TrendsView: View {
         let requestedRevision = model.trendsRevision
         let options = TrendsOptions(sport: sport, dateWindow: dateWindow, setting: setting,
             measure: measure, period: period, comparison: comparison, recordWindow: recordWindow)
-        let result = await Task.detached { TrendsPresentation.make(history, options: options) }.value
+        let result = await model.trendsPresentationCache.presentation(history, options: options, store: model.library?.store)
         guard !Task.isCancelled, requestedConfiguration == configuration,
               requestedRevision == model.trendsRevision else { return }
         presentation = result
@@ -454,58 +454,4 @@ private struct TrendsSelection: Identifiable, Hashable {
     var title: String
     var activities: [ActivityRecord]
     var id: String { title }
-}
-private struct TrendsOptions: Sendable {
-    var sport: String; var dateWindow: String; var setting: String
-    var measure: TrendMeasure; var period: TrendPeriod; var comparison: String; var recordWindow: String
-}
-private struct TrendsPresentation: Sendable {
-    var rows: [TrendActivity] = []
-    var buckets: [TrendBucket] = []
-    var days: [TrendBucket] = []
-    var curve: [PowerCurvePoint] = []
-    var recentCurve: [PowerCurvePoint] = []
-    var thresholds: [TrendPoint] = []
-    var setThresholds: [TrendPoint] = []
-    var efficiency: [TrendPoint] = []
-    var regression: [TrendPoint] = []
-    var records: [TrendRecord] = []
-    var estimate: Double?
-    var currentThreshold: Double?
-    var staleCount = 0
-    static func make(_ history: TrendsHistory, options: TrendsOptions, now: Date = Date(), calendar: Calendar = .current) -> Self {
-        let year = calendar.dateInterval(of: .year, for: now)!.start
-        let end = now.addingTimeInterval(0.001)
-        let sports: [String: Sport] = ["Rides": .cycling, "Walks": .walking, "Runs": .running, "Hikes": .hiking]
-        let all = history.matching(FeedFilter(sports: sports[options.sport].map { [$0] },
-            setting: options.setting == "All settings" ? nil : options.setting == "Indoor" ? .indoor : .outdoor))
-        let first = all.map { $0.activity.start }.min() ?? year
-        let start: Date
-        switch options.dateWindow {
-        case "Last 6 weeks": start = calendar.date(byAdding: .day, value: -42, to: now)!
-        case "Last 90 days": start = calendar.date(byAdding: .day, value: -90, to: now)!
-        case "This year": start = year
-        case "All time": start = min(first, now)
-        default: start = calendar.date(byAdding: .year, value: -1, to: now)!
-        }
-        var result = Self()
-        result.rows = all.filter { $0.activity.start >= start && $0.activity.start < end }
-        result.staleCount = result.rows.filter(\.isStale).count
-        result.buckets = TrendsAggregation.volume(all, range: start..<end, period: options.period, measure: options.measure, calendar: calendar)
-        let comparisonStart = options.comparison == "All time" ? first : options.comparison == "This year" ? year : calendar.date(byAdding: .day, value: -90, to: now)!
-        result.curve = TrendsAggregation.curve(result.rows.filter { $0.activity.start >= comparisonStart })
-        let sixWeeks = calendar.date(byAdding: .day, value: -42, to: now)!
-        result.recentCurve = TrendsAggregation.curve(result.rows.filter { $0.activity.start >= sixWeeks })
-        result.thresholds = TrendsAggregation.thresholds(all, range: start..<end, calendar: calendar)
-        result.currentThreshold = history.profile.thresholdPower(on: now)
-        result.estimate = TrendsAggregation.estimate(result.rows, on: now, calendar: calendar)
-        result.setThresholds = ([start] + history.profile.thresholdPowerHistory.map(\.effectiveFrom).filter { $0 > start && $0 < end } + [now]).sorted().compactMap { date in
-            history.profile.thresholdPower(on: date).map { TrendPoint(date: date, value: $0, activity: nil) }
-        }
-        result.efficiency = TrendsAggregation.efficiency(result.rows)
-        result.regression = TrendsAggregation.regression(result.efficiency)
-        result.records = TrendsAggregation.records(result.rows.filter { options.recordWindow == "All time" || $0.activity.start >= year })
-        result.days = TrendsAggregation.dailyLoad(result.rows, range: start..<end, calendar: calendar)
-        return result
-    }
 }

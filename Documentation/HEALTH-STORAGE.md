@@ -20,3 +20,20 @@ The manifest is committed before durable source/profile metadata changes. A gene
 The legacy mixed database migration first copies SQLite components into the excluded directory. A final marker distinguishes a complete copy from an interrupted one. The old files are removed only after opening the copied database and committing the non-Health recovery manifest. Legacy Health snapshots and matching candidates are moved into their excluded locations. This cannot remove data from backups made by older versions.
 
 `BackupIsolationTests` verifies a restore with only eligible files, all non-Health revisions and the profile, preserved title/visibility decisions, fallback from an unavailable Health primary, later reattachment of Health, migration of the old layout, interrupted-generation replay, exclusion attributes and rejection of corrupt manifests. These are filesystem/host tests, not an actual device-backup or iCloud restore certification. CloudKit replication remains M4 work.
+
+## Persistent trend caches
+
+`LocalMetadata/TrendsCache/` holds one compact history snapshot and at most twelve
+chart presentations. It inherits LocalMetadata's backup exclusion and is never
+part of cloud recovery. Files are atomic, disposable JSON payloads; missing or
+undecodable payloads are rebuilt. History keys include the pipeline and cache
+schema versions. Presentation keys include the history snapshot, filters,
+calendar/timezone, schema version, and minute of calculation, preserving the
+existing one-minute freshness policy for rolling date windows.
+
+Store input mutations remove this directory before changing metadata. A new
+persistent generation prevents in-flight calculations from writing old results
+back after an edit or deletion. Recovery replay also clears the cache. Per-ride
+power-curve writes do not invalidate it, because they are derived cache outputs.
+The full history snapshot remains reusable across restarts until input data or
+algorithm versions change; chart presentations remain subject to time expiry.

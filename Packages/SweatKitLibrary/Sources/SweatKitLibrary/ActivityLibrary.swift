@@ -44,6 +44,9 @@ public actor ActivityLibrary {
     /// The versions this library treats as current.
     public nonisolated let versions: PipelineVersions
 
+    var cachedTrendsHistory: (revision: UInt64, history: TrendsHistory)?
+    var trendsHistoryTask: (revision: UInt64, token: UUID, task: Task<TrendsHistory, Error>)?
+
     /// The kind of the derived result that holds an activity's
     /// `ActivityMetrics`.
     public static let metricsKind = "metrics"

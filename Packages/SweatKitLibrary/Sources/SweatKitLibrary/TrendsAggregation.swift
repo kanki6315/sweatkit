@@ -3,19 +3,19 @@ import SweatKitAnalysis
 import SweatKitModel
 import SweatKitStore
 
-public enum TrendMeasure: String, CaseIterable, Sendable { case distance = "Distance", time = "Time", ascent = "Ascent", load = "Load" }
-public enum TrendPeriod: String, CaseIterable, Sendable {
+public enum TrendMeasure: String, Codable, CaseIterable, Sendable { case distance = "Distance", time = "Time", ascent = "Ascent", load = "Load" }
+public enum TrendPeriod: String, Codable, CaseIterable, Sendable {
     case week = "Weekly", month = "Monthly", year = "Yearly"
     public var component: Calendar.Component { switch self { case .week: .weekOfYear; case .month: .month; case .year: .year } }
 }
-public struct TrendTotal: Sendable {
+public struct TrendTotal: Codable, Sendable {
     public var known: Double = 0
     public var missing: Int = 0
     public var count: Int = 0
     public init() {}
     public var complete: Double? { missing == 0 ? known : nil }
 }
-public struct TrendBucket: Identifiable, Sendable {
+public struct TrendBucket: Codable, Identifiable, Sendable {
     public var start: Date
     public var end: Date
     public var total: TrendTotal
@@ -26,7 +26,7 @@ public struct TrendBucket: Identifiable, Sendable {
         self.start = start; self.end = end; self.total = total; self.previous = previous; self.lastYear = lastYear
     }
 }
-public struct TrendRecord: Identifiable, Sendable {
+public struct TrendRecord: Codable, Identifiable, Sendable {
     public var key: String
     public var title: String
     public var value: Double
@@ -34,7 +34,7 @@ public struct TrendRecord: Identifiable, Sendable {
     public var activity: ActivityRecord
     public var id: String { key }
 }
-public struct TrendPoint: Identifiable, Sendable {
+public struct TrendPoint: Codable, Identifiable, Sendable {
     public var date: Date
     public var value: Double
     public var activity: ActivityRecord?
@@ -109,26 +109,51 @@ public enum TrendsAggregation {
         return result
     }
     public static func curve(_ rows: [TrendActivity]) -> [PowerCurvePoint] {
-        TrendsHistory.durations.map { duration in
-            let best = rows.filter { !$0.isStale }.flatMap(\.curve).filter { $0.duration == duration }.compactMap { $0.power.value }.max()
-            return PowerCurvePoint(duration: duration, power: best.map(Metric.available) ?? .unavailable(.noValidWindow))
+        var best: [Int: Double] = [:]
+        for row in rows where !row.isStale {
+            for point in row.curve {
+                if let value = point.power.value { best[point.duration] = max(best[point.duration] ?? value, value) }
+            }
+        }
+        return TrendsHistory.durations.map { duration in
+            PowerCurvePoint(duration: duration, power: best[duration].map(Metric.available) ?? .unavailable(.noValidWindow))
         }
     }
+
     public static func estimate(_ rows: [TrendActivity], on date: Date, calendar: Calendar = .current) -> Double? {
         guard let start = calendar.date(byAdding: .day, value: -90, to: date) else { return nil }
         return rows.filter { !$0.isStale && $0.activity.start >= start && $0.activity.start <= date }
             .flatMap(\.curve).filter { $0.duration == 1200 }.compactMap { $0.power.value }.max().map { $0 * 0.95 }
     }
     public static func thresholds(_ rows: [TrendActivity], range: Range<Date>, calendar: Calendar = .current) -> [TrendPoint] {
+        // Sliding maximum: visit each ride once instead of scanning all history
+        // for every displayed day. Calendar arithmetic preserves DST boundaries.
+        let samples = rows.filter { !$0.isStale }.flatMap { row in
+            row.curve.filter { $0.duration == 1200 }.compactMap { point in
+                point.power.value.map { (date: row.activity.start, power: $0) }
+            }
+        }.sorted { $0.date < $1.date }
+        var queue: [Int] = []
+        var head = 0
+        var nextSample = 0
         var date = range.lowerBound
         var result: [TrendPoint] = []
         while date < range.upperBound {
-            if let value = estimate(rows, on: date, calendar: calendar) { result.append(TrendPoint(date: date, value: value)) }
+            guard let start = calendar.date(byAdding: .day, value: -90, to: date) else { break }
+            while nextSample < samples.count && samples[nextSample].date <= date {
+                while queue.count > head, let last = queue.last,
+                      samples[last].power <= samples[nextSample].power { queue.removeLast() }
+                queue.append(nextSample)
+                nextSample += 1
+            }
+            while head < queue.count && samples[queue[head]].date < start { head += 1 }
+            if head < queue.count { result.append(TrendPoint(date: date, value: samples[queue[head]].power * 0.95)) }
             guard let next = calendar.date(byAdding: .day, value: 1, to: date), next > date else { break }
             date = next
         }
         return result
     }
+
     public static func efficiency(_ rows: [TrendActivity]) -> [TrendPoint] {
         rows.compactMap { row in
             guard !row.isStale, row.activity.sport == .cycling, let metrics = row.metrics,
