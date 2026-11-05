@@ -13,7 +13,7 @@ npm run check
 npm run deploy
 ```
 
-Wrangler prompts for Cloudflare authentication when necessary. For Cloudflare Workers Git builds, set the root directory to `Website`, leave the build command empty, and use `npm run deploy` as the deploy command.
+Wrangler prompts for Cloudflare authentication when necessary. For Cloudflare Workers Git builds, set the root directory to `website`, leave the build command empty, and use `npm run deploy` as the deploy command.
 
 Add your full hostname in Cloudflare → Workers & Pages → sweatkit-site → Settings → Domains & Routes → Custom Domain. The hostname was supplied as `sweatkit.arjunakankipati`; no domain suffix is assumed or bound in configuration.
 
