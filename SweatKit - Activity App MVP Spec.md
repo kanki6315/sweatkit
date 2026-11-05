@@ -690,7 +690,7 @@ The flyover gates ran on the iPhone 18 Pro Max. They call for three representati
 | Question | Passes when | If it fails | Result |
 | --- | --- | --- | --- |
 | Does the Personal API return the original file with per-second power, heart rate and GPS? | A ride from the Garmin computer downloads with all three channels intact | File import becomes the main path for rides; the API is used for listing and summaries | Passed. The download is the original file, byte for byte, with every channel. |
-| How deep is the history, and what are the rate limits? | Full history lists and downloads, or the limits are measured and written down | Backfill from a Garmin data export; throttle sync to the measured limit | Passed. History listed back to 7 September 2019, the earliest activity Garmin returned, and that file downloaded. No limit was signalled at 11 requests 3 seconds apart, so the real limit is still unknown and sync stays paced. |
+| How deep is the history, and what are the rate limits? | Full history lists and downloads, or the limits are measured and written down | Backfill from a Garmin data export; throttle sync to the measured limit | Passed. History listed back to 7 September 2019, the account's first activity, and that file downloaded. No limit was signalled at 11 requests 3 seconds apart, so the real limit is still unknown and sync stays paced. |
 | Do Zwift rides appear in the Personal API? | A Zwift ride is listed and its file downloads | Zwift rides come from file import or Apple Health | Passed. Zwift rides are listed as virtual rides and download as the original file. |
 | Does a coloured route sit correctly on realistic 3D terrain? | The line follows the ground on the hilly and urban routes, with no floating or buried stretches | Use a pitched camera over satellite imagery without realistic elevation. If that reads poorly, evaluate another map renderer before M2 starts. | Passed by eye on the rolling ride and beside buildings. Not yet checked on steep ground. |
 | Does the coloured route hold frame rate while scrubbing? | 60 frames per second on the long ride, with imagery loaded | One line per zone band and stronger simplification, then fewer drawn vertices until it holds | Passed. 60 frames per second on the ride and on the 10-hour walk at 2 m simplification, up to 1,548 drawn vertices. A 5-hour ride and dimming ahead of the marker are not yet measured. |
@@ -723,7 +723,6 @@ The two largest risks were what Garmin's Personal tier really returns and how we
 
 - [ ] What do Garmin's Personal API terms, shown when a key is created, say about storage, including iCloud, and about AI processing?
 - [ ] How much walking and running detail matters compared with cycling?
-- [ ] Is 7 September 2019 the first activity on the Garmin account? It is the earliest one the API returned.
 - [ ] Does Garmin's last-update date on an activity move when the activity is edited? If it does, a deep scan can use it to catch a changed file whose summary is unchanged.
 
 Settled by the assumptions and removed from this list: personal use only, iPhone first, iOS 26, metric units by default, iCloud storage through CloudKit, the iPhone 18 Pro Max as the reference device, and SweatKit as the app name.
