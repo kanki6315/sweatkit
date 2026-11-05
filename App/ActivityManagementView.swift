@@ -7,6 +7,7 @@ import SweatKitStore
 struct ActivityManagementView: View {
     let activity: ActivityRecord
     let library: ActivityLibrary
+    var deleteActivity: (@MainActor (SourceIdentity) async throws -> Void)? = nil
     @Environment(\.dismiss) private var dismiss
     @State private var confirmsDeletion = false
     @State private var offers: [AlternativeOffer] = []
@@ -64,7 +65,8 @@ struct ActivityManagementView: View {
                     let legacy = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
                         .appendingPathComponent("SweatKitThumbnails")
                     if FileManager.default.fileExists(atPath: legacy.path) { try FileManager.default.removeItem(at: legacy) }
-                    try await library.permanentlyDelete(id)
+                    if let deleteActivity { try await deleteActivity(id) }
+                    else { try await library.permanentlyDelete(id) }
                 }
             }
             Button("Cancel", role: .cancel) { }

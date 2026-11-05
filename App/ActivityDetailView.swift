@@ -12,6 +12,8 @@ import SweatKitTimeline
 struct ActivityDetailView: View {
     let activity: ActivityRecord
     let library: ActivityLibrary?
+    var deleteActivity: (@MainActor (SourceIdentity) async throws -> Void)? = nil
+    @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
     @State private var alternatives: [AlternativeOffer] = []
     @State private var presentation: DetailAnalysisPresentation?
@@ -51,7 +53,7 @@ struct ActivityDetailView: View {
                         Text(record.sport.hasFullSupport ? "This recording has no visible per-second samples. Charts, zones and a route cannot be shown. If you expected samples from Apple Health, review read access in Health settings and refresh." : "This sport is shown as a summary. Full detail is available for cycling, walking, running and hiking.")
                     }
                     if let library {
-                        NavigationLink("Activity info and sources") { ActivityManagementView(activity: record, library: library) }
+                        NavigationLink("Activity info and sources") { ActivityManagementView(activity: record, library: library, deleteActivity: deleteActivity) }
                     }
                 }.monospacedDigit()
             } else if let prepared {
@@ -64,7 +66,7 @@ struct ActivityDetailView: View {
                             }
                             if let library {
                                 NavigationLink("Activity info and sources") {
-                                    ActivityManagementView(activity: record, library: library)
+                                    ActivityManagementView(activity: record, library: library, deleteActivity: deleteActivity)
                                 }
                             }
                             Picker("Overlay", selection: $overlay) {
@@ -161,7 +163,7 @@ struct ActivityDetailView: View {
                 VStack(spacing: 8) {
                     if !alternatives.isEmpty, let library {
                         NavigationLink {
-                            ActivityManagementView(activity: record, library: library)
+                            ActivityManagementView(activity: record, library: library, deleteActivity: deleteActivity)
                         } label: {
                             Label("Another recording has additional data. Review sources", systemImage: "square.stack")
                                 .font(.subheadline)
@@ -251,7 +253,12 @@ struct ActivityDetailView: View {
         playing = false
         summaryOnly = false
         do {
-            current = try await library.activity(id)
+            guard let latest = try await library.activity(id), !latest.isHidden else {
+                current = nil
+                dismiss()
+                return
+            }
+            current = latest
             async let stream = library.analysisStream(for: id)
             async let recorded = library.recordedActivity(for: id)
             async let profile = library.profile()

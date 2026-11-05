@@ -40,6 +40,7 @@ final class LibraryModel {
             library = opened
             garmin = GarminConnection(library: opened, root: root)
             health = HealthConnection(library: opened, root: root)
+            await garmin?.recoverDeletionCleanup()
             await reload()
         } catch { self.error = error.localizedDescription }
     }
@@ -126,6 +127,13 @@ final class LibraryModel {
         localityResolver.enqueue(activities.compactMap(\.id), library: library) { [weak self] in
             await self?.reload()
         }
+    }
+
+    func permanentlyDelete(_ id: SourceIdentity) async throws {
+        guard let library else { throw LibraryError.unknownActivity(id) }
+        if let garmin { try await garmin.permanentlyDelete(id) }
+        else { try await library.permanentlyDelete(id) }
+        await reload()
     }
 
     func cancelImport() { importTask?.cancel() }

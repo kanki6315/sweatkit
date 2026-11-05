@@ -65,7 +65,7 @@ struct ActivityFeedView: View {
                 Section {
                     ForEach(activities(in: week), id: \.id) { activity in
                         NavigationLink {
-                            ActivityDetailView(activity: activity, library: model.library)
+                            ActivityDetailView(activity: activity, library: model.library, deleteActivity: model.permanentlyDelete)
                         } label: {
                             ActivityFeedRow(activity: activity, units: model.units, library: model.library, revision: model.revisions[activity.primary], removedAtSource: activity.members.contains { model.removedSources.contains($0) }, stale: model.staleIDs.contains(activity.id ?? activity.primary))
                         }

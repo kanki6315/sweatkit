@@ -4,6 +4,7 @@ import Security
 import SweatKitGarmin
 import SweatKitLibrary
 import SweatKitSync
+import SweatKitModel
 
 @MainActor @Observable
 final class GarminConnection {
@@ -101,6 +102,15 @@ final class GarminConnection {
         }
         task = nil
         running = false
+    }
+
+    func recoverDeletionCleanup() async {
+        do { try await bridge.pruneDeletedSummaries() }
+        catch { status = "Deleted recordings remain deleted, but cached Garmin summaries could not be cleared. Check storage and reopen SweatKit to retry." }
+    }
+
+    func permanentlyDelete(_ id: SourceIdentity) async throws {
+        try await bridge.permanentlyDelete(id)
     }
 
     func pause() { task?.cancel() }
