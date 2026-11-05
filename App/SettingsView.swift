@@ -1,6 +1,8 @@
 import SwiftUI
 import SweatKitModel
 import SweatKitAnalysis
+import SweatKitLibrary
+import SweatKitStore
 import SweatKitSync
 import UniformTypeIdentifiers
 
@@ -17,6 +19,9 @@ struct SettingsView: View {
     @State private var saving = false
     @State private var error: String?
     @State private var status: String?
+    @State private var thresholdEstimate: Double?
+    @State private var estimateError: String?
+    @State private var showsThresholdReview = false
 
     var body: some View {
         NavigationStack {
@@ -33,18 +38,27 @@ struct SettingsView: View {
                     }.disabled(model.library == nil || model.isImporting)
                 }
                 Section("Athlete profile") {
-                    NavigationLink { Form { athleteSettings; profileSave }.navigationTitle("Athlete profile") } label: {
-                        SettingsSummaryRow(title: "Thresholds and weight", symbol: "person", detail: "Heart rate, power history and weight")
+                    if let estimate = thresholdEstimate, estimate.rounded() > (profile.thresholdPower(on: .now) ?? 0) {
+                        thresholdSuggestion(estimate)
+                            .listRowBackground(Color.accentColor.opacity(0.12))
                     }
-                    NavigationLink { Form { zoneSettings(power: true); profileSave }.navigationTitle("Power zones") } label: {
-                        SettingsSummaryRow(title: "Power zones", symbol: "bolt.fill", detail: profile.powerZoneBounds == nil ? "Automatic · personal threshold or starter zones" : "Custom boundaries")
+                    if let estimateError { Text(estimateError).font(.footnote).foregroundStyle(.secondary) }
+                    NavigationLink { Form { thresholdHistory; zoneSettings(power: true); profileSave }.navigationTitle("Threshold power") } label: {
+                        profileRow("Threshold power", symbol: "bolt.fill", value: profile.thresholdPower(on: .now).map { "\(Int($0)) W" } ?? "Not set", detail: thresholdHistorySummary)
                     }
-                    NavigationLink { Form { zoneSettings(power: false); profileSave }.navigationTitle("Heart-rate zones") } label: {
-                        SettingsSummaryRow(title: "Heart-rate zones", symbol: "heart", detail: profile.heartRateZoneBounds == nil ? "Automatic · personal threshold or starter zones" : "Custom boundaries")
+                    NavigationLink { Form { athleteSettings; zoneSettings(power: false); profileSave }.navigationTitle("Heart rate and weight") } label: {
+                        profileRow("Threshold heart rate", symbol: "heart.fill", value: profile.thresholdHeartRate.map { "\(Int($0)) bpm" } ?? "Not set", detail: profile.statedThresholdHeartRate == nil && profile.maxHeartRate != nil ? "Estimated from maximum heart rate" : nil)
                     }
+                    NavigationLink { Form { athleteSettings; zoneSettings(power: false); profileSave }.navigationTitle("Heart rate and weight") } label: {
+                        profileRow("Weight", symbol: "person", value: profile.weight.map { String(format: "%.1f kg", $0) } ?? "Not set")
+                    }
+
                 }
                 if let library = model.library {
                     Section("Sync and storage") {
+                        NavigationLink { Form { deepScanSettings }.navigationTitle("Deep scan") } label: {
+                            SettingsSummaryRow(title: "Deep scan", symbol: "arrow.trianglehead.2.clockwise.rotate.90", detail: "Weekly history checks · full reconciliation on demand")
+                        }
                         if let cloud = model.cloud {
                             NavigationLink { CloudSettingsView(cloud: cloud) } label: {
                                 SettingsSummaryRow(title: "iCloud", symbol: "icloud", detail: cloud.status)
@@ -73,9 +87,17 @@ struct SettingsView: View {
             .task {
                 do {
                     await model.open()
-                    if let library = model.library { profile = try await library.profile(); loaded = true }
+                    if let library = model.library {
+                        profile = try await library.profile(); loaded = true
+                        await loadThresholdEstimate()
+                    }
                     else { error = model.error }
                 } catch { self.error = error.localizedDescription }
+            }
+        }
+        .sheet(isPresented: $showsThresholdReview) {
+            ThresholdSuggestionReview(profile: profile, estimate: thresholdEstimate ?? 0, saving: $saving, error: $error) { watts, date in
+                await applyThresholdSuggestion(watts, effectiveFrom: date)
             }
         }
         .tint((AppTheme(rawValue: accent) ?? .cyan).color)
@@ -167,6 +189,9 @@ struct SettingsView: View {
         } header: { Text("Athlete profile") } footer: {
             Text("Leave unknown values blank. Without a threshold heart rate, zones use 90% of your maximum heart rate when set. Starter zones apply when neither is known.")
         }
+    }
+
+    private var thresholdHistory: some View {
         Section {
             ForEach(profile.thresholdPowerHistory.indices, id: \.self) { index in
                 VStack(alignment: .leading) {
@@ -183,6 +208,73 @@ struct SettingsView: View {
             }
         } header: { Text("Threshold power history") } footer: {
             Text("Each value applies from its date until the next entry. Corrections recalculate the affected activities. Swipe an entry to delete it.")
+        }
+    }
+
+    private var thresholdHistorySummary: String {
+        let entries = profile.thresholdPowerHistory.filter { $0.effectiveFrom <= Date() }.sorted { $0.effectiveFrom < $1.effectiveFrom }
+        guard let latest = entries.last else { return "Set a value or review an estimate from your rides" }
+        return "Since \(latest.effectiveFrom.formatted(.dateTime.day().month(.abbreviated))) · \(max(0, entries.count - 1)) earlier values"
+    }
+
+    private func profileRow(_ title: String, symbol: String, value: String, detail: String? = nil) -> some View {
+        ViewThatFits(in: .horizontal) {
+            HStack {
+                SettingsSummaryRow(title: title, symbol: symbol, detail: detail)
+                Spacer(minLength: 12)
+                Text(value).foregroundStyle(.secondary).monospacedDigit().fixedSize()
+            }
+            VStack(alignment: .leading, spacing: 4) {
+                SettingsSummaryRow(title: title, symbol: symbol, detail: detail)
+                Text(value).foregroundStyle(.secondary).monospacedDigit()
+            }
+        }
+    }
+
+    private func thresholdSuggestion(_ estimate: Double) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Your best 20 minutes in the last 90 days suggests a threshold of **\(Int(estimate.rounded())) W**.")
+                .fixedSize(horizontal: false, vertical: true)
+            Button("Review") {
+                showsThresholdReview = true
+            }.buttonStyle(.borderedProminent)
+        }.padding(.vertical, 8)
+    }
+
+    private func loadThresholdEstimate() async {
+        guard let library = model.library else { return }
+        do {
+            let history = try await library.trendsHistory()
+            thresholdEstimate = await Task.detached(priority: .utility) {
+                TrendsAggregation.estimate(history.matching(FeedFilter(sports: [.cycling])), on: Date())
+            }.value
+            estimateError = nil
+        } catch { estimateError = "Threshold estimate could not load. Your saved profile is unchanged." }
+    }
+
+    private func applyThresholdSuggestion(_ watts: Double, effectiveFrom date: Date) async {
+        guard watts.isFinite, watts > 0 else { return }
+        let previous = profile
+        let day = Calendar.current.startOfDay(for: date)
+        profile.thresholdPowerHistory.removeAll { Calendar.current.isDate($0.effectiveFrom, inSameDayAs: day) }
+        profile.thresholdPowerHistory.append(.init(effectiveFrom: day, watts: watts))
+        if await save() { showsThresholdReview = false }
+        else { profile = previous }
+    }
+
+    @ViewBuilder private var deepScanSettings: some View {
+        if let garmin = model.garmin {
+            Section {
+                Text(garmin.status)
+                Button("Reconcile all history and files") {
+                    Task { await garmin.sync(.fullReconciliation(.all)); await model.reload() }
+                }.disabled(!garmin.canSync)
+                if garmin.running { Button("Pause sync") { garmin.pause() } }
+            } footer: {
+                Text("Routine sync checks older history weekly. Full reconciliation also downloads every original again to detect edits. Unchanged files do not create new activities. You can pause and resume.")
+            }
+        } else {
+            Section { Text("Open the library and connect Garmin to scan your history.") }
         }
     }
 
@@ -235,23 +327,24 @@ struct SettingsView: View {
         }
     }
 
-    private func save() async {
+    @discardableResult
+    private func save() async -> Bool {
         for (bounds, count) in [(profile.powerZoneBounds, 6), (profile.heartRateZoneBounds, 4)] {
             if let bounds, !AthleteProfile.validZoneBounds(bounds, count: count) {
                 error = "Zone boundaries must be positive and increase from one zone to the next."
-                return
+                return false
             }
         }
         let values = [profile.maxHeartRate, profile.statedThresholdHeartRate, profile.weight].compactMap { $0 }
             + profile.thresholdPowerHistory.map(\.watts)
         guard values.allSatisfy({ $0.isFinite && $0 > 0 }) else {
-            error = "Enter positive values, or leave optional values blank."; return
+            error = "Enter positive values, or leave optional values blank."; return false
         }
         let dates = profile.thresholdPowerHistory.map { Calendar.current.startOfDay(for: $0.effectiveFrom) }
         guard Set(dates).count == dates.count else {
-            error = "Use one threshold power entry per effective date."; return
+            error = "Use one threshold power entry per effective date."; return false
         }
-        guard let library = model.library else { return }
+        guard let library = model.library else { return false }
         saving = true
         error = nil
         defer { saving = false }
@@ -260,11 +353,16 @@ struct SettingsView: View {
                 profile.thresholdPowerHistory[index].effectiveFrom = dates[index]
             }
             try await library.saveProfile(profile)
-            let report = try await library.recompute()
-            status = report.failures.isEmpty ? "Profile saved. Activities are up to date."
-                : "Profile saved. \(report.failures.count) activities could not be recalculated. Save again to retry."
+            do {
+                let report = try await library.recompute()
+                status = report.failures.isEmpty ? "Profile saved. Activities are up to date."
+                    : "Profile saved. \(report.failures.count) activities could not be recalculated. Save again to retry."
+            } catch {
+                status = "Profile saved. Recalculation could not finish. Save again to retry."
+            }
             await model.reload()
             NotificationCenter.default.post(name: AppTheme.profileDidChange, object: nil)
-        } catch { self.error = error.localizedDescription }
+            return true
+        } catch { self.error = error.localizedDescription; return false }
     }
 }

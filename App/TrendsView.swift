@@ -41,8 +41,6 @@ struct TrendsView: View {
                     ContentUnavailableView("No activities in this range", systemImage: "chart.xyaxis.line",
                         description: Text("Change the filters or import more history from Activities."))
                 } else {
-                    Text("Based on imported history. Empty periods mean no matching activities in this library.")
-                        .font(.footnote).foregroundStyle(.secondary)
                     if presentation.staleCount > 0 {
                         Text("\(presentation.staleCount) activities need recalculation. Their old results are excluded.")
                             .font(.footnote)
@@ -54,6 +52,10 @@ struct TrendsView: View {
                     efficiency
                     records
                     calendar
+                    Text("Sources: \(sourceSummary(presentation.rows.map(\.activity)))")
+                        .font(.caption).foregroundStyle(.secondary)
+                    Text("Empty periods mean no matching activities in this library.")
+                        .font(.caption).foregroundStyle(.secondary)
                 }
             }.padding(.horizontal, 20).padding(.bottom, 24)
         }
@@ -70,7 +72,7 @@ struct TrendsView: View {
                 } label: {
                     VStack(alignment: .leading) {
                         Text(row.title)
-                        Text(row.start, format: .dateTime.day().month().year()).font(.caption).foregroundStyle(.secondary)
+                        Text("\(row.start.formatted(.dateTime.day().month().year())) · \(sourceSummary([row]))").font(.caption).foregroundStyle(.secondary)
                     }
                 }
             }.navigationTitle(selected.title)
@@ -148,8 +150,8 @@ struct TrendsView: View {
                             .foregroundStyle(bucket.id == presentation.buckets.last?.id ? Color.primary : Color.secondary.opacity(0.65))
                     }
                     if let value = bucket.lastYear.complete, bucket.lastYear.count > 0 {
-                        PointMark(x: .value("Period", bucket.start), y: .value("Last year", scaled(value)))
-                            .symbol(.square).symbolSize(18).foregroundStyle(Color.primary)
+                        RectangleMark(x: .value("Period", bucket.start), y: .value("Last year", scaled(value)), width: .fixed(18), height: .fixed(2))
+                            .foregroundStyle(Color.primary)
                     }
                 }.chartYAxis { AxisMarks(position: .leading) }
                     .chartXAxis { AxisMarks { AxisValueLabel() } }
@@ -157,7 +159,10 @@ struct TrendsView: View {
                     .chartXVisibleDomain(length: period == .week ? 12 * 7 * 86400 : period == .month ? 365 * 86400 : 5 * 365 * 86400)
                     .chartScrollPosition(initialX: presentation.buckets.suffix(12).first?.start ?? Date())
                     .frame(height: 180).accessibilityLabel("\(measure.rawValue) by \(period.rawValue.lowercased()). Incomplete periods omitted.")
-                note("Bars: this period · marks: same period last year. \(presentation.buckets.filter { $0.total.missing > 0 }.count) incomplete periods.")
+                chartLegend(first: period.rawValue, second: "Same period last year", firstIsBar: true)
+                if presentation.buckets.contains(where: { $0.total.missing > 0 }) {
+                    note("\(presentation.buckets.filter { $0.total.missing > 0 }.count) incomplete periods omitted.")
+                }
                 Menu("Explore periods") {
                     ForEach(presentation.buckets.reversed()) { bucket in
                         Button(bucket.start.formatted(date: .abbreviated, time: .omitted)) {
@@ -214,10 +219,7 @@ struct TrendsView: View {
             if typeSize.isAccessibilitySize { comparisonPicker.pickerStyle(.menu) }
             else { comparisonPicker.pickerStyle(.segmented) }
             panel {
-                note("Solid: last 6 weeks · dashed: \(comparison.lowercased()). Both respect the selected filters.")
-                Button("Explore power activities") {
-                    selection = TrendsSelection(title: "Power activities", activities: presentation.rows.filter { $0.curve.contains { $0.power.value != nil } }.map(\.activity))
-                }
+                chartLegend(first: "Last 6 weeks", second: comparison == "90 days" ? "Last 90 days" : comparison, dashed: true)
                 if presentation.curve.allSatisfy({ $0.power.value == nil }) { note("No valid power windows in this range.") }
                 else {
                     Chart {
@@ -253,6 +255,9 @@ struct TrendsView: View {
                         .chartYAxisLabel("Watts")
                         .frame(height: 200)
                 }
+                Button("Explore power activities") {
+                    selection = TrendsSelection(title: "Power activities", activities: presentation.rows.filter { $0.curve.contains { $0.power.value != nil } }.map(\.activity))
+                }.font(.footnote)
             }
         }
     }
@@ -269,9 +274,13 @@ struct TrendsView: View {
                 }
                 if presentation.thresholds.isEmpty { note("A valid 20-minute power window in the preceding 90 days is needed for an estimate.") }
                 Chart {
-                    ForEach(presentation.thresholds) { point in
+                    ForEach(presentation.thresholds.indices, id: \.self) { index in
+                        let point = presentation.thresholds[index]
+                        LineMark(x: .value("Date", point.date), y: .value("Estimate W", point.value),
+                            series: .value("Estimate segment", thresholdSegment(at: index)))
+                            .lineStyle(StrokeStyle(lineWidth: 2, dash: [5, 4])).foregroundStyle(Color.secondary)
                         PointMark(x: .value("Date", point.date), y: .value("Estimate W", point.value))
-                            .symbolSize(5).foregroundStyle(Color.secondary)
+                            .symbolSize(3).foregroundStyle(Color.secondary)
                     }
                     ForEach(presentation.setThresholds) { point in
                         LineMark(x: .value("Date", point.date), y: .value("Set W", point.value))
@@ -281,9 +290,18 @@ struct TrendsView: View {
                 if let estimate = presentation.estimate, let current = presentation.currentThreshold, estimate > current {
                     note("The estimate is above your set threshold. Review your threshold in Settings if appropriate.")
                 }
-                note("Your threshold: solid · estimate: dotted. Estimate is 95% of rolling 90-day best 20-minute power; it never changes your settings.")
+                chartLegend(first: "Your threshold", second: "Estimate", dashed: true)
+                DisclosureGroup("How the estimate works") {
+                    note("95% of your best valid 20-minute power in the preceding 90 days. It never changes your settings automatically.")
+                }.font(.footnote)
             }
         }
+    }
+    private func thresholdSegment(at index: Int) -> Int {
+        guard index > 0 else { return 0 }
+        return (1...index).filter {
+            presentation.thresholds[$0].date.timeIntervalSince(presentation.thresholds[$0 - 1].date) > 36 * 3600
+        }.count
     }
     @ViewBuilder private var thresholdLabels: some View {
         VStack(alignment: .leading) {
@@ -323,7 +341,6 @@ struct TrendsView: View {
                 HStack { heading("Records"); Spacer(); recordPicker }
             }
             panel {
-                note("Records respect the sport, date and setting filters. Only available measurements can qualify.")
                 if presentation.records.isEmpty { note("No eligible records in this range.") }
                 ForEach(presentation.records) { record in
                     NavigationLink {
@@ -342,7 +359,7 @@ struct TrendsView: View {
                                     Text(recordValue(record)).bold().monospacedDigit().fixedSize()
                                 }
                             }
-                            Text("\(record.activity.start.formatted(date: .abbreviated, time: .omitted)) · \(record.activity.title)")
+                            Text("\(record.activity.start.formatted(date: .abbreviated, time: .omitted)) · \(record.activity.title) · \(sourceSummary([record.activity]))")
                                 .font(.caption).foregroundStyle(Color.secondary)
                                 .fixedSize(horizontal: false, vertical: true)
                         }.foregroundStyle(Color.primary).frame(minHeight: 44)
@@ -404,6 +421,29 @@ struct TrendsView: View {
                 note("Less → more · dot: load unavailable. Tap a day for activities.")
             }
         }
+    }
+    private func sourceSummary(_ activities: [ActivityRecord]) -> String {
+        let sources = Set(activities.map { $0.primary.source })
+        return SourceKind.allCases.filter(sources.contains).map {
+            switch $0 { case .garmin: "Garmin"; case .healthKit: "Apple Health"; case .file: "FIT file" }
+        }.joined(separator: " · ")
+    }
+    private func chartLegend(first: String, second: String, firstIsBar: Bool = false, dashed: Bool = false) -> some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 18) { legendItem(first, secondary: firstIsBar, bar: firstIsBar); legendItem(second, secondary: dashed, dashed: dashed) }
+            VStack(alignment: .leading, spacing: 6) { legendItem(first, secondary: firstIsBar, bar: firstIsBar); legendItem(second, secondary: dashed, dashed: dashed) }
+        }.font(.caption).foregroundStyle(.secondary)
+    }
+    private func legendItem(_ title: String, secondary: Bool, bar: Bool = false, dashed: Bool = false) -> some View {
+        HStack(spacing: 6) {
+            if bar { Rectangle().fill(Color.secondary).frame(width: 10, height: 8) }
+            else {
+                Path { path in path.move(to: .zero); path.addLine(to: CGPoint(x: 20, y: 0)) }
+                    .stroke(secondary ? Color.secondary : Color.primary, style: StrokeStyle(lineWidth: 2, dash: dashed ? [4, 3] : []))
+                    .frame(width: 20, height: 2)
+            }
+            Text(title)
+        }.accessibilityElement(children: .combine)
     }
     private func select(_ title: String, from start: Date, to end: Date) {
         selection = TrendsSelection(title: title, activities: presentation.rows.filter { $0.activity.start >= start && $0.activity.start < end }.map(\.activity))

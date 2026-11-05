@@ -17,6 +17,17 @@ final class IntegratedScreens: XCTestCase {
         XCTAssertTrue(app.sliders["Shared comparison clock"].waitForExistence(timeout: 20))
         capture("detail-to-comparison-large")
     }
+    @MainActor private func alignNearTop(_ element: XCUIElement, in app: XCUIApplication) {
+        let target: CGFloat = 190
+        for _ in 0..<3 {
+            let delta = element.frame.minY - target
+            if abs(delta) < 30 { return }
+            let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.65))
+            let distance = max(-250, min(400, delta))
+            start.press(forDuration: 0.1, thenDragTo: start.withOffset(CGVector(dx: 0, dy: -distance)),
+                        withVelocity: .slow, thenHoldForDuration: 0.3)
+        }
+    }
     @MainActor private func capture(_ name: String) {
         let a = XCTAttachment(screenshot: XCUIScreen.main.screenshot()); a.name = name; a.lifetime = .keepAlways; add(a)
     }
@@ -24,6 +35,9 @@ final class IntegratedScreens: XCTestCase {
         let app = XCUIApplication(); app.launchArguments = dark ? ["dark"] : []; app.launch()
         let suffix = dark ? "dark" : "light"
         XCTAssertTrue(app.tabBars.buttons["Activities"].waitForExistence(timeout: 120))
+        // Wait for asynchronous thumbnail preparation before recording visual evidence.
+        _ = app.images.firstMatch.waitForExistence(timeout: 5)
+        Thread.sleep(forTimeInterval: 2)
         capture("01-feed-" + suffix)
         app.tabBars.buttons["Routes"].tap()
         let route = app.buttons["route-row"].firstMatch
@@ -44,14 +58,46 @@ final class IntegratedScreens: XCTestCase {
         XCTAssertTrue(first.waitForExistence(timeout: 20)); first.tap()
         XCTAssertTrue(app.buttons["Analysis"].waitForExistence(timeout: 60)); capture("02-detail-" + suffix)
         app.buttons["Analysis"].tap(); XCTAssertTrue(app.buttons["Done"].waitForExistence(timeout: 10)); capture("03-analysis-" + suffix)
+        let splits = app.staticTexts["Kilometre splits"].firstMatch
+        for _ in 0..<6 { if splits.isHittable { break }; app.swipeUp() }
+        XCTAssertTrue(splits.exists)
+        alignNearTop(splits, in: app)
+        capture("analysis-content-" + suffix)
+        capture("splits-table-" + suffix)
         app.buttons["Done"].tap(); app.buttons["Back"].tap()
         XCTAssertTrue(app.tabBars.buttons["Activities"].waitForExistence(timeout: 10))
         let indoor = app.buttons["indoor-activity-row"].firstMatch
         for _ in 0..<5 { if indoor.isHittable { break }; app.swipeUp() }
         XCTAssertTrue(indoor.exists); indoor.tap()
         XCTAssertTrue(app.buttons["Analysis"].waitForExistence(timeout: 60)); capture("04-indoor-" + suffix)
-        app.buttons["Back"].tap()
+        app.buttons["Analysis"].tap()
+        let history = app.buttons.containing(NSPredicate(format: "label BEGINSWITH 'Historical power window'")).firstMatch
+        for _ in 0..<8 { if history.isHittable { break }; app.swipeUp() }
+        XCTAssertTrue(history.exists)
+        XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label BEGINSWITH 'Historical sources:'")).firstMatch.waitForExistence(timeout: 30))
+        alignNearTop(history, in: app)
+        capture("historical-curve-" + suffix)
+        history.tap(); app.buttons["All time"].firstMatch.tap()
+        capture("historical-all-time-" + suffix)
+        app.buttons["Done"].tap(); app.buttons["Back"].tap()
         app.buttons["Settings"].tap(); XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: 10)); capture("09-settings-" + suffix)
+        let review = app.buttons["Review"].firstMatch
+        for _ in 0..<3 { if review.isHittable { break }; app.swipeUp() }
+        XCTAssertTrue(review.waitForExistence(timeout: 30))
+        if review.exists {
+            review.tap(); XCTAssertTrue(app.navigationBars["Review threshold"].waitForExistence(timeout: 10))
+            capture("threshold-review-" + suffix)
+            XCTAssertTrue(app.buttons["Apply threshold"].isEnabled)
+            app.buttons["Apply threshold"].tap()
+            XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: 30))
+            XCTAssertTrue(app.navigationBars["Review threshold"].waitForNonExistence(timeout: 30))
+            XCTAssertFalse(app.buttons["Review"].exists)
+            capture("threshold-applied-" + suffix)
+            app.buttons["Done"].tap(); app.buttons["Settings"].tap()
+            XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: 10))
+            XCTAssertTrue(app.staticTexts["155 W"].waitForExistence(timeout: 30))
+            XCTAssertFalse(app.buttons["Review"].exists)
+        }
         app.swipeUp(); app.buttons.containing(NSPredicate(format: "label BEGINSWITH 'iCloud'")).firstMatch.tap()
         capture("cloud-" + suffix)
     }

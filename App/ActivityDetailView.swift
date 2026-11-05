@@ -20,6 +20,12 @@ struct ActivityDetailView: View {
     @State private var alternatives: [AlternativeOffer] = []
     @State private var presentation: DetailAnalysisPresentation?
     @State private var metrics: ActivityMetrics?
+    @State private var historicalCurve: [PowerCurvePoint] = []
+    @State private var historicalCurveError: String?
+    @State private var historyWindow = 90
+    @State private var historicalCurveLoading = false
+    @State private var historicalSources: [SourceKind] = []
+    @State private var expandsAnalysisTimeline = false
     @State private var showsAnalysis = false
     @State private var playing = false
     @State private var playbackSpeed = 1.0
@@ -59,6 +65,7 @@ struct ActivityDetailView: View {
             if summaryOnly {
                 List {
                     Section {
+                        SourceAttributionView(sources: record.members.map(\.source))
                         LabeledContent("Elapsed time", value: Duration.seconds(record.elapsedTime).formatted(.time(pattern: .hourMinuteSecond)))
                         if let timer = record.timerTime {
                             LabeledContent("Timer time", value: Duration.seconds(timer).formatted(.time(pattern: .hourMinuteSecond)))
@@ -110,14 +117,54 @@ struct ActivityDetailView: View {
             if let presentation, let prepared {
                 NavigationStack {
                     analysis(presentation, prepared)
-                        .safeAreaInset(edge: .bottom) { timeline(prepared) }
+                        .safeAreaInset(edge: .bottom) {
+                            if expandsAnalysisTimeline {
+                                VStack(spacing: 0) {
+                                    Button("Compact timeline", systemImage: "chevron.down") { expandsAnalysisTimeline = false }.font(.caption).frame(minHeight: 44)
+                                    timeline(prepared)
+                                }.background(Color(uiColor: .systemBackground))
+                            } else { compactPlayback(prepared) }
+                        }
                         .navigationTitle(record.title)
                         .navigationBarTitleDisplayMode(.inline)
                         .toolbar { Button("Done") { showsAnalysis = false } }
                 }
-                .presentationDetents(dynamicTypeSize.isAccessibilitySize ? [.large] : [.medium, .large])
+                .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
             }
+        }
+        .task(id: "\(showsAnalysis)-\(historyWindow)") {
+            guard showsAnalysis, record.sport.family == .cycling, let library else { return }
+            historicalCurve = []
+            historicalSources = []
+            historicalCurveError = nil
+            historicalCurveLoading = true
+            do {
+                let history = try await library.trendsHistory()
+                try Task.checkCancellation()
+                let start = historyWindow == 0 ? Date.distantPast : historyWindow == 365
+                    ? (Calendar.current.dateInterval(of: .year, for: record.start)?.start ?? record.start)
+                    : record.start.addingTimeInterval(-90 * 86400)
+                let end = record.start
+                let points = await Task.detached(priority: .utility) {
+                    let eligible = history.activities.filter {
+                        !$0.isStale && $0.activity.start >= start && $0.activity.start < end
+                            && $0.activity.sport.family == .cycling
+                    }
+                    let entries = eligible.flatMap { row in row.curve.map { (point: $0, source: row.activity.primary.source) } }
+                    let groups = Dictionary(grouping: entries, by: { $0.point.duration })
+                    let winners = groups.keys.sorted().compactMap { duration in
+                        groups[duration]?.filter { $0.point.power.value != nil }.max { ($0.point.power.value ?? -.infinity) < ($1.point.power.value ?? -.infinity) }
+                    }
+                    return (winners.map(\.point), Array(Set(winners.map(\.source))))
+                }.value
+                try Task.checkCancellation()
+                historicalCurve = points.0
+                historicalSources = points.1
+                historicalCurveLoading = false
+                historicalCurveError = nil
+            } catch is CancellationError { }
+            catch { historicalCurve = []; historicalCurveLoading = false; historicalCurveError = "Historical comparison couldn’t load." }
         }
         .task(id: selection) {
             guard let selection, let prepared else { selectionStats = nil; return }
@@ -125,6 +172,21 @@ struct ActivityDetailView: View {
             guard !Task.isCancelled else { return }
             selectionStats = result
         }
+    }
+
+    private func compactPlayback(_ detail: PreparedDetail) -> some View {
+        HStack(spacing: 12) {
+            Button(playing ? "Pause" : "Play", systemImage: playing ? "pause.fill" : "play.fill") { playing.toggle() }
+                .labelStyle(.iconOnly).buttonStyle(.borderedProminent).buttonBorderShape(.circle)
+                .frame(minWidth: 44, minHeight: 44)
+            Button("Expand timeline", systemImage: "waveform.path") { expandsAnalysisTimeline = true }
+                .labelStyle(.iconOnly).frame(minWidth: 44, minHeight: 44)
+            Slider(value: manualScrub, in: 0...Double(max(1, detail.input.stream.count - 1)))
+                .tint(.primary).accessibilityLabel("Analysis playback position")
+            Text(Duration.seconds(scrub.rounded(.down)).formatted(.time(pattern: .hourMinuteSecond)))
+                .font(.caption.monospacedDigit()).frame(minWidth: 64, alignment: .trailing)
+        }.padding(.horizontal, 16).padding(.vertical, 8)
+            .background(Color(uiColor: .systemBackground))
     }
 
     private func updateTimelineOverlay() {
@@ -151,11 +213,12 @@ struct ActivityDetailView: View {
                 VStack(spacing: 0) {
                     HStack(spacing: 8) {
                         Button { dismiss() } label: {
-                            Image(systemName: "chevron.left").frame(width: 44, height: 44)
+                            Image(systemName: "chevron.left").foregroundStyle(.primary).frame(width: 36, height: 36)
+                                .background(Color(uiColor: .quaternarySystemFill), in: Circle()).frame(width: 44, height: 44)
                         }.accessibilityLabel("Back")
                         VStack(alignment: .leading, spacing: 3) {
                             Text(record.title).font(.headline).lineLimit(2)
-                            Text("\(record.start.formatted(.dateTime.month(.abbreviated).day().hour().minute())) · \(record.sport.rawValue.capitalized)")
+                            Text("\(record.start.formatted(.dateTime.month(.abbreviated).day().hour().minute())) · \(SourceAttributionView.names(record.members.map(\.source)))")
                                 .font(.caption).foregroundStyle(.secondary)
                         }.frame(maxWidth: .infinity, alignment: .leading)
                         Menu {
@@ -196,17 +259,7 @@ struct ActivityDetailView: View {
                     }.padding(.horizontal, 8).padding(.top, 8)
                     StatsPanel(stats: detail.cursorStats(at: Int(scrub)), sport: record.sport, units: units, floating: false)
                         .frame(maxHeight: dynamicTypeSize.isAccessibilitySize ? 240 : nil)
-                    if let route = matchedRoute,
-                       let effort = route.efforts.first(where: { $0.activity.members.contains(record.id ?? record.primary) }) {
-                        NavigationLink {
-                            RouteComparisonView(route: route, subject: effort, library: library, units: units)
-                        } label: {
-                            Label(routeContext(route, effort: effort),
-                                  systemImage: "point.topleft.down.to.point.bottomright.curvepath")
-                                .font(.footnote).fixedSize(horizontal: false, vertical: true)
-                                .frame(maxWidth: .infinity, minHeight: 44)
-                        }.padding(.horizontal, 12)
-                    }
+                    routeComparisonLink
                     if !alternatives.isEmpty, let library {
                         NavigationLink("Review additional source data") {
                             ActivityManagementView(activity: record, library: library, deleteActivity: deleteActivity)
@@ -222,9 +275,27 @@ struct ActivityDetailView: View {
         }
     }
 
+    @ViewBuilder private var routeComparisonLink: some View {
+                    if let route = matchedRoute,
+                       let effort = route.efforts.first(where: { $0.activity.members.contains(record.id ?? record.primary) }) {
+                        NavigationLink {
+                            RouteComparisonView(route: route, subject: effort, library: library, units: units)
+                        } label: {
+                            Label(routeContext(route, effort: effort),
+                                  systemImage: "point.topleft.down.to.point.bottomright.curvepath")
+                                .font(.footnote).fixedSize(horizontal: false, vertical: true)
+                                .frame(maxWidth: .infinity, minHeight: 44)
+                        }.padding(.horizontal, 12)
+                    }
+    }
+
     private func analysis(_ presentation: DetailAnalysisPresentation, _ detail: PreparedDetail) -> some View {
         ActivityAnalysisView(presentation: presentation, detail: detail, metrics: metrics, units: units,
-                             scrub: manualScrub, selection: $selection)
+                             scrub: manualScrub, selection: $selection, historicalCurve: historicalCurve, historicalCurveError: historicalCurveError, routeHeader: AnyView(VStack(alignment: .leading, spacing: 8) {
+                                 Text(record.start, format: .dateTime.month(.abbreviated).day().hour().minute()).font(.caption).foregroundStyle(.secondary)
+                                 SourceAttributionView(sources: record.members.map(\.source))
+                                 routeComparisonLink
+                             }), historicalSources: historicalSources, historicalCurveLoading: historicalCurveLoading, historyWindow: $historyWindow)
     }
 
     @ViewBuilder private func timeline(_ detail: PreparedDetail) -> some View {
@@ -273,7 +344,8 @@ struct ActivityDetailView: View {
                 Button(playing ? "Pause" : "Play", systemImage: playing ? "pause.fill" : "play.fill") {
                     if scrub >= Double(detail.input.stream.count - 1) { scrub = 0 }
                     playing.toggle()
-                }.labelStyle(.iconOnly).frame(minWidth: 44, minHeight: 44)
+                }.labelStyle(.iconOnly).buttonStyle(.borderedProminent).buttonBorderShape(.circle)
+                    .frame(minWidth: 44, minHeight: 44)
                 Picker("Playback speed", selection: $playbackSpeed) {
                     ForEach([0.5, 1.0, 2.0, 4.0], id: \.self) { speed in Text("\(speed, specifier: "%g")×").tag(speed) }
                 }.pickerStyle(.menu)
@@ -284,6 +356,13 @@ struct ActivityDetailView: View {
                     Text("of \(Duration.seconds(Double(max(0, detail.input.stream.count - 1))).formatted(.time(pattern: .hourMinuteSecond)))")
                         .font(.caption2.monospacedDigit()).foregroundStyle(.secondary)
                 }.frame(minWidth: 88, alignment: .trailing)
+                if !showsAnalysis, detail.line.value != nil {
+                    Button {
+                        options.cameraMode = options.cameraMode == .follow ? .overview : .follow
+                    } label: { Image(systemName: options.cameraMode == .follow ? "location.fill" : "location") }
+                        .tint(.primary).frame(minWidth: 44, minHeight: 44)
+                        .accessibilityLabel(options.cameraMode == .follow ? "Show whole route" : "Follow current position")
+                }
                 if !showsAnalysis {
                     Button { showsAnalysis = true } label: {
                         if dynamicTypeSize.isAccessibilitySize { Image(systemName: "chart.xyaxis.line") }

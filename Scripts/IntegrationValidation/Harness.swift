@@ -57,6 +57,10 @@ import SweatKitModel
                         let data = try Data(contentsOf: Bundle.main.url(forResource: name, withExtension: "fit")!)
                         try await library.importFile(data)
                     }
+                    // Explicit test-only profile: enables real metric presentation without
+                    // pretending these are the user's thresholds or personal acceptance.
+                    _ = try await library.saveProfile(AthleteProfile(thresholdPowerHistory: [.init(effectiveFrom: .distantPast, watts: 100)], statedThresholdHeartRate: 170, weight: 72))
+                    _ = try await library.recompute()
                     await model.useFixtureLibrary(library)
                     ready = true
                 } catch { self.error = String(describing: error) }
