@@ -1,0 +1,6 @@
+.build/
+.swiftpm/
+# Downloads hold real GPS tracks and the request log; never commit them.
+out/
+# Tool cache
+.impeccable/
