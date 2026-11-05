@@ -7,7 +7,7 @@ final class ProductionRouteRoot: XCTestCase {
         app.launch()
         XCTAssertTrue(app.tabBars.buttons["Routes"].waitForExistence(timeout: 30))
         app.tabBars.buttons["Routes"].tap()
-        XCTAssertTrue(app.staticTexts["No routes yet"].waitForExistence(timeout: 30))
+        XCTAssertTrue(app.staticTexts["No frequent routes yet"].waitForExistence(timeout: 30))
         let capture = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         capture.name = "production-routes-empty"; capture.lifetime = .keepAlways; add(capture)
         app.buttons["Settings"].firstMatch.tap()

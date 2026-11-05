@@ -44,6 +44,8 @@ public actor ActivityLibrary {
     /// The versions this library treats as current.
     public nonisolated let versions: PipelineVersions
 
+    var routeCatalogCache: RouteCatalogCache?
+
     /// The kind of the derived result that holds an activity's
     /// `ActivityMetrics`.
     public static let metricsKind = "metrics"

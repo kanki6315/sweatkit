@@ -157,6 +157,7 @@ public struct AlignmentMeasures: Hashable, Codable, Sendable {
     /// in the stretch, both ends included. When the reference line is shorter
     /// than one stretch, a single stretch covers the whole line. 0 when no
     /// stretch counts or the effort has no points.
+    public var offsetDistanceFraction: Double = 1
     public var worstSideOffset: Double
 
     public init(
@@ -254,6 +255,13 @@ public struct AlignmentMeasures: Hashable, Codable, Sendable {
             lengthRatio = referenceLength > 0 ? trackLength / referenceLength : 0
         }
         worstSideOffset = Self.worstSideOffset(of: points, referenceLength: referenceLength, rules: rules)
+        var offsetLength = 0.0
+        for (a, b) in zip(points, points.dropFirst()) {
+            if max(abs(a.sideOffset), abs(b.sideOffset)) > rules.maximumSideOffset {
+                offsetLength += measuredPart(from: a.routeDistance, to: b.routeDistance)
+            }
+        }
+        offsetDistanceFraction = measuredLength > 0 ? offsetLength / measuredLength : 1
     }
 
     /// How far the track had travelled when the effort first reached a route
@@ -351,7 +359,13 @@ public struct AlignmentMeasures: Hashable, Codable, Sendable {
         if !(lengthRatio >= 1 - rules.lengthRatioTolerance && lengthRatio <= 1 + rules.lengthRatioTolerance) {
             failed.insert(.lengthRatio)
         }
-        if !(abs(worstSideOffset) <= rules.maximumSideOffset) {
+        // Local GPS drift may briefly shift a well-covered track sideways. A
+        // sustained parallel road still fails, even if it is within 30 metres.
+        let localizedDrift = abs(worstSideOffset) <= rules.maximumDriftOffset
+            && offsetDistanceFraction <= rules.maximumDriftFraction
+            && proximity >= 0.97 && coverage >= 0.99
+            && abs(lengthRatio - 1) <= 0.02
+        if !(abs(worstSideOffset) <= rules.maximumSideOffset) && !localizedDrift {
             failed.insert(.sideOffset)
         }
         return failed
