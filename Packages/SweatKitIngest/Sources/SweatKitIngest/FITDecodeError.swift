@@ -15,7 +15,8 @@ public enum FITDecodeError: Error, Hashable, Sendable, CaseIterable {
     /// header, the stated data size and the 2-byte checksum add up to.
     case truncated
     /// The file is the stated length but its header or contents fail their
-    /// checksum, or the FIT SDK cannot read its messages.
+    /// checksum, or the FIT SDK cannot read its messages. Bytes after the
+    /// file that are not another FIT file land here too.
     case corrupt
     /// A sound FIT file with no session message, so not a recorded activity.
     /// Courses, settings and workout files land here.
