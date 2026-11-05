@@ -3,14 +3,16 @@
 public struct Provenance: Hashable, Codable, Sendable {
     /// The revision of the inputs.
     public var inputRevision: ContentHash
-    /// The revision of the athlete profile, or nil when the result does not
-    /// read the profile.
-    public var profileRevision: Int?
+    /// The fingerprint of the profile values the result read, from
+    /// `AthleteProfile.fingerprint(on:reading:)`, or nil when the result does
+    /// not read the profile. A correction elsewhere in the threshold history
+    /// leaves it unchanged.
+    public var profileFingerprint: ContentHash?
     public var algorithmVersion: Int
 
-    public init(inputRevision: ContentHash, profileRevision: Int? = nil, algorithmVersion: Int) {
+    public init(inputRevision: ContentHash, profileFingerprint: ContentHash? = nil, algorithmVersion: Int) {
         self.inputRevision = inputRevision
-        self.profileRevision = profileRevision
+        self.profileFingerprint = profileFingerprint
         self.algorithmVersion = algorithmVersion
     }
 }
