@@ -31,6 +31,17 @@ public enum CleanupRules {
     /// rule's 0.5 m/s, read the same way as `stoppedSpeedCycling`.
     public static let stoppedSpeedOnFoot = 0.5
 
+    /// A slow run collapses only while its points stay within this many
+    /// metres of the point where the run began.
+    ///
+    /// The spec says "jitter while stopped" and gives no distance. Speed alone
+    /// cannot tell standing still from walking slowly, and slow walking still
+    /// counts, so a stop must also stay in one place. 10 m is a starting
+    /// value, to be tuned against real recordings: wider than the metre or
+    /// few of GPS wobble while standing, and narrow enough that slow walking
+    /// is kept at about this resolution.
+    public static let stopRadius = 10.0
+
     /// The spec's "about 2 m" tolerance for the drawn line: a point within
     /// this distance of the simplified line is left out.
     public static let simplificationTolerance = 2.0
