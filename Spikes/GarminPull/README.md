@@ -1,13 +1,15 @@
 # GarminPull
 
-Throwaway spike for milestone M0. It runs the spec's three Garmin decision gates against the live Personal API. Nothing in `App/` or `Packages/` depends on it, and it can be deleted once `RESULTS.md` is complete.
+Throwaway probe for milestone M0. It runs the spec's three Garmin decision gates against the live Personal API. Nothing in `App/` or `Packages/` depends on it, and it can be deleted once `RESULTS.md` is complete.
+
+The API client itself is not throwaway: it is `Packages/SweatKitGarmin` (token exchange and renewal, activity search, activity summaries, original-file downloads, typed errors). This probe adds what only M0 needs around it: reading the key from the environment, pacing, the gate checks, FIT decoding with Garmin's SDK, and rate-header reporting.
 
 ## Safety
 
 - The key is read only from `GARMIN_API_KEY`. The tool never prints, logs or writes it. Requests are logged with the `Authorization` header left out.
 - Requests go one at a time, at least 3 seconds apart. The first `429` stops the run, and the tool sends nothing more.
 - A `401` or `403` also stops the run.
-- Downloads, saved response bodies and the request log go to `out/`. That folder is in `.gitignore` because it holds real GPS tracks. Do not commit it.
+- Downloads, saved JSON response bodies (never the token response) and the request log go to `out/`. That folder is in `.gitignore` because it holds real GPS tracks. Do not commit it.
 
 ## Before a live run
 
@@ -59,7 +61,13 @@ Paste the output of `gates` (or `out/gates.txt`). It holds activity names, IDs a
 
 ## Tests
 
-No network. They cover request building, parsing of sample bodies shaped from Garmin's OpenAPI document, rate-header detection, zip handling and FIT channel counts against the shared fixtures.
+No network. The client's tests (request building, response parsing, token renewal, error mapping) are in the package. From the repository root:
+
+```bash
+Scripts/test-packages.sh SweatKitGarmin
+```
+
+From this folder, the probe's own tests cover month ranges, pacing, stopping after a 429, rate-header detection, zip handling and FIT channel counts against the shared fixtures:
 
 ```bash
 swift test

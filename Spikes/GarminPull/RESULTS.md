@@ -4,6 +4,12 @@ Milestone M0, the three Garmin gates from the spec's "M0 decision gates" table.
 
 **Status: waiting on a live run.** Garmin's pages settle none of the three gates on their own. The tool, its offline tests and the commands are ready; see `README.md`. Rows marked *Waiting on live run* are filled in once `swift run GarminPull gates` has been run with a real key.
 
+## What is built
+
+- `Packages/SweatKitGarmin` is the real client, kept whatever the gates decide: key-for-token exchange with renewal before expiry and one renewal on a 401, activity search by local start-date range with offset paging and sort order, activity summaries, original-file downloads as unopened bytes, and typed errors for a refused key, a refused fresh token, rate limiting, network failure and an unexpected response. It takes the key as a parameter and never logs the key or the token. Its assumptions that the live run checks are `Bearer` for data calls and the token body's field names (difference 3 below). It is not yet in `project.yml`.
+- `Spikes/GarminPull` is the throwaway probe on top of it.
+- Not built until the gates report: the sync depths, the month-by-month backfill and its two-listing check, a source-adapter protocol, storage and de-duplication.
+
 Docs read on 4 November 2026: the [Personal API](https://developer.garmin.com/gc-developer-program/personal/personal-api/) page, the [Personal API FAQ](https://developer.garmin.com/gc-developer-program/personal/personal-faq/) and the [endpoint reference](https://developer.garmin.com/gc-developer-program/personal/swagger-docs/). The endpoint reference page draws a Swagger viewer in the browser; the OpenAPI 3.0.1 document behind it ("Garmin Connect Personal API", version 1.0.0) is embedded in the page's script and was read from there.
 
 ## Gates

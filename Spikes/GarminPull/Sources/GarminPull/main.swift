@@ -1,9 +1,10 @@
 import Foundation
 import GarminPullCore
+import SweatKitGarmin
 
-// Throwaway M0 spike for the Garmin Personal API. See README.md for the commands
-// and RESULTS.md for what they settle. The key is read from GARMIN_API_KEY and is
-// never printed, logged or written anywhere.
+// Throwaway M0 probe for the Garmin Personal API, built on SweatKitGarmin. See
+// README.md for the commands and RESULTS.md for what they settle. The key is read
+// from GARMIN_API_KEY and is never printed, logged or written anywhere.
 
 let packageDirectory = URL(filePath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
 let repositoryRoot = packageDirectory.deletingLastPathComponent().deletingLastPathComponent()
@@ -20,84 +21,66 @@ func heading(_ text: String) { say("\n== \(text)") }
 
 struct Failure: Error, CustomStringConvertible { var description: String }
 
-struct Live {
-    let client: PacedClient
-    let endpoints = Endpoints()
-    let token: String
-
-    static func connect() async throws -> Live {
-        guard let key = ProcessInfo.processInfo.environment["GARMIN_API_KEY"]?.trimmingCharacters(in: .whitespacesAndNewlines), !key.isEmpty else {
-            throw Failure(description: "GARMIN_API_KEY is not set. Export it in this terminal first; see README.md.")
-        }
-        try FileManager.default.createDirectory(at: outputDirectory.appending(path: "responses"), withIntermediateDirectories: true)
-        let client = PacedClient(log: outputDirectory.appending(path: "requests.jsonl"))
-
-        heading("Token")
-        let (data, exchange) = try await client.send(Endpoints().token(apiKey: key))
-        report(exchange)
-        let token: TokenResponse
-        do {
-            token = try TokenResponse.parse(data)
-        } catch {
-            say("Token body is \(data.count) bytes and did not parse: \(error)")
-            throw error
-        }
-        say("Body keys: \(token.keys.joined(separator: ", "))")
-        say("token_type: \(token.tokenType ?? "not stated")  expires_in: \(token.expiresIn.map { "\(Int($0)) s (\(String(format: "%.1f", $0 / 3600)) h)" } ?? "not stated")  token length: \(token.accessToken.count)")
-        return Live(client: client, token: token.accessToken)
-    }
-
-    func search(_ query: ActivitySearch, saveAs name: String) async throws -> [ActivityListEntry] {
-        let (data, exchange) = try await client.send(endpoints.search(query, accessToken: token))
-        report(exchange)
-        save(data, name)
-        return try ActivityListEntry.decodeList(data)
-    }
-
-    func detail(_ id: Int64) async throws -> ActivityDetail {
-        let (data, exchange) = try await client.send(endpoints.activity(id: id, accessToken: token))
-        report(exchange)
-        save(data, "activity-\(id).json")
-        return try ActivityDetail.decode(data)
-    }
-
-    /// Lists every page of one month, as the backfill would.
-    func month(_ month: CalendarMonth) async throws -> [ActivityListEntry] {
-        var all: [ActivityListEntry] = []
-        var start = 0
-        while true {
-            let page = try await search(.month(month, start: start), saveAs: "month-\(month)-\(start).json")
-            all += page
-            if page.count < 99 { return all }
-            say("Month \(month) filled a page of 99; fetching the next page.")
-            start += 99
-        }
-    }
-
-    func download(_ id: Int64) async throws -> Data {
-        let (data, exchange) = try await client.send(endpoints.download(id: id, accessToken: token))
-        report(exchange)
-        return data
-    }
-
-    func save(_ data: Data, _ name: String) {
-        try? data.write(to: outputDirectory.appending(path: "responses/\(name)"))
+func explain(_ error: any Error) -> String {
+    guard let error = error as? GarminError else { return "\(error)" }
+    switch error {
+    case .keyRejected(let status): return "Key refused (HTTP \(status)): wrong, expired or deleted. Create a new key."
+    case .tokenExpired: return "A freshly issued token was refused by a data endpoint (HTTP 401 twice). The Bearer assumption may be wrong."
+    case .rateLimited(let retryAfter): return "RATE LIMITED (429). Retry-After: \(retryAfter.map { "\(Int($0)) s" } ?? "not given"). The run stopped; nothing more was sent."
+    case .network(let code): return "Network failure: URLError \(code.rawValue)."
+    case .unexpectedResponse(let response): return "Unexpected response: HTTP \(response.status), \(response.reason)."
+    case .invalidRequest: return "Invalid request arguments."
     }
 }
 
-func report(_ exchange: Exchange) {
-    say("\(exchange.request) -> \(exchange.status)  \(exchange.bytes) bytes  \(exchange.milliseconds) ms")
-    say("  rate headers: \(exchange.rateHeaders.isEmpty ? "none" : exchange.rateHeaders.sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" }.joined(separator: " "))")
-    let shown = ["content-type", "content-disposition", "content-length", "cache-control", "server", "via", "x-cache", "date"]
-    for name in shown { if let value = exchange.headers[name] { say("  \(name): \(value)") } }
+func report(_ exchange: GarminExchange) {
+    say("\(exchange.method) \(exchange.target) -> \(exchange.status)  \(exchange.bytes) bytes")
+    let rate = rateHeaders(exchange.headers)
+    say("  rate headers: \(rate.isEmpty ? "none" : rate.sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" }.joined(separator: " "))")
+    for name in ["content-type", "content-disposition", "cache-control", "server", "via", "x-cache"] {
+        if let value = exchange.headers[name] { say("  \(name): \(value)") }
+    }
 }
 
-func describe(_ entries: [ActivityListEntry], limit: Int = 5) {
+func connect() async throws -> GarminClient {
+    guard let key = ProcessInfo.processInfo.environment["GARMIN_API_KEY"]?.trimmingCharacters(in: .whitespacesAndNewlines), !key.isEmpty else {
+        throw Failure(description: "GARMIN_API_KEY is not set. Export it in this terminal first; see README.md.")
+    }
+    try FileManager.default.createDirectory(at: outputDirectory.appending(path: "responses"), withIntermediateDirectories: true)
+    let recorder = ExchangeRecorder(url: outputDirectory.appending(path: "requests.jsonl"))
+    let client = GarminClient(apiKey: key, transport: PacedTransport(saveJSONBodiesTo: outputDirectory.appending(path: "responses")), observer: { exchange in
+        recorder.record(exchange)
+        report(exchange)
+    })
+
+    heading("Token")
+    try await client.validateKey()
+    say("Body keys: \((await client.tokenResponseKeys ?? []).joined(separator: ", "))")
+    if let expiry = await client.tokenExpiry {
+        say("Treated as valid for \(String(format: "%.1f", expiry.timeIntervalSinceNow / 3600)) h (from expires_in, or the documented 24 h if absent)")
+    }
+    return client
+}
+
+func describe(_ entries: [ActivitySummary], limit: Int = 5) {
     say("\(entries.count) activities")
     for entry in entries.prefix(limit) {
         say("  \(entry.activityId)  \(entry.startTimeLocal ?? "?")  \(entry.activityType?.typeKey ?? "?")  \(entry.manufacturer ?? "?")  \(entry.activityName ?? "")")
     }
     if entries.count > limit { say("  ...") }
+}
+
+/// Lists every page of one month, as the backfill would.
+func listMonth(_ client: GarminClient, _ month: CalendarMonth) async throws -> [ActivitySummary] {
+    var query = month.query()
+    var all: [ActivitySummary] = []
+    while true {
+        let page = try await client.activities(query)
+        all += page
+        if page.count < query.limit { return all }
+        say("Month \(month) filled a page of \(query.limit); fetching the next page.")
+        query = query.nextPage
+    }
 }
 
 /// Reports what a downloaded or local payload holds and returns the FIT report.
@@ -129,6 +112,12 @@ func inspect(_ payload: Data, label: String, keepAs id: Int64? = nil) throws -> 
     }
 }
 
+func download(_ client: GarminClient, _ id: Int64) async throws -> FITChannelReport? {
+    let file = try await client.originalFile(activityID: id)
+    say("content type \(file.contentType ?? "none")  filename \(file.suggestedFilename ?? "none")")
+    return try inspect(file.data, label: "download", keepAs: id)
+}
+
 func compare(_ downloaded: FITChannelReport?, toFixture path: String) throws {
     let reference = try FITChannelReport(fit: Data(contentsOf: repositoryRoot.appending(path: path)))
     say("-- reference \(path)")
@@ -142,63 +131,60 @@ func compare(_ downloaded: FITChannelReport?, toFixture path: String) throws {
 
 /// Checks one reference activity: its summary, that it appears in its month's
 /// listing, and that its file downloads with the fixture's channels.
-func checkReference(_ live: Live, id: Int64, fixture: String) async throws {
+func checkReference(_ client: GarminClient, id: Int64, fixture: String) async throws {
     heading("Activity \(id) (\(fixture))")
-    let detail = try await live.detail(id)
+    let detail = try await client.activity(id: id)
     let meta = detail.metadataDTO
     say("type \(detail.activityTypeDTO?.typeKey ?? "?")  start \(detail.summaryDTO?.startTimeLocal ?? "?")  manufacturer \(meta?.manufacturer ?? "?")")
     say("isOriginal \(meta?.isOriginal.map(String.init) ?? "?")  fileFormat \(meta?.fileFormat?.formatKey ?? "?")  trimmed \(meta?.trimmed.map(String.init) ?? "?")  lastUpdateDate \(meta?.lastUpdateDate ?? "?")  uploadedDate \(meta?.uploadedDate ?? "?")")
 
     if let date = detail.startDate {
         let month = CalendarMonth(containing: date)
-        let entries = try await live.month(month)
+        let entries = try await listMonth(client, month)
         let listed = entries.contains { $0.activityId == id }
-        say("Month \(month) lists \(entries.count) activities; \(id) is \(listed ? "LISTED" : "NOT LISTED").")
+        let outside = entries.filter { entry in entry.startDate.map { CalendarMonth(containing: $0) != month } ?? true }
+        say("Month \(month) lists \(entries.count) activities; \(id) is \(listed ? "LISTED" : "NOT LISTED"). Entries outside the month: \(outside.count).")
     } else {
         say("No start date in the summary, so the month listing was skipped.")
     }
 
-    let payload = try await live.download(id)
-    let fit = try inspect(payload, label: "download", keepAs: id)
-    try compare(fit, toFixture: fixture)
+    try compare(try await download(client, id), toFixture: fixture)
 }
 
 func run(_ arguments: [String]) async throws {
     let command = arguments.first ?? "help"
     switch command {
     case "gates":
-        let live = try await Live.connect()
+        let client = try await connect()
         heading("Newest page")
-        describe(try await live.search(.newest, saveAs: "newest.json"))
+        describe(try await client.activities(.newest))
         heading("Earliest activity (ascending, limit 1)")
-        let earliest = try await live.search(.earliest, saveAs: "earliest.json")
+        let earliest = try await client.activities(.earliest)
         describe(earliest)
         for reference in references {
-            try await checkReference(live, id: reference.id, fixture: reference.fixture)
+            try await checkReference(client, id: reference.id, fixture: reference.fixture)
         }
         if let first = earliest.first {
             heading("Earliest activity's file")
-            try inspect(try await live.download(first.activityId), label: "download", keepAs: first.activityId)
+            _ = try await download(client, first.activityId)
         }
         heading("Done")
-        say("\(await live.client.exchanges.count) requests, none rate limited. Log: out/requests.jsonl")
+        say("No request was rate limited. Every exchange is in out/requests.jsonl.")
 
     case "token":
-        _ = try await Live.connect()
+        _ = try await connect()
 
     case "newest":
-        let live = try await Live.connect()
-        describe(try await live.search(.newest, saveAs: "newest.json"), limit: 99)
+        describe(try await connect().activities(.newest), limit: 99)
 
     case "earliest":
-        let live = try await Live.connect()
-        describe(try await live.search(.earliest, saveAs: "earliest.json"))
+        describe(try await connect().activities(.earliest))
 
     case "month":
         guard arguments.count == 2, let month = CalendarMonth(arguments[1]) else { throw Failure(description: "Usage: month YYYY-MM") }
-        let live = try await Live.connect()
-        heading("Month \(month): \(month.firstDay) to \(month.lastDay)")
-        describe(try await live.month(month), limit: 99)
+        let client = try await connect()
+        heading("Month \(month)")
+        describe(try await listMonth(client, month), limit: 99)
 
     case "months":
         // Walks whole months newest first, as the backfill would, and reports each
@@ -207,39 +193,38 @@ func run(_ arguments: [String]) async throws {
             throw Failure(description: "Usage: months YYYY-MM YYYY-MM (oldest first, newest second; at most 36 months)")
         }
         var months: [CalendarMonth] = []
-        var cursor = to
-        while (cursor.year, cursor.month) >= (from.year, from.month) {
-            months.append(cursor)
-            cursor = cursor.month == 1 ? CalendarMonth(year: cursor.year - 1, month: 12) : CalendarMonth(year: cursor.year, month: cursor.month - 1)
+        var cursor: CalendarMonth? = to
+        while let month = cursor, (month.year, month.month) >= (from.year, from.month), months.count <= 36 {
+            months.append(month)
+            cursor = month.previous
         }
-        guard months.count <= 36 else { throw Failure(description: "\(months.count) months is over the cap of 36.") }
-        let live = try await Live.connect()
+        guard months.count <= 36 else { throw Failure(description: "More than 36 months; narrow the range.") }
+        let client = try await connect()
         var counts: [(CalendarMonth, Int)] = []
         for month in months {
             heading("Month \(month)")
-            let entries = try await live.month(month)
+            let entries = try await listMonth(client, month)
             describe(entries, limit: 3)
             counts.append((month, entries.count))
         }
         heading("Summary")
-        for (month, count) in counts { say("\(month)  \(count)\(count >= 99 ? "  (needed paging)" : "")") }
+        for (month, count) in counts { say("\(month)  \(count)\(count >= ActivityQuery.defaultLimit ? "  (needed paging)" : "")") }
 
     case "activity":
         guard arguments.count == 2, let id = Int64(arguments[1]) else { throw Failure(description: "Usage: activity ID") }
-        let live = try await Live.connect()
-        let fixture = references.first { $0.id == id }?.fixture
-        if let fixture {
-            try await checkReference(live, id: id, fixture: fixture)
+        let client = try await connect()
+        if let fixture = references.first(where: { $0.id == id })?.fixture {
+            try await checkReference(client, id: id, fixture: fixture)
         } else {
-            let detail = try await live.detail(id)
+            let detail = try await client.activity(id: id)
             say("type \(detail.activityTypeDTO?.typeKey ?? "?")  start \(detail.summaryDTO?.startTimeLocal ?? "?")  isOriginal \(detail.metadataDTO?.isOriginal.map(String.init) ?? "?")")
         }
 
     case "download":
         guard arguments.count >= 2, let id = Int64(arguments[1]) else { throw Failure(description: "Usage: download ID [--compare PATH]") }
-        let live = try await Live.connect()
+        let client = try await connect()
         heading("Download \(id)")
-        let fit = try inspect(try await live.download(id), label: "download", keepAs: id)
+        let fit = try await download(client, id)
         if arguments.count == 4, arguments[2] == "--compare" { try compare(fit, toFixture: arguments[3]) }
 
     case "inspect":
@@ -266,6 +251,6 @@ func run(_ arguments: [String]) async throws {
 do {
     try await run(Array(CommandLine.arguments.dropFirst()))
 } catch {
-    print("ERROR: \(error)")
+    print("ERROR: \(explain(error))")
     exit(1)
 }

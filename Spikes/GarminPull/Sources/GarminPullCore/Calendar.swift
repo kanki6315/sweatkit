@@ -1,40 +1,14 @@
 import Foundation
+import SweatKitGarmin
 
-/// A local calendar date, written `yyyy-MM-dd` as the search endpoint expects.
-public struct CalendarDate: Sendable, Hashable, Comparable, CustomStringConvertible {
-    public var year: Int
-    public var month: Int
-    public var day: Int
-
-    public init(year: Int, month: Int, day: Int) {
-        self.year = year
-        self.month = month
-        self.day = day
-    }
-
-    /// Reads the date part of `yyyy-MM-dd` or `yyyy-MM-dd HH:mm:ss`, the format of
-    /// `startTimeLocal` in activity summaries.
-    public init?(prefixOf text: String) {
-        let parts = text.prefix(10).split(separator: "-")
-        guard parts.count == 3, let year = Int(parts[0]), let month = Int(parts[1]), let day = Int(parts[2]),
-              (1...12).contains(month), (1...31).contains(day) else { return nil }
-        self.init(year: year, month: month, day: day)
-    }
-
-    public var description: String {
-        String(format: "%04d-%02d-%02d", year, month, day)
-    }
-
-    public static func < (lhs: CalendarDate, rhs: CalendarDate) -> Bool {
-        (lhs.year, lhs.month, lhs.day) < (rhs.year, rhs.month, rhs.day)
-    }
-}
-
+/// One calendar month of local start dates, the unit of the spec's backfill.
+/// Kept in the probe because the backfill design waits on the gate results.
 public struct CalendarMonth: Sendable, Hashable, CustomStringConvertible {
     public var year: Int
     public var month: Int
 
-    public init(year: Int, month: Int) {
+    public init?(year: Int, month: Int) {
+        guard (1...9999).contains(year), (1...12).contains(month) else { return nil }
         self.year = year
         self.month = month
     }
@@ -42,22 +16,28 @@ public struct CalendarMonth: Sendable, Hashable, CustomStringConvertible {
     /// Reads `yyyy-MM`.
     public init?(_ text: String) {
         let parts = text.split(separator: "-")
-        guard parts.count == 2, let year = Int(parts[0]), let month = Int(parts[1]), (1...12).contains(month) else { return nil }
+        guard parts.count == 2, let year = Int(parts[0]), let month = Int(parts[1]) else { return nil }
         self.init(year: year, month: month)
     }
 
     public init(containing date: CalendarDate) {
-        self.init(year: date.year, month: date.month)
+        year = date.year
+        month = date.month
     }
 
-    public var firstDay: CalendarDate { CalendarDate(year: year, month: month, day: 1) }
+    public var firstDay: CalendarDate? { CalendarDate(year: year, month: month, day: 1) }
 
-    public var lastDay: CalendarDate {
-        var calendar = Calendar(identifier: .gregorian)
-        calendar.timeZone = TimeZone(identifier: "UTC")!
-        let first = calendar.date(from: DateComponents(year: year, month: month, day: 1))!
-        let days = calendar.range(of: .day, in: .month, for: first)!.count
-        return CalendarDate(year: year, month: month, day: days)
+    public var lastDay: CalendarDate? {
+        (28...31).reversed().lazy.compactMap { CalendarDate(year: self.year, month: self.month, day: $0) }.first
+    }
+
+    public var previous: CalendarMonth? {
+        month == 1 ? CalendarMonth(year: year - 1, month: 12) : CalendarMonth(year: year, month: month - 1)
+    }
+
+    /// The search for every activity starting in this month, newest first.
+    public func query(start: Int = 0) -> ActivityQuery {
+        ActivityQuery(start: start, startDate: firstDay, endDate: lastDay)
     }
 
     public var description: String { String(format: "%04d-%02d", year, month) }
