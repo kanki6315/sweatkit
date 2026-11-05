@@ -30,11 +30,7 @@ struct RootView: View {
             }
             Tab("Trends", systemImage: "chart.xyaxis.line") {
                 screen("Trends") {
-                    ContentUnavailableView(
-                        "No trends yet",
-                        systemImage: "chart.xyaxis.line",
-                        description: Text("Volume, power and records build up as activities are added.")
-                    )
+                    TrendsView(model: library)
                 }
             }
         }

@@ -25,6 +25,7 @@ final class LibraryModel {
     var error: String?
     var filter = FeedFilter()
     private var cursor: FeedCursor?
+    private(set) var trendsRevision = 0
     private var generation = 0
     private var importTask: Task<Void, Never>?
     private let localityResolver = ActivityLocalityResolver()
@@ -58,6 +59,7 @@ final class LibraryModel {
             let weeks = try await library.weeklySummaries(filter)
             let stale = try await library.staleActivities()
             guard request == generation else { return }
+            trendsRevision += 1
             activities = page.activities
             staleIDs = Set(stale.map(\.id))
             weekSummaries = Dictionary(uniqueKeysWithValues: weeks.map { ($0.start, $0) })

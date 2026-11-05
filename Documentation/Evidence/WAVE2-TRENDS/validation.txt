@@ -1,0 +1,23 @@
+Wave 2 Trends validation excerpts, 5 November 2026
+Separate build roots; no merge, push, signing or release.
+
+Existing Library suite
+/tmp/sweatkit-trends-tests.log
+✔ Test run with 119 tests in 25 suites passed after 430.037 seconds.
+
+Analysis regression suite
+/tmp/sweatkit-trends-analysis.log
+✔ Test run with 289 tests in 31 suites passed after 0.061 seconds.
+
+Trends tests and host benchmark
+/tmp/sweatkit-trends-focused2.log
+TRENDS_HOST_YEAR 365 compact summaries, all aggregations: 0.156727375 seconds
+✔ Test run with 10 tests in 1 suite passed after 7.326 seconds.
+
+Final production iPhone build (capture harness removed)
+/tmp/sweatkit-trends-production-build.log
+** BUILD SUCCEEDED **
+
+Simulator capture harness build
+/tmp/sweatkit-trends-sim.log
+** BUILD SUCCEEDED **
