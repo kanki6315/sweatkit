@@ -1,5 +1,6 @@
 #if canImport(UIKit)
 import MapKit
+import OSLog
 import SweatKitModel
 import SwiftUI
 import UIKit
@@ -47,7 +48,12 @@ private struct FlyoverMapRepresentable: UIViewRepresentable {
     var options: FlyoverOptions
     var cameraMode: FlyoverOptions.CameraMode
 
-    func makeCoordinator() -> FlyoverMapCoordinator { IdleMapCache.shared.take() ?? FlyoverMapCoordinator() }
+    func makeCoordinator() -> FlyoverMapCoordinator {
+        let cached = IdleMapCache.shared.take()
+        let coordinator = cached ?? FlyoverMapCoordinator()
+        coordinator.beginPresentation(reused: cached != nil)
+        return coordinator
+    }
 
     func makeUIView(context: Context) -> LayoutReportingMapView {
         if let mapView = context.coordinator.mapView { return mapView }
@@ -78,13 +84,22 @@ private struct FlyoverMapRepresentable: UIViewRepresentable {
     }
 }
 
-/// Keeps one idle map (including its geometry and renderers) warm briefly.
+/// Keeps one idle map (including its geometry and renderers) warm for up to five minutes.
 /// NSCache may discard it under memory pressure; MapKit owns its tile cache.
 @MainActor
 private final class IdleMapCache {
     static let shared = IdleMapCache()
     private let cache = NSCache<NSString, FlyoverMapCoordinator>()
     private var generation = UUID()
+    private var memoryWarningObserver: NSObjectProtocol?
+
+    private init() {
+        memoryWarningObserver = NotificationCenter.default.addObserver(
+            forName: UIApplication.didReceiveMemoryWarningNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.cache.removeAllObjects() }
+        }
+    }
 
     func take() -> FlyoverMapCoordinator? {
         let coordinator = cache.object(forKey: "idle")
@@ -98,7 +113,7 @@ private final class IdleMapCache {
         cache.setObject(coordinator, forKey: "idle")
         let token = UUID()
         generation = token
-        DispatchQueue.main.asyncAfter(deadline: .now() + 60) { [weak self] in
+        DispatchQueue.main.asyncAfter(deadline: .now() + 300) { [weak self] in
             guard let self, self.generation == token else { return }
             self.cache.removeAllObjects()
         }
@@ -228,6 +243,7 @@ final class FlyoverMapCoordinator: NSObject, MKMapViewDelegate {
         if newMapSettings != mapSettings {
             mapSettings = newMapSettings
             mapView.preferredConfiguration = Self.configuration(for: newMapSettings)
+            performanceLog.info("map_configuration style=\(options.mapStyle.rawValue, privacy: .public) realistic=\(options.realisticElevation)")
         }
 
         let newLineSettings = LineSettings(
@@ -274,6 +290,7 @@ final class FlyoverMapCoordinator: NSObject, MKMapViewDelegate {
     }
 
     func stop() {
+        performanceLog.info("map_detached")
         stopDisplayLink()
     }
 
@@ -281,6 +298,83 @@ final class FlyoverMapCoordinator: NSObject, MKMapViewDelegate {
         if needsOverviewFit || cameraMode == .overview {
             fitOverview()
         }
+    }
+
+    // Timings describe visible rendering, not network requests: MapKit owns
+    // tile downloads and may complete several render passes per camera change.
+    private let performanceLog = Logger(subsystem: "com.arjunakankipati.sweatkit", category: "MapPerformance")
+    private var presentationStarted = CACurrentMediaTime()
+    private var firstRenderReported = false
+    private var firstCompleteRenderReported = false
+    private var loadingStarted: CFTimeInterval?
+    private var regionStarted: CFTimeInterval?
+    private var regionSettled: CFTimeInterval?
+    private var renderStarted: CFTimeInterval?
+    private var regionSequence = 0
+
+    func beginPresentation(reused: Bool) {
+        presentationStarted = CACurrentMediaTime()
+        firstRenderReported = false
+        firstCompleteRenderReported = false
+        loadingStarted = nil
+        regionStarted = nil
+        regionSettled = nil
+        renderStarted = nil
+        performanceLog.info("map_attached reused=\(reused)")
+    }
+
+    func mapView(_ mapView: MKMapView, regionWillChangeAnimated animated: Bool) {
+        // Follow moves every frame; logging each change would distort measurement.
+        guard cameraMode != .follow else { return }
+        regionSequence += 1
+        regionStarted = CACurrentMediaTime()
+        regionSettled = nil
+        performanceLog.info("region_start sequence=\(self.regionSequence)")
+    }
+
+    func mapView(_ mapView: MKMapView, regionDidChangeAnimated animated: Bool) {
+        guard cameraMode != .follow else { return }
+        regionSettled = CACurrentMediaTime()
+        let movement = regionSettled! - (regionStarted ?? regionSettled!)
+        performanceLog.info("region_settled sequence=\(self.regionSequence) movement_ms=\(movement * 1000) distance_m=\(mapView.camera.centerCoordinateDistance) pitch=\(mapView.camera.pitch) overlays=\(self.routeOverlays.count)")
+    }
+
+    func mapViewWillStartRenderingMap(_ mapView: MKMapView) {
+        if renderStarted == nil { renderStarted = CACurrentMediaTime() }
+    }
+
+    func mapViewDidFinishRenderingMap(_ mapView: MKMapView, fullyRendered: Bool) {
+        let now = CACurrentMediaTime()
+        if !firstRenderReported {
+            firstRenderReported = true
+            performanceLog.info("map_first_render elapsed_ms=\((now - self.presentationStarted) * 1000) fully_rendered=\(fullyRendered)")
+        }
+        if fullyRendered && !firstCompleteRenderReported {
+            firstCompleteRenderReported = true
+            performanceLog.info("map_first_complete_render elapsed_ms=\((now - self.presentationStarted) * 1000)")
+        }
+        guard cameraMode != .follow else { renderStarted = nil; return }
+        let renderMS = renderStarted.map { (now - $0) * 1000 } ?? -1
+        let settledMS = regionSettled.map { (now - $0) * 1000 } ?? -1
+        performanceLog.info("map_render sequence=\(self.regionSequence) fully_rendered=\(fullyRendered) render_ms=\(renderMS) since_settled_ms=\(settledMS) distance_m=\(mapView.camera.centerCoordinateDistance)")
+        renderStarted = nil
+    }
+
+    func mapViewWillStartLoadingMap(_ mapView: MKMapView) {
+        if loadingStarted == nil { loadingStarted = CACurrentMediaTime() }
+    }
+
+    func mapViewDidFinishLoadingMap(_ mapView: MKMapView) {
+        let milliseconds = loadingStarted.map { (CACurrentMediaTime() - $0) * 1000 } ?? -1
+        loadingStarted = nil
+        performanceLog.info("map_loading_finished duration_ms=\(milliseconds)")
+    }
+
+    func mapViewDidFailLoadingMap(_ mapView: MKMapView, withError error: any Error) {
+        // Avoid logging location-bearing URLs or raw error descriptions.
+        loadingStarted = nil
+        let failure = error as NSError
+        performanceLog.error("map_load_failed domain=\(failure.domain, privacy: .public) code=\(failure.code)")
     }
 
     // MARK: Map
@@ -430,7 +524,7 @@ final class FlyoverMapCoordinator: NSObject, MKMapViewDelegate {
             return
         }
         let link = CADisplayLink(target: self, selector: #selector(stepCamera(_:)))
-        link.preferredFrameRateRange = CAFrameRateRange(minimum: 30, maximum: 30, preferred: 30)
+        link.preferredFrameRateRange = CAFrameRateRange(minimum: 30, maximum: 60, preferred: 60)
         link.add(to: .main, forMode: .common)
         displayLink = link
     }
