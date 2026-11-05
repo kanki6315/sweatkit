@@ -227,14 +227,19 @@ func referenceLine(_ points: [P], plane: Plane = .equator) -> ReferenceLine? {
 
 /// A mapped point for tests that build a mapping by hand: at route distance
 /// `s`, sitting `side` metres to the right of the line (negative for left)
-/// and so `abs(side)` metres from it, at time `t` on both clocks.
-func mapped(_ s: Double, side: Double = 0, t: TimeInterval = 0) -> MappedPoint {
-    MappedPoint(routeDistance: s, distanceFromLine: abs(side), sideOffset: side, elapsedTime: t, movingTime: t)
+/// and so `abs(side)` metres from it, at time `t` on both clocks. The track
+/// has travelled `travelled` metres by then, which is `s` unless given: a
+/// track that runs along the line from its start.
+func mapped(_ s: Double, side: Double = 0, t: TimeInterval = 0, travelled: Double? = nil) -> MappedPoint {
+    MappedPoint(
+        routeDistance: s, distanceFromLine: abs(side), sideOffset: side,
+        trackDistance: travelled ?? s, elapsedTime: t, movingTime: t
+    )
 }
 
 /// A mapped point with a different time on each clock.
 func mapped(_ s: Double, elapsed: TimeInterval, moving: TimeInterval) -> MappedPoint {
-    MappedPoint(routeDistance: s, distanceFromLine: 0, sideOffset: 0, elapsedTime: elapsed, movingTime: moving)
+    MappedPoint(routeDistance: s, distanceFromLine: 0, sideOffset: 0, trackDistance: s, elapsedTime: elapsed, movingTime: moving)
 }
 
 /// An alignment built by hand from mapped points.

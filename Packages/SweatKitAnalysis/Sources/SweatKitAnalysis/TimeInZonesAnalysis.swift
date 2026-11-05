@@ -2,8 +2,11 @@ import SweatKitModel
 
 extension StreamAnalysis {
     /// Seconds in each of the seven power zones, against the threshold power
-    /// in effect on the activity date.
+    /// in effect on the activity date. Cycling only: the zones are shares of
+    /// cycling threshold power, which a power reading on foot is not
+    /// comparable with.
     func timeInPowerZones() -> Metric<TimeInZones> {
+        guard sport == .cycling else { return .unavailable(.notDefinedForSport) }
         guard power.hasValues else { return .unavailable(.noPower) }
         guard let threshold = thresholdPower else { return .unavailable(.noThresholdPower) }
         guard threshold != 0 else { return .unavailable(.zeroDenominator) }

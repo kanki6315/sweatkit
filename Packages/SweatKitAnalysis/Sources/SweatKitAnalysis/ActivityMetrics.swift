@@ -44,9 +44,9 @@ public struct ActivityMetrics: Hashable, Codable, Sendable {
     /// other reason.
     public var promptsForThresholdPower: Bool
     /// Seven zones by share of the threshold power in effect on the activity
-    /// date. Unavailable with `.noPower`, `.noThresholdPower`, or
-    /// `.zeroDenominator` for a threshold of zero. The spec does not limit
-    /// time in zones by sport, so it is not limited here.
+    /// date, for cycling. Unavailable with `.notDefinedForSport` off a bike,
+    /// `.noPower`, `.noThresholdPower`, or `.zeroDenominator` for a
+    /// threshold of zero.
     public var timeInPowerZones: Metric<TimeInZones>
     /// Five zones by share of the profile's threshold heart rate. Unavailable
     /// with `.noHeartRate`, `.noThresholdHeartRate`, or `.zeroDenominator`.

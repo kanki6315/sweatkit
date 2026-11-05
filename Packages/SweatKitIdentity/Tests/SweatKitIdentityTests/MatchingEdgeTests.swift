@@ -32,18 +32,39 @@ private func outcomes(_ first: MatchCandidate, _ second: MatchCandidate) -> [Mat
 /// expected value is worked out from the spec's wording in the comment.
 @Suite("Automatic match rule: edges")
 struct MatchRuleEdgeTests {
-    @Test func recordsThatPassEveryToleranceMatchEvenWithoutOverlapping() {
+    @Test func recordsThatAgreeButDoNotOverlapAreSeparateRecordings() {
         // Two one-minute, 300 m recordings: 0 to 60 and 120 to 180.
         //   sport family: cycling and cycling.
         //   starts: 120 - 0 = 120 s, within 2 minutes.
         //   durations: 60 and 60, 0 apart.
         //   distances: 300 and 300, 0 apart.
-        // The spec's list has those four conditions and no fifth about
-        // overlap, so all of them hold and the records merge, although the
-        // first ends 60 s before the second starts.
+        // Those four hold, but the first ends 60 s before the second
+        // starts, so the records share no time. The rule needs them to
+        // overlap, and a pair that does not overlap is not flagged either.
         let first = candidate(ga1, start: 0, elapsed: 60, distance: 300)
         let second = candidate(hk1, start: 120, elapsed: 60, distance: 300)
+        #expect(outcomes(first, second) == [.unrelated, .unrelated])
+    }
+
+    @Test func theSameShortRecordingsMergeOnceTheyOverlap() {
+        // 0 to 60 and 59 to 119: they share the second from 59 to 60.
+        //   starts: 59 s apart, within 2 minutes. Durations and distances
+        //   are equal. All five conditions hold.
+        let first = candidate(ga1, start: 0, elapsed: 60, distance: 300)
+        let second = candidate(hk1, start: 59, elapsed: 60, distance: 300)
         #expect(outcomes(first, second) == [.sameActivity(.tolerances), .sameActivity(.tolerances)])
+    }
+
+    @Test func aSourceIdentifierSettlesAMatchWithoutOverlap() {
+        // The same two recordings that share no time, but the workout's
+        // source identifier names the Garmin record. That settles the match
+        // on its own, whatever the tolerances and the overlap say.
+        let first = candidate(ga1, start: 0, elapsed: 60, distance: 300)
+        let second = MatchCandidate(
+            identity: hk1, sport: .cycling, start: at(120), elapsed: 60, distance: 300,
+            isIndoor: false, linkedIdentities: [ga1]
+        )
+        #expect(outcomes(first, second) == [.sameActivity(.sourceIdentifier), .sameActivity(.sourceIdentifier)])
     }
 
     @Test func twoRecordsOfSportOtherAreOneFamily() {

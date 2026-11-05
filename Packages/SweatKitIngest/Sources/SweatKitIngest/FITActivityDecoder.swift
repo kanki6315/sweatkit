@@ -46,6 +46,10 @@ public enum FITActivityDecoder {
         .indoorWheelchairRun, .indoorHandCycling, .virtualActivity,
     ]
 
+    /// Steps in one stride. A FIT file counts on-foot cadence in strides of
+    /// one foot.
+    static let stepsPerStride = 2.0
+
     /// The timer event types that stop the timer.
     static let stopEventTypes: Set<EventType> = [.stop, .stopAll, .stopDisable, .stopDisableAll]
 
@@ -102,12 +106,13 @@ public enum FITActivityDecoder {
     ///   semicircles. Nil unless the record has both.
     /// - Altitude and speed: the enhanced field when the record has it,
     ///   otherwise the plain field.
-    /// - Distance, heart rate, power, cadence and temperature: as recorded. A
-    ///   recorded zero is 0, and a field the record does not hold is nil.
-    /// - Cadence is the cadence field alone. Fractional cadence is not added,
-    ///   and on-foot cadence is not doubled, although Garmin devices count
-    ///   one foot. The spec does not cover either, so the value stays as
-    ///   recorded.
+    /// - Distance, heart rate, power and temperature: as recorded. A recorded
+    ///   zero is 0, and a field the record does not hold is nil.
+    /// - Cadence: the cadence field plus the fractional cadence field when
+    ///   the record has one. On a bike that is revolutions per minute. On
+    ///   foot a FIT file counts the strides of one foot, so the sum is
+    ///   doubled to give steps per minute. Nil when the record has no
+    ///   cadence field.
     public static func decode(_ data: Data) throws(FITDecodeError) -> RecordedActivity {
         // The SDK reads by offsets from zero, and a slice of a larger `Data`
         // keeps its parent's indices, so the bytes are copied to start at 0.
@@ -128,14 +133,15 @@ public enum FITActivityDecoder {
 
         guard let session = messages.sessions.first else { throw .noActivity }
         let subSport = session.getSubSport()
+        let activitySport = sport(session.getSport())
         return RecordedActivity(
-            sport: sport(session.getSport()),
+            sport: activitySport,
             isIndoor: subSport.map(indoorSubSports.contains) ?? false,
             isVirtual: subSport == .virtualActivity,
             stated: stated(session: session, activity: messages.activities.first),
             timerEvents: messages.events.compactMap(timerEvent),
             laps: messages.laps.compactMap(lap),
-            stream: NativeStream(samples: messages.records.compactMap(sample))
+            stream: NativeStream(samples: messages.records.compactMap { sample($0, sport: activitySport) })
         )
     }
 
@@ -213,7 +219,7 @@ public enum FITActivityDecoder {
         return RecordedLap(start: start, end: end)
     }
 
-    private static func sample(_ record: RecordMesg) -> NativeSample? {
+    private static func sample(_ record: RecordMesg, sport: SweatKitModel.Sport) -> NativeSample? {
         guard let timestamp = record.getTimestamp() else { return nil }
         var position: Coordinate?
         if let latitude = record.getPositionLat(), let longitude = record.getPositionLong() {
@@ -230,9 +236,16 @@ public enum FITActivityDecoder {
             speed: record.getEnhancedSpeed() ?? record.getSpeed(),
             heartRate: record.getHeartRate().map(Double.init),
             power: record.getPower().map(Double.init),
-            cadence: record.getCadence().map(Double.init),
+            cadence: cadence(of: record, sport: sport),
             temperature: record.getTemperature().map(Double.init)
         )
+    }
+
+    /// Revolutions per minute on a bike, steps per minute on foot.
+    private static func cadence(of record: RecordMesg, sport: SweatKitModel.Sport) -> Double? {
+        guard let whole = record.getCadence() else { return nil }
+        let cycles = Double(whole) + (record.getFractionalCadence() ?? 0)
+        return sport.family == .onFoot ? cycles * stepsPerStride : cycles
     }
 
     /// The start plus the elapsed time, or nil when either is absent.

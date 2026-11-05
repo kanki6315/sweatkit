@@ -42,14 +42,15 @@ import Testing
         // The rider goes straight from (480, 0) to (500, 20), missing the
         // corner point. Both are on the line, at 480 m and 520 m, so the
         // stretch between them is mapped: coverage 100%.
-        // Length: sqrt(20^2 + 20^2) = 28.284 m in place of 40 m.
-        //   1000 - 40 + 28.284 = 988.284, ratio 0.98828. Within 3%.
+        // Length: sqrt(20^2 + 20^2) = 28.284 m in place of 40 m. Between the
+        //   marks at 25 m and 975 m: 950 - 40 + 28.284 = 938.284,
+        //   ratio 938.284 / 950 = 0.98767. Within 3%.
         var clipped = corner
         clipped.remove(at: 25)
         let result = try align(clipped, to: corner)
         #expect(close(result.measures.proximity, 1, within: 1e-9))
         #expect(close(result.measures.coverage, 1, within: 1e-5))
-        #expect(close(result.measures.lengthRatio, 0.988284, within: 1e-5))
+        #expect(close(result.measures.lengthRatio, 938.284 / 950, within: 1e-5))
         #expect(result.failed.isEmpty)
         #expect(result.outcome == .join)
     }
@@ -61,8 +62,9 @@ import Testing
         // (500, 80), searches 540 to 640 m and maps to 580 m exactly.
         // Proximity: every point within 30 m, 100%.
         // Coverage: every point is on the line, so nothing is unmapped.
-        // Length: sqrt(60^2 + 60^2) = 84.853 m in place of 120 m.
-        //   1000 - 120 + 84.853 = 964.853, ratio 0.96485. Fails.
+        // Length: sqrt(60^2 + 60^2) = 84.853 m in place of 120 m. Between the
+        //   marks: 950 - 120 + 84.853 = 914.853, ratio 914.853 / 950 =
+        //   0.96300. Fails.
         // Side offset: (500, 60) is straight ahead of its matched position
         //   on the north leg, with no sideways part. 0 everywhere.
         var cut = corner
@@ -73,7 +75,7 @@ import Testing
         #expect(close(result.alignment.points[24].routeDistance, 580, within: 0.01))
         #expect(close(result.measures.proximity, 1, within: 1e-9))
         #expect(close(result.measures.coverage, 1, within: 1e-5))
-        #expect(close(result.measures.lengthRatio, 0.964853, within: 1e-5))
+        #expect(close(result.measures.lengthRatio, 914.853 / 950, within: 1e-5))
         #expect(close(result.measures.worstSideOffset, 0, within: 0.01))
         #expect(result.failed == [.lengthRatio])
         #expect(result.outcome == .manualReview)
@@ -92,7 +94,10 @@ import Testing
         // of route ahead, out of reach of the window.
         // Proximity: 18 of 32 = 0.5625, under 70%.
         // Ends: the last point on the line is at 300 m, 720 m short.
-        // Coverage: 300 / 1020 = 0.294. Length ratio: 620 / 1020 = 0.608.
+        // Coverage: the timed section runs from 25 m to 995 m, 970 m long,
+        // and 25 to 300 of it is mapped: 275 / 970 = 0.284.
+        // Length ratio: over what the rider spans, 25 m to 300 m, where the
+        // track runs along the line: 275 / 275 = 1.
         let hairpin = Course.polyline([P(0, 0), P(500, 0), P(500, 20), P(0, 20)])
         let cutShort = Course.polyline([P(0, 0), P(300, 0), P(300, 20), P(0, 20)])
         #expect(cutShort.count == 32)
@@ -100,26 +105,28 @@ import Testing
         #expect(close(result.measures.proximity, 18.0 / 32.0, within: 1e-9))
         #expect(close(result.measures.startGap, 0, within: 0.01))
         #expect(close(result.measures.endGap, 720, within: 0.01))
-        #expect(close(result.measures.coverage, 300.0 / 1020.0, within: 1e-5))
-        #expect(close(result.measures.lengthRatio, 620.0 / 1020.0, within: 1e-6))
+        #expect(close(result.measures.coverage, 275.0 / 970.0, within: 1e-5))
+        #expect(close(result.measures.lengthRatio, 1, within: 1e-6))
         #expect(result.outcome == .reject)
     }
 
     // MARK: Late starts either side of 25 m
 
     @Test func aStart24MetresLateJoins() throws {
-        // First point at 24 m, within 25 m. Coverage and length ratio are
-        // both 1976 / 2000 = 0.988.
+        // First point at 24 m, within 25 m. The unmapped 24 m lies before
+        // the first mark, so the timed section is covered whole: coverage 1.
         let result = try align(Course.eastRoad(from: 24, to: 2000, step: 26), to: road)
         #expect(close(result.measures.startGap, 24, within: 0.01))
-        #expect(close(result.measures.coverage, 0.988, within: 1e-5))
+        #expect(close(result.measures.coverage, 1, within: 1e-5))
+        #expect(close(result.measures.lengthRatio, 1, within: 1e-6))
         #expect(result.failed.isEmpty)
         #expect(result.outcome == .join)
     }
 
     @Test func aStart26MetresLateIsRejected() throws {
-        // First point at 26 m, beyond 25 m. Coverage and length ratio,
-        // 1974 / 2000 = 0.987, both pass.
+        // First point at 26 m, beyond 25 m. The other measures pass: 1 m of
+        // the section is unmapped, coverage 1949 / 1950, and the length
+        // ratio over what the rider spans is 1.
         let result = try align(Course.eastRoad(from: 26, to: 2000, step: 42), to: road)
         #expect(close(result.measures.startGap, 26, within: 0.01))
         #expect(result.failed == [.ends])
@@ -128,30 +135,43 @@ import Testing
 
     // MARK: Short routes
 
-    /// The spec says "a start 20 m late joins". Read literally, its coverage
-    /// and length ratio rules take that back on a short route: 20 m is more
-    /// than 3% of anything under 667 m, and more than 5% of anything under
-    /// 400 m. These two tests pin the literal reading. They are reported as
-    /// an open question, not as a settled rule.
-    @Test func aStart20MetresLateOnA600MetreRouteGoesToReview() throws {
+    /// "A start 20 m late joins", on a route of any length. Coverage and the
+    /// length ratio are measured over the timed section, which starts at
+    /// 25 m, so the 20 m the rider missed counts against neither. Measured
+    /// over the whole line it would be more than 3% of any route under
+    /// 667 m, and more than 5% of any route under 400 m.
+    @Test func aStart20MetresLateOnA600MetreRouteJoins() throws {
         // Ends: first point at 20 m, within 25 m. Passes.
-        // Coverage: 580 / 600 = 0.967, one 20 m stretch. Passes.
-        // Length ratio: 580 / 600 = 0.967, outside 3%. Fails.
+        // The timed section runs from 25 m to 575 m, 550 m long. The rider
+        // is on the line from 20 m, so all of it is mapped: coverage 1.
+        // Length ratio: 550 m travelled between the marks: 550 / 550 = 1.
         let result = try align(Course.eastRoad(from: 20, to: 600), to: Course.eastRoad(to: 600))
         #expect(close(result.measures.startGap, 20, within: 0.01))
-        #expect(close(result.measures.coverage, 580.0 / 600.0, within: 1e-5))
-        #expect(close(result.measures.lengthRatio, 580.0 / 600.0, within: 1e-6))
-        #expect(result.failed == [.lengthRatio])
-        #expect(result.outcome == .manualReview)
+        #expect(close(result.measures.coverage, 1, within: 1e-5))
+        #expect(close(result.measures.lengthRatio, 1, within: 1e-6))
+        #expect(result.failed.isEmpty)
+        #expect(result.outcome == .join)
     }
 
-    @Test func aStart20MetresLateOnA300MetreRouteIsRejected() throws {
-        // Ends: 20 m, passes. Coverage: 280 / 300 = 0.933, under 95%. Fails.
-        // Length ratio: 0.933. Fails. A failed coverage rejects.
+    @Test func aStart20MetresLateOnA300MetreRouteJoins() throws {
+        // The timed section runs from 25 m to 275 m, 250 m long, all of it
+        // mapped and all of it travelled: coverage 1, length ratio 1.
         let result = try align(Course.eastRoad(from: 20, to: 300), to: Course.eastRoad(to: 300))
         #expect(close(result.measures.startGap, 20, within: 0.01))
-        #expect(close(result.measures.coverage, 280.0 / 300.0, within: 1e-5))
-        #expect(result.failed == [.coverage, .lengthRatio])
+        #expect(close(result.measures.coverage, 1, within: 1e-5))
+        #expect(close(result.measures.lengthRatio, 1, within: 1e-6))
+        #expect(result.failed.isEmpty)
+        #expect(result.outcome == .join)
+    }
+
+    @Test func aStart30MetresLateOnA300MetreRouteIsStillRejected() throws {
+        // The first point is at 30 m, beyond the 25 m the ends rule allows.
+        // 25 to 30 m of the section is unmapped: coverage 245 / 250 = 0.98.
+        // Only the ends fail, and a failed end rejects.
+        let result = try align(Course.eastRoad(from: 30, to: 300, step: 10), to: Course.eastRoad(to: 300))
+        #expect(close(result.measures.startGap, 30, within: 0.01))
+        #expect(close(result.measures.coverage, 245.0 / 250.0, within: 1e-5))
+        #expect(result.failed == [.ends])
         #expect(result.outcome == .reject)
     }
 

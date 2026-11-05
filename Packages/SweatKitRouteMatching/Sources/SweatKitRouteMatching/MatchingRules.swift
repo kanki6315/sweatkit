@@ -36,11 +36,12 @@ public struct MatchingRules: Hashable, Sendable {
     /// end it may stop. The timed section is cut back from both ends by the
     /// same distance, which is what guarantees every full effort covers it.
     public var endTolerance: Double = 25
-    /// The share of the reference line's length that must be mapped.
+    /// The share of the timed section's length that must be mapped.
     public var minimumCoverage: Double = 0.95
-    /// No unmapped stretch of the reference line may be longer than this.
+    /// No unmapped stretch of the timed section may be longer than this.
     public var longestUnmappedStretch: Double = 50
-    /// The length ratio must be within this of 1.
+    /// The length ratio, measured over the timed section, must be within
+    /// this of 1.
     public var lengthRatioTolerance: Double = 0.03
     /// The length of route over which the side offset is averaged.
     public var sideOffsetStretch: Double = 200

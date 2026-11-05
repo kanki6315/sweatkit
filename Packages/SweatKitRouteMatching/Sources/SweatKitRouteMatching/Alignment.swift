@@ -22,6 +22,10 @@ public struct MappedPoint: Hashable, Codable, Sendable {
     /// line, the direction is that of the piece that begins at the corner, or
     /// of the last piece at the line's end.
     public var sideOffset: Double
+    /// How far the track itself had travelled when it reached this point, in
+    /// metres from the track's first point. It never decreases from one
+    /// point to the next.
+    public var trackDistance: Double
     /// The point's elapsed time, carried over from the track.
     public var elapsedTime: TimeInterval
     /// The point's moving time, carried over from the track.
@@ -31,12 +35,14 @@ public struct MappedPoint: Hashable, Codable, Sendable {
         routeDistance: Double,
         distanceFromLine: Double,
         sideOffset: Double,
+        trackDistance: Double,
         elapsedTime: TimeInterval,
         movingTime: TimeInterval
     ) {
         self.routeDistance = routeDistance
         self.distanceFromLine = distanceFromLine
         self.sideOffset = sideOffset
+        self.trackDistance = trackDistance
         self.elapsedTime = elapsedTime
         self.movingTime = movingTime
     }
@@ -102,7 +108,7 @@ public struct AlignmentMeasures: Hashable, Codable, Sendable {
     /// the last point on the line. The reference length when no point is on
     /// the line.
     public var endGap: Double
-    /// Coverage: the share of the reference line's length that was mapped.
+    /// Coverage: the share of the timed section's length that was mapped.
     ///
     /// The stretch of line between the route distances of two consecutive
     /// points is mapped when both points are on the line. Everything else is
@@ -110,19 +116,36 @@ public struct AlignmentMeasures: Hashable, Codable, Sendable {
     /// after the last, and the stretch between two points on the line that
     /// have points off the line between them.
     ///
-    /// Read literally, the ends count against coverage. On a reference line
-    /// shorter than 500 m a start 25 m late passes the ends rule and fails
-    /// this one.
+    /// Only the part of each stretch inside the timed section counts. The
+    /// ends rule already lets a full effort begin `rules.endTolerance` late
+    /// and stop as early, so those two ends of the line are judged by that
+    /// rule alone and do not count against coverage as well.
+    ///
+    /// On a reference line too short to hold a timed section, coverage is
+    /// measured over the whole line.
     public var coverage: Double
-    /// The longest unmapped stretch of the reference line, in metres. 0 when
-    /// the whole line is mapped.
+    /// The longest unmapped stretch inside the timed section, in metres. 0
+    /// when the whole section is mapped. Measured over the whole line when
+    /// the line is too short to hold a timed section.
     ///
     /// Two unmapped stretches that meet at a single point on the line are
     /// measured separately, because the effort did touch the line between
     /// them.
     public var longestUnmappedStretch: Double
-    /// Length ratio: the distance the track travelled divided by the length
-    /// of the reference line.
+    /// Length ratio: the distance the track travelled between the two marks
+    /// of the timed section, divided by the section's length.
+    ///
+    /// The track's distance at each mark is read where the effort first
+    /// reached that route distance, in a straight line between the points
+    /// either side, as crossing times are. Riding before the first mark or
+    /// on past the second therefore does not count.
+    ///
+    /// An effort that does not reach a mark is measured over as much of the
+    /// section as its points span, so that a late start or an early finish
+    /// fails the ends rule alone. 0 when its points span none of the section.
+    ///
+    /// On a reference line too short to hold a timed section, it is the
+    /// whole track's length divided by the whole line's.
     public var lengthRatio: Double
     /// Side offset: the average signed `sideOffset` over the 200 m stretch
     /// where that average is furthest from zero. Positive is to the right.
@@ -161,6 +184,16 @@ public struct AlignmentMeasures: Hashable, Codable, Sendable {
         trackLength: Double,
         rules: MatchingRules = .standard
     ) {
+        // Coverage and the length ratio are measured over the timed section,
+        // or over the whole line when it is too short to hold one.
+        let section = TimedSection(referenceLength: referenceLength, rules: rules)
+        let measured = section.map { $0.start...$0.end } ?? 0...max(referenceLength, 0)
+        let measuredLength = measured.upperBound - measured.lowerBound
+        /// The length of the part of a stretch of line that lies in `measured`.
+        func measuredPart(from start: Double, to end: Double) -> Double {
+            max(0, min(end, measured.upperBound) - max(start, measured.lowerBound))
+        }
+
         // Proximity, ends and coverage, in one pass over the points in order.
         var onLineCount = 0
         var mappedLength = 0.0
@@ -175,7 +208,7 @@ public struct AlignmentMeasures: Hashable, Codable, Sendable {
             }
             onLineCount += 1
             if let last = lastOnLine {
-                let stretch = max(0, point.routeDistance - last)
+                let stretch = measuredPart(from: last, to: point.routeDistance)
                 if previousWasOnLine {
                     mappedLength += stretch
                 } else {
@@ -184,7 +217,7 @@ public struct AlignmentMeasures: Hashable, Codable, Sendable {
             } else {
                 // The stretch before the first point on the line.
                 firstOnLine = point.routeDistance
-                longestUnmapped = max(longestUnmapped, point.routeDistance)
+                longestUnmapped = max(longestUnmapped, measuredPart(from: 0, to: point.routeDistance))
             }
             lastOnLine = point.routeDistance
             previousWasOnLine = true
@@ -195,16 +228,46 @@ public struct AlignmentMeasures: Hashable, Codable, Sendable {
             startGap = firstOnLine
             endGap = max(0, referenceLength - lastOnLine)
             // The stretch after the last point on the line.
-            longestUnmappedStretch = max(longestUnmapped, endGap)
-            coverage = referenceLength > 0 ? mappedLength / referenceLength : 0
+            longestUnmappedStretch = max(longestUnmapped, measuredPart(from: lastOnLine, to: referenceLength))
+            coverage = measuredLength > 0 ? mappedLength / measuredLength : 0
         } else {
             startGap = referenceLength
             endGap = referenceLength
-            longestUnmappedStretch = referenceLength
+            longestUnmappedStretch = measuredLength
             coverage = 0
         }
-        lengthRatio = referenceLength > 0 ? trackLength / referenceLength : 0
+
+        if let section, let first = points.first, let last = points.last {
+            // As much of the section as the effort's points span.
+            let from = max(section.start, first.routeDistance)
+            let to = min(section.end, last.routeDistance)
+            if to > from,
+               let atStart = Self.trackDistance(of: points, atRouteDistance: from),
+               let atEnd = Self.trackDistance(of: points, atRouteDistance: to) {
+                lengthRatio = (atEnd - atStart) / (to - from)
+            } else {
+                lengthRatio = 0
+            }
+        } else if section != nil {
+            lengthRatio = 0
+        } else {
+            lengthRatio = referenceLength > 0 ? trackLength / referenceLength : 0
+        }
         worstSideOffset = Self.worstSideOffset(of: points, referenceLength: referenceLength, rules: rules)
+    }
+
+    /// How far the track had travelled when the effort first reached a route
+    /// distance, read in a straight line between the points either side.
+    /// Nil when the first point is already beyond it or no point reaches it.
+    private static func trackDistance(of points: [MappedPoint], atRouteDistance distance: Double) -> Double? {
+        let arrival = firstIndex(in: points.count) { points[$0].routeDistance >= distance }
+        guard arrival < points.count else { return nil }
+        let after = points[arrival]
+        if after.routeDistance == distance { return after.trackDistance }
+        guard arrival > 0 else { return nil }
+        let before = points[arrival - 1]
+        let fraction = (distance - before.routeDistance) / (after.routeDistance - before.routeDistance)
+        return before.trackDistance + fraction * (after.trackDistance - before.trackDistance)
     }
 
     /// The side offset measure, by the definition on `worstSideOffset`. Of two
@@ -379,7 +442,13 @@ public enum RouteAlignment {
         // start of the line.
         var previousDistance = 0.0
         var previousPiece = 0
+        var previousCoordinate: Coordinate?
+        var travelled = 0.0
         for point in track.points {
+            if let previousCoordinate {
+                travelled += Geodesy.distance(from: previousCoordinate, to: point.coordinate)
+            }
+            previousCoordinate = point.coordinate
             let furthest = min(previousDistance + max(0, rules.searchWindow), course.length)
             let match = closestPosition(
                 to: point.coordinate,
@@ -392,6 +461,7 @@ public enum RouteAlignment {
                 routeDistance: match.routeDistance,
                 distanceFromLine: match.distance,
                 sideOffset: match.sideOffset,
+                trackDistance: travelled,
                 elapsedTime: point.elapsedTime,
                 movingTime: point.movingTime
             ))

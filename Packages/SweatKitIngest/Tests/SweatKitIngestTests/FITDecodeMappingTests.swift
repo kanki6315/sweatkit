@@ -265,6 +265,51 @@ import Testing
         #expect(sample.temperature == -3)
     }
 
+    /// "Cadence: steps per minute on foot." A FIT file counts the strides of
+    /// one foot, so on foot the recorded figure is doubled.
+    @Test(arguments: [FITSwiftSDK.Sport.walking, .running, .hiking])
+    func onFootCadenceIsStepsPerMinute(_ sport: FITSwiftSDK.Sport) throws {
+        let activity = try decode([
+            // 54 strides of one foot a minute: 54 x 2 = 108 steps a minute.
+            try SyntheticFIT.record(0) { try $0.setCadence(54) },
+            // With half a stride more: (54 + 0.5) x 2 = 109.
+            try SyntheticFIT.record(1) {
+                try $0.setCadence(54)
+                try $0.setFractionalCadence(0.5)
+            },
+            // Standing still: 0 x 2 = 0, a recorded zero.
+            try SyntheticFIT.record(2) { try $0.setCadence(0) },
+            // No cadence field: nil, not zero.
+            try SyntheticFIT.record(3) { try $0.setHeartRate(100) },
+            try SyntheticFIT.session(sport: sport),
+        ])
+        #expect(activity.stream.samples.map(\.cadence) == [108, 109, 0, nil])
+    }
+
+    @Test func cyclingCadenceIsRevolutionsPerMinute() throws {
+        let activity = try decode([
+            // Not doubled on a bike: 88.
+            try SyntheticFIT.record(0) { try $0.setCadence(88) },
+            // The fractional part is added: 88 + 0.5 = 88.5.
+            try SyntheticFIT.record(1) {
+                try $0.setCadence(88)
+                try $0.setFractionalCadence(0.5)
+            },
+            try SyntheticFIT.session(sport: .cycling),
+        ])
+        #expect(activity.stream.samples.map(\.cadence) == [88, 88.5])
+    }
+
+    @Test func cadenceOfAnotherSportIsLeftAsRecorded() throws {
+        // Only walking, running and hiking count steps. Rowing maps to
+        // `.other`, and its 30 strokes a minute stay 30.
+        let activity = try decode([
+            try SyntheticFIT.record(0) { try $0.setCadence(30) },
+            try SyntheticFIT.session(sport: .rowing),
+        ])
+        #expect(activity.stream.samples.first?.cadence == 30)
+    }
+
     /// Missing is never zero, from the first step: a field the record does
     /// not hold is nil, and a recorded zero is 0.
     @Test func recordedZeroIsZeroAndAnAbsentFieldIsNil() throws {

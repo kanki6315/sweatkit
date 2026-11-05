@@ -99,7 +99,8 @@ public enum MatchOutcome: Hashable, Codable, Sendable {
     /// - the start times differ by no more than `startDifference`,
     /// - the elapsed durations differ by no more than `durationFraction`,
     /// - when both records are outdoor, the distances differ by no more than
-    ///   `distanceFraction`.
+    ///   `distanceFraction`,
+    /// - the two records overlap in time.
     ///
     /// Records that fail are `.possibleDuplicate` when they overlap in time
     /// and `.unrelated` when they do not.
@@ -117,12 +118,11 @@ public enum MatchOutcome: Hashable, Codable, Sendable {
     ///   `start + elapsed`. Spans that only touch do not overlap.
     /// - Overlapping records of different sport families are still flagged,
     ///   because the spec flags every overlapping pair that fails the rule.
-    /// - The rule does not itself require the two spans to overlap. Two
-    ///   short records that agree on everything and start within
-    ///   `startDifference` of each other match even when one ends before
-    ///   the other starts.
+    /// - Two short records that agree on everything and start within
+    ///   `startDifference` of each other, but where one ends before the
+    ///   other starts, are separate recordings and are `.unrelated`.
     /// - A record whose elapsed time is zero or less covers no time and
-    ///   overlaps nothing.
+    ///   overlaps nothing, so it never matches on the tolerances.
     /// - Two records of sport `.other` are of one family, `.other`, by the
     ///   literal rule, so they can match.
     public static func between(
@@ -134,10 +134,10 @@ public enum MatchOutcome: Hashable, Codable, Sendable {
             || second.linkedIdentities.contains(first.identity) {
             return .sameActivity(.sourceIdentifier)
         }
-        if passesTolerances(first, second, tolerances: tolerances) {
-            return .sameActivity(.tolerances)
-        }
-        return overlapInTime(first, second) ? .possibleDuplicate : .unrelated
+        guard overlapInTime(first, second) else { return .unrelated }
+        return passesTolerances(first, second, tolerances: tolerances)
+            ? .sameActivity(.tolerances)
+            : .possibleDuplicate
     }
 
     /// Whether the two records agree on sport family, start, duration and,

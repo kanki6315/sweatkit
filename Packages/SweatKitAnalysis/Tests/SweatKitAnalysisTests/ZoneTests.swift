@@ -145,12 +145,19 @@ import Testing
     }
 
     @Test(arguments: [Sport.walking, .running, .hiking, .other])
-    func timeInPowerZonesIsNotLimitedByTheSport(sport: Sport) {
-        // The spec's power table is cycling only, but time in zones sits in
-        // its "Other" table with no sport named. 200 W at a 200 W threshold
-        // is the fourth zone.
+    func timeInPowerZonesIsForCyclingOnly(sport: Sport) {
+        // "Time in power zones is for cycling only." The zones are shares of
+        // cycling threshold power, so a power channel off a bike is not
+        // zoned against it, whatever it holds.
         let stream = makeStream(count: 2, power: [200, 200])
         let metrics = analyse(stream, sport: sport, profile: makeProfile(thresholdPower: 200))
+        #expect(metrics.timeInPowerZones == .unavailable(.notDefinedForSport))
+    }
+
+    @Test func theSameStreamOnABikeIsZoned() {
+        // 200 W at a 200 W threshold is 100%, the fourth zone (90 to 105%).
+        let stream = makeStream(count: 2, power: [200, 200])
+        let metrics = analyse(stream, sport: .cycling, profile: makeProfile(thresholdPower: 200))
         #expect(metrics.timeInPowerZones == .available(TimeInZones(seconds: [0, 0, 0, 2, 0, 0, 0], missing: 0)))
     }
 

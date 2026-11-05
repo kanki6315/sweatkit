@@ -133,7 +133,8 @@ Two records are merged automatically only when all of these hold:
 - the sport family matches,
 - start times are within 2 minutes,
 - elapsed durations are within 5%,
-- distances are within 5%, for outdoor activities only, because indoor distance differs widely between recorders.
+- distances are within 5%, for outdoor activities only, because indoor distance differs widely between recorders,
+- the two records overlap in time. Two short recordings that start within 2 minutes of each other but share no time are separate recordings.
 
 A source identifier that links two records settles the match on its own, where one exists. The tolerances are starting values.
 
@@ -242,6 +243,8 @@ These rules sit under almost every metric, so they are fixed here and versioned.
 - The analysis stream is a 1 Hz grid over elapsed time, starting at the activity start. It is rebuilt from the native stream whenever a rule changes.
 - The sample at second t describes the interval from t to t + 1. A duration is a count of samples, so every duration and window is a whole number of seconds. A native sample belongs to the grid second that contains its timestamp, and several native samples in one second are averaged.
 - Every value in every channel is marked measured, interpolated or missing.
+- A sample stamped at the end of the activity, or after it, is not on the grid and is left out. The grid has one second for each second of elapsed time, and that sample would describe the second after the last.
+- Cadence is revolutions per minute on a bike and steps per minute on foot. A FIT file counts the strides of one foot, so on-foot cadence is doubled when the file is decoded.
 - Gaps of up to 5 seconds are filled and marked interpolated. Position, altitude, distance and heart rate are filled linearly. Power and cadence hold the last value.
 - Nothing is interpolated across a pause boundary. The values on each side of a pause stand alone.
 - Longer gaps are missing. Missing is never zero: a recorded 0 W while coasting is measured, and no reading is missing.
@@ -460,7 +463,7 @@ A ride with sparse power, a ride under 5 minutes and a ride with no threshold po
 | Metric | Definition |
 | --- | --- |
 | Ascent and descent | Summed by peak and valley. A climb runs from a low point to the next high point and ends once the altitude has fallen back by the threshold; a turn smaller than the threshold neither ends it nor counts. Descents mirror this. The threshold is 3 m, 1.5 m for cycling, and none for a virtual activity, whose altitude is computed and has no noise. Barometric altitude preferred over GPS. |
-| Time in zones | Seconds per zone from measured and interpolated values; missing seconds are reported as their own bucket |
+| Time in zones | Seconds per zone from measured and interpolated values; missing seconds are reported as their own bucket. Time in power zones is for cycling only, because the zones are shares of cycling threshold power. |
 | Efficiency, cycling | Weighted power divided by average heart rate, when both are available |
 | Efficiency, on foot | Average speed divided by average heart rate, over the seconds that have both. Always speed, never pace, so a higher value always means more output per heartbeat. |
 | Splits | Pace, heart rate and ascent per km, for walking, running and hiking |
@@ -505,9 +508,11 @@ Detection is cheap and deliberately loose. Cell overlap ignores order, so it can
 | --- | --- | --- |
 | Proximity | Share of points within 30 m of the reference line | At least 90% |
 | Ends | How close the mapping gets to each end of the reference line | The first mapped point is within 25 m of the start, and the last is within 25 m of the end |
-| Coverage | Share of the reference line's length that was mapped | At least 95%, with no unmapped stretch longer than 50 m |
-| Length ratio | Distance travelled against the length of the reference line | Within 3% |
+| Coverage | Share of the timed section's length that was mapped | At least 95%, with no unmapped stretch longer than 50 m |
+| Length ratio | Distance travelled between the two marks of the timed section, against the section's length | Within 3% |
 | Side offset | Average sideways distance from the reference line over any 200 m stretch, with its sign | No stretch more than 10 m to one side |
+
+Coverage and the length ratio are measured over the timed section, which is defined below, and not over the whole line. The ends rule already lets a full effort start up to 25 m late and stop up to 25 m early, so that slack is not counted against the effort a second time. This is what lets a start 20 m late join a route of any length. Riding before the first mark or on past the second does not count towards the length ratio.
 
 | Outcome | When |
 | --- | --- |

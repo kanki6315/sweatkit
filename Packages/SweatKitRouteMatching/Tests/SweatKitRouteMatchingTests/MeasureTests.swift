@@ -45,8 +45,8 @@ import Testing
         let points = [
             mapped(900),
             mapped(1000),
-            MappedPoint(routeDistance: 1000, distanceFromLine: 100, sideOffset: 0, elapsedTime: 0, movingTime: 0),
-            MappedPoint(routeDistance: 1000, distanceFromLine: 200, sideOffset: 0, elapsedTime: 0, movingTime: 0),
+            MappedPoint(routeDistance: 1000, distanceFromLine: 100, sideOffset: 0, trackDistance: 1000, elapsedTime: 0, movingTime: 0),
+            MappedPoint(routeDistance: 1000, distanceFromLine: 200, sideOffset: 0, trackDistance: 1000, elapsedTime: 0, movingTime: 0),
         ]
         #expect(close(measures(points).proximity, 0.5, within: 1e-12))
     }
@@ -87,7 +87,10 @@ import Testing
         #expect(measures([]).endGap == 1000)
     }
 
-    // MARK: Coverage - "Share of the reference line's length that was mapped"
+    // MARK: Coverage - "Share of the timed section's length that was mapped"
+    //
+    // The default line is 1000 m, so its timed section runs from 25 m to
+    // 975 m and is 950 m long.
 
     @Test func theStretchBetweenTwoPointsOnTheLineIsMapped() {
         // Five points on the line, 250 m apart, from end to end. However far
@@ -99,28 +102,42 @@ import Testing
 
     @Test func aPointOffTheLineLeavesTheStretchAroundItUnmapped() {
         // On the line at 0, 200 and 400 m; 35 m off it at 420 m; on it again
-        // at 450, 700 and 1000 m. Mapped: 0 to 400 and 450 to 1000. Unmapped:
-        // 400 to 450, 50 m. Coverage (400 + 550) / 1000 = 0.95.
+        // at 450, 700 and 1000 m. Mapped: 0 to 400 and 450 to 1000, of which
+        // 25 to 400 (375 m) and 450 to 975 (525 m) are in the timed section.
+        // Unmapped: 400 to 450, 50 m. Coverage (375 + 525) / 950.
         let result = measures([
             mapped(0), mapped(200), mapped(400),
             mapped(420, side: 35),
             mapped(450), mapped(700), mapped(1000),
         ])
-        #expect(close(result.coverage, 0.95, within: 1e-12))
+        #expect(close(result.coverage, 900.0 / 950.0, within: 1e-12))
         #expect(close(result.longestUnmappedStretch, 50, within: 1e-9))
     }
 
-    @Test func theLineBeforeTheFirstPointAndAfterTheLastIsUnmapped() {
+    @Test func theEndsOutsideTheTimedSectionDoNotCountAgainstCoverage() {
         // On the line from 20 m to 990 m. Unmapped: 0 to 20 and 990 to 1000.
-        // Coverage 970 / 1000 = 0.97, longest unmapped stretch 20 m.
+        // Both lie outside the timed section of 25 to 975, which is mapped
+        // from end to end: coverage 950 / 950 = 1, nothing unmapped in it.
+        // The ends rule is what judges a late start and an early finish.
         let result = measures([mapped(20), mapped(500), mapped(990)])
-        #expect(close(result.coverage, 0.97, within: 1e-12))
-        #expect(close(result.longestUnmappedStretch, 20, within: 1e-9))
+        #expect(close(result.coverage, 1, within: 1e-12))
+        #expect(close(result.longestUnmappedStretch, 0, within: 1e-9))
+    }
+
+    @Test func theLineBeforeTheFirstPointAndAfterTheLastIsUnmappedInsideTheSection() {
+        // On the line from 60 m to 940 m. Unmapped: 0 to 60, of which 25 to
+        // 60 (35 m) is in the section, and 940 to 1000, of which 940 to 975
+        // (35 m) is. Mapped: 60 to 940, 880 m. Coverage 880 / 950.
+        let result = measures([mapped(60), mapped(500), mapped(940)])
+        #expect(close(result.coverage, 880.0 / 950.0, within: 1e-12))
+        #expect(close(result.longestUnmappedStretch, 35, within: 1e-9))
     }
 
     @Test func severalUnmappedStretchesAddUpAndTheLongestIsReported() {
         // Unmapped: 100 to 180 (80 m, one point off the line) and 500 to 600
-        // (100 m, two points off the line). Coverage (1000 - 180) / 1000 = 0.82.
+        // (100 m, two points off the line). Mapped in the timed section: 25
+        // to 100 (75 m), 180 to 500 (320 m) and 600 to 975 (375 m).
+        // Coverage (75 + 320 + 375) / 950 = 770 / 950.
         let result = measures([
             mapped(0), mapped(100),
             mapped(150, side: -40),
@@ -128,7 +145,7 @@ import Testing
             mapped(520, side: 45), mapped(560, side: 45),
             mapped(600), mapped(1000),
         ])
-        #expect(close(result.coverage, 0.82, within: 1e-12))
+        #expect(close(result.coverage, 770.0 / 950.0, within: 1e-12))
         #expect(close(result.longestUnmappedStretch, 100, within: 1e-9))
     }
 
@@ -147,30 +164,78 @@ import Testing
 
     @Test func aLonePointOnTheLineMapsNothing() {
         // One point on the line at 300 m: nothing either side of it is mapped.
-        // The unmapped stretches are 0 to 300 and 300 to 1000.
+        // The unmapped stretches are 0 to 300, of which 25 to 300 (275 m) is
+        // in the timed section, and 300 to 1000, of which 300 to 975 (675 m)
+        // is.
         let result = measures([mapped(300)])
         #expect(result.coverage == 0)
-        #expect(close(result.longestUnmappedStretch, 700, within: 1e-9))
+        #expect(close(result.longestUnmappedStretch, 675, within: 1e-9))
     }
 
-    @Test func withNoPointOnTheLineTheWholeLineIsUnmapped() {
+    @Test func withNoPointOnTheLineTheWholeSectionIsUnmapped() {
+        // The timed section is 975 - 25 = 950 m long.
         let result = measures([mapped(0, side: 50), mapped(1000, side: 50)])
         #expect(result.coverage == 0)
-        #expect(result.longestUnmappedStretch == 1000)
+        #expect(result.longestUnmappedStretch == 950)
         #expect(measures([]).coverage == 0)
-        #expect(measures([]).longestUnmappedStretch == 1000)
+        #expect(measures([]).longestUnmappedStretch == 950)
     }
 
-    // MARK: Length ratio - "Distance travelled against the length of the reference line"
+    @Test func aLineTooShortForATimedSectionIsMeasuredWhole() {
+        // A 40 m line cannot hold two marks 25 m in from each end, so the
+        // whole line is measured. On the line from 10 m to 40 m: unmapped 0
+        // to 10. Coverage 30 / 40 = 0.75. Length ratio 44 / 40 = 1.1.
+        let result = measures([mapped(10), mapped(40)], referenceLength: 40, trackLength: 44)
+        #expect(close(result.coverage, 0.75, within: 1e-12))
+        #expect(close(result.longestUnmappedStretch, 10, within: 1e-9))
+        #expect(close(result.lengthRatio, 1.1, within: 1e-12))
+    }
 
-    @Test func lengthRatioIsTrackLengthOverReferenceLength() {
-        let points = [mapped(0), mapped(1000)]
-        // 1030 / 1000 = 1.03, 970 / 1000 = 0.97, 2010 / 1000 = 2.01.
-        #expect(close(measures(points, trackLength: 1030).lengthRatio, 1.03, within: 1e-12))
-        #expect(close(measures(points, trackLength: 970).lengthRatio, 0.97, within: 1e-12))
-        #expect(close(measures(points, trackLength: 2010).lengthRatio, 2.01, within: 1e-12))
-        // 900 / 1200 = 0.75.
-        #expect(close(measures(points, referenceLength: 1200, trackLength: 900).lengthRatio, 0.75, within: 1e-12))
+    // MARK: Length ratio - "Distance travelled between the marks against the section's length"
+
+    @Test func lengthRatioIsTheTrackDistanceBetweenTheMarksOverTheSectionLength() {
+        // Two points, at the start and the end of the line, with the track
+        // having travelled 1030 m between them. Read in a straight line, the
+        // track is at 25 x 1.03 = 25.75 m at the first mark and at
+        // 975 x 1.03 = 1004.25 m at the second: 978.5 / 950 = 1.03.
+        #expect(close(measures([mapped(0), mapped(1000, travelled: 1030)]).lengthRatio, 1.03, within: 1e-12))
+        // 970 m: (975 - 25) x 0.97 / 950 = 0.97.
+        #expect(close(measures([mapped(0), mapped(1000, travelled: 970)]).lengthRatio, 0.97, within: 1e-12))
+        // 2010 m: (975 - 25) x 2.01 / 950 = 2.01.
+        #expect(close(measures([mapped(0), mapped(1000, travelled: 2010)]).lengthRatio, 2.01, within: 1e-12))
+        // A 1200 m line has marks at 25 and 1175 m, 1150 m apart. 900 m of
+        // track over it: (1175 - 25) x 0.75 / 1150 = 0.75.
+        let longer = measures([mapped(0), mapped(1200, travelled: 900)], referenceLength: 1200)
+        #expect(close(longer.lengthRatio, 0.75, within: 1e-12))
+    }
+
+    @Test func ridingBeforeTheFirstMarkAndPastTheSecondDoesNotCount() {
+        // 300 m ridden to reach the start of the line (held at route
+        // distance 0), 1000 m along it, then 200 m more past its end (held
+        // at 1000). The track is at 300 + 25 = 325 m at the first mark and
+        // at 300 + 975 = 1275 m when it first reaches the second:
+        // 950 / 950 = 1. The whole track is 1500 m, which is not used.
+        let points = [
+            mapped(0, travelled: 0), mapped(0, travelled: 300),
+            mapped(1000, travelled: 1300), mapped(1000, travelled: 1500),
+        ]
+        #expect(close(measures(points, trackLength: 1500).lengthRatio, 1, within: 1e-12))
+    }
+
+    @Test func anEffortThatMissesAMarkIsMeasuredOverWhatItSpans() {
+        // The first point is at 100 m, past the first mark, so the ratio is
+        // taken from 100 m to the second mark at 975 m. The track is at 0 m
+        // at its first point and at 875 m at the mark: 875 / 875 = 1. The
+        // late start is for the ends rule to fail, not this one.
+        let late = measures([mapped(100, travelled: 0), mapped(1000, travelled: 900)])
+        #expect(close(late.lengthRatio, 1, within: 1e-12))
+        #expect(late.startGap == 100)
+    }
+
+    @Test func anEffortThatSpansNoneOfTheSectionHasNoLengthRatio() {
+        // No points, and a single point, span no stretch of the section.
+        #expect(measures([]).lengthRatio == 0)
+        #expect(measures([mapped(300)]).lengthRatio == 0)
     }
 
     // MARK: Side offset - "Average sideways distance ... over any 200 m stretch, with its sign"
@@ -242,7 +307,7 @@ import Testing
         // The last point is held at the end of the line, 100 m straight
         // beyond it. It is far from the line and not to either side.
         var points = every20(to: 200) { _ in 0 }
-        points.append(MappedPoint(routeDistance: 200, distanceFromLine: 100, sideOffset: 0, elapsedTime: 0, movingTime: 0))
+        points.append(MappedPoint(routeDistance: 200, distanceFromLine: 100, sideOffset: 0, trackDistance: 200, elapsedTime: 0, movingTime: 0))
         #expect(close(measures(points, referenceLength: 200).worstSideOffset, 0, within: 1e-9))
     }
 
@@ -253,29 +318,34 @@ import Testing
     // MARK: All five together
 
     @Test func oneMappingGivesAllFiveMeasures() {
-        // A 400 m line and a 404 m track with 21 points, one every 20 m from
-        // 20 m to 400 m plus one more at 400 m. The point at 200 m is 40 m to
-        // the left; every other point is 2 m to the right.
+        // A 400 m line with 21 points, one every 20 m from 20 m to 400 m plus
+        // one more at 400 m. The point at 200 m is 40 m to the left; every
+        // other point is 2 m to the right. The track travels 1.01 m for
+        // every metre of line. The timed section runs from 25 m to 375 m and
+        // is 350 m long.
         //
         // Proximity: 20 of 21 points within 30 m = 0.952.
         // Ends: first point on the line at 20 m, last at 400 m: gaps 20 and 0.
-        // Coverage: unmapped 0 to 20 (20 m) and 180 to 220 (40 m):
-        //   (400 - 60) / 400 = 0.85, longest 40 m.
-        // Length ratio: 404 / 400 = 1.01.
+        // Coverage: unmapped 0 to 20, which is outside the section, and 180
+        //   to 220 (40 m). Mapped in the section: 25 to 180 (155 m) and 220
+        //   to 375 (155 m): 310 / 350, longest 40 m.
+        // Length ratio: (375 - 25) x 1.01 / 350 = 1.01.
         // Side offset: the stretches that fit start at 20, 40 ... 200 m. Each
         //   one from 20 to 180 m holds 11 points, the point at 200 m among
         //   them: (10 * 2 - 40) / 11 = -1.818. The one from 200 m holds the
         //   10 points from 200 to 380 m and both points at 400 m, 12 in all:
         //   (11 * 2 - 40) / 12 = -1.5. Furthest from zero: -20 / 11.
-        var points = stride(from: 20.0, through: 400, by: 20).map { mapped($0, side: $0 == 200 ? -40 : 2) }
-        points.append(mapped(400, side: 2))
+        var points = stride(from: 20.0, through: 400, by: 20).map {
+            mapped($0, side: $0 == 200 ? -40 : 2, travelled: $0 * 1.01)
+        }
+        points.append(mapped(400, side: 2, travelled: 404))
         let result = measures(points, referenceLength: 400, trackLength: 404)
         #expect(close(result.proximity, 20.0 / 21.0, within: 1e-12))
         #expect(close(result.startGap, 20, within: 1e-9))
         #expect(close(result.endGap, 0, within: 1e-9))
-        #expect(close(result.coverage, 0.85, within: 1e-12))
+        #expect(close(result.coverage, 310.0 / 350.0, within: 1e-12))
         #expect(close(result.longestUnmappedStretch, 40, within: 1e-9))
-        #expect(close(result.lengthRatio, 1.01, within: 1e-12))
+        #expect(close(result.lengthRatio, 1.01, within: 1e-9))
         #expect(close(result.worstSideOffset, -20.0 / 11.0, within: 1e-9))
     }
 
