@@ -1,0 +1,51 @@
+name: SweatKit
+options:
+  bundleIdPrefix: com.arjunakankipati
+  deploymentTarget:
+    iOS: "26.0"
+  createIntermediateGroups: true
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    DEVELOPMENT_TEAM: TDBAHN96B3
+packages:
+  SweatKitModel:
+    path: Packages/SweatKitModel
+  SweatKitIngest:
+    path: Packages/SweatKitIngest
+  SweatKitIdentity:
+    path: Packages/SweatKitIdentity
+  SweatKitAnalysis:
+    path: Packages/SweatKitAnalysis
+  SweatKitRouteMatching:
+    path: Packages/SweatKitRouteMatching
+targets:
+  SweatKit:
+    type: application
+    platform: iOS
+    sources:
+      - App
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.arjunakankipati.sweatkit
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_CFBundleDisplayName: SweatKit
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        INFOPLIST_KEY_UISupportedInterfaceOrientations: UIInterfaceOrientationPortrait
+        TARGETED_DEVICE_FAMILY: "1"
+    dependencies:
+      - package: SweatKitModel
+        product: SweatKitModel
+      - package: SweatKitIngest
+      - package: SweatKitIdentity
+      - package: SweatKitAnalysis
+      - package: SweatKitRouteMatching
+schemes:
+  SweatKit:
+    build:
+      targets:
+        SweatKit: all
+    run:
+      config: Debug

@@ -1,0 +1,13 @@
+.DS_Store
+
+# Swift packages
+.build/
+.swiftpm/
+
+# Xcode. The project is generated from project.yml with `xcodegen generate`.
+*.xcodeproj
+DerivedData/
+xcuserdata/
+
+# Tool caches
+.impeccable/hook.cache.json
