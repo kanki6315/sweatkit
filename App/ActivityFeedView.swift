@@ -356,11 +356,13 @@ struct ActivityFeedRow: View {
                         activityContent
                         headline
                     }
+                    .alignmentGuide(.listRowSeparatorLeading) { $0[.leading] }
                 } else {
                     HStack(alignment: .top, spacing: 12) {
                         activityContent.frame(maxWidth: .infinity, alignment: .leading)
                         headline
                     }
+                    .alignmentGuide(.listRowSeparatorLeading) { $0[.leading] }
                 }
             }
         }
@@ -373,6 +375,7 @@ struct ActivityFeedRow: View {
         VStack(alignment: .leading, spacing: 6) {
             Text(activity.title)
                 .font(prominent ? .title3.bold() : .headline)
+                .lineLimit(typeSize.isAccessibilitySize ? nil : 1)
                 .fixedSize(horizontal: false, vertical: true)
             ViewThatFits(in: .horizontal) {
                 HStack(spacing: 5) {
@@ -429,7 +432,7 @@ struct ActivityFeedRow: View {
     @ViewBuilder private var headline: some View {
         if let headline = activity.headline {
             let isPower = headline.kind == "averagePower" || headline.kind == "weightedPower"
-            VStack(alignment: .trailing, spacing: 2) {
+            VStack(alignment: typeSize.isAccessibilitySize ? .leading : .trailing, spacing: 2) {
                 Group {
                     if let value = headline.value.value {
                         if isPower {
