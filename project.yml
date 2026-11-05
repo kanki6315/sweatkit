@@ -29,6 +29,8 @@ packages:
     path: Packages/SweatKitStore
   SweatKitTrackCleanup:
     path: Packages/SweatKitTrackCleanup
+  SweatKitTimeline:
+    path: Packages/SweatKitTimeline
 targets:
   SweatKit:
     type: application
@@ -54,6 +56,7 @@ targets:
       - package: SweatKitFlyover
       - package: SweatKitStore
       - package: SweatKitTrackCleanup
+      - package: SweatKitTimeline
 schemes:
   SweatKit:
     build:

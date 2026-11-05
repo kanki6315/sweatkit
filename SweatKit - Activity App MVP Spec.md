@@ -368,7 +368,7 @@ The palette is colour-blind safe and a legend chip names the current overlay. Th
 Both reference videos show raw GPS, and one ends in a tangle where the recorder sat still. Before drawing, the app:
 
 - drops points that imply an impossible speed,
-- collapses jitter while stopped into a single point,
+- collapses jitter while stopped into a single point. A run of seconds below the moving-time speed floor collapses only while it stays within 10 m of where it began, so slow walking is kept,
 - simplifies the line to about 2 m tolerance for rendering, keeping a map from each drawn vertex back to its sample.
 
 **Performance targets**

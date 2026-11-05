@@ -19,7 +19,8 @@ A native iOS app for viewing one person's own rides and walks. Local-first, no s
 | `Packages/SweatKitStore` | On-device persistence: originals by content hash, source records and revisions, activities and the feed query, stream files, derived results with provenance, the athlete profile. Persistence only: it never decodes, computes or merges. | Model |
 | `Packages/SweatKitTrackCleanup` | Turns a stream's positions into a cleaned track for route matching and a simplified line for the flyover, each point keeping its sample index. | Model |
 | `Packages/SweatKitFlyover` | The MapKit flyover view and its camera and drawing logic. Takes an already-prepared route. | Model |
-| `Spikes/` | The M0 probe tool and device harness, with their gate results in `RESULTS.md`. Throwaway: nothing depends on them. | |
+| `Packages/SweatKitTimeline` | The detail screen's scrubbing timeline and stats panel. Takes already-prepared series and the same scrub binding as the flyover. | Model |
+| `Spikes/` | The M0 probe tool and the device harnesses for the flyover and the timeline, with gate results in `RESULTS.md` and device checklists in each `README.md`. Throwaway: nothing depends on them. | |
 | `Fixtures/` | Real FIT files shared by every package's tests | |
 | `project.yml` | XcodeGen spec. `SweatKit.xcodeproj` is generated and not committed. | |
 
