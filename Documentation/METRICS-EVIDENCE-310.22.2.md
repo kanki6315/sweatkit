@@ -8,6 +8,18 @@ The user confirmed the reference recording: **5 November 2026, 09:32 EST (14:32 
 
 Follow-up: the user states **no activity-average cadence is given**. This agrees with the current summary implementation. Treat cadence as a missing comparator, not an established numerical mismatch on build 310.22.2. Adding average cadence would require a defined aggregation/coverage policy and is not part of this endpoint correction.
 
+## Follow-up: average cadence summary
+
+The user subsequently requested an activity-average cadence to compare with Fitness. Added `CadenceSummary` in Analysis and wired it through the prepared Detail presentation into the existing summary grid for cycling and on-foot activities. This is a new stream-derived display metric, not a claim to reproduce Apple's denominator or source processing.
+
+Policy: mean of available measured/interpolated 1 Hz timer samples, including recorded zeroes, excluding paused seconds, missing samples and invalid values. On-foot units remain steps/min (no extra doubling); cycling uses rpm. Incomplete coverage is shown as the fraction of timer seconds with cadence. Unknown pause positions, no valid readings or no timer seconds give an unavailable reason. Long Health step aggregates remain unavailable under the existing importer; this display does not fabricate cadence for them.
+
+The value is prepared once with the activity's detail and does not vary with the cursor. It is computed from the current stream rather than added to serialized `ActivityMetrics`, so no stored schema or algorithm-version migration is needed for this addition. No Model change. Existing endpoint stream version 3 remains required for the prior commit.
+
+Verification for this follow-up: `Scripts/test-packages.sh SweatKitAnalysis SweatKitDetail` passed 293 Analysis tests and 77 Detail tests (`/tmp/sweatkit-cadence-tests.log`). New tests verify timer-only aggregation, zeroes, interpolation, missing/invalid/short channels, unknown pauses, empty timer, coverage and Detail preparation. A disposable simulator harness uses the checked-in real `walk.fit` through the production decoder, normalizer, detail preparation and `ActivityAnalysisView`; the fixture renders 90 spm. This is fixture/UI evidence, not Charlotte acceptance. Display uses compact `spm` with an expanded steps-per-minute VoiceOver label to avoid a wrapped unit in the existing grid.
+
+The final iOS simulator build succeeded. Visually checked the summary on a Simlock-leased iPhone 17 in light/default text and dark/extra-extra-extra-large text: the cadence value/unit and label fit, and the grid adapts from three columns to two. Captures: `/tmp/sweatkit-cadence-summary.png` and `/tmp/sweatkit-cadence-summary-large-dark.png`; build log: `/tmp/sweatkit-cadence-build.log`. Simulator lease released after verification. No TestFlight build was uploaded. Charlotte data, partial-coverage UI with live Health data, and VoiceOver speech on a real device remain acceptance checks.
+
 ## Minimum evidence to reproduce
 
 1. Fitness and SweatKit summaries plus every split row, including units and labels (duration versus pace). Include SweatKit source/primary-source details and build number. A transcription is sufficient for the first split comparison.
