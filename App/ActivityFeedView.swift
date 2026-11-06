@@ -4,7 +4,7 @@ import SweatKitLibrary
 import SweatKitModel
 import SweatKitStore
 
-/// Shared by the Activities and native Search tabs so filters stay consistent.
+/// Keeps title search and Activities filters together across navigation.
 @MainActor @Observable final class ActivityFeedFilters {
     var search = ""
     var sport: Sport?
