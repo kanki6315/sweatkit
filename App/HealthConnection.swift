@@ -48,10 +48,17 @@ final class HealthConnection {
         running = true
         do {
             try await health.requestAuthorization(toShare: [], read: Set(Self.observedTypes))
-            var state = try readState()
-            state.anchors = [:]
+            var state = try await readState()
+            // A schema upgrade needs a backfill. Repeated permission reviews
+            // still refresh snapshots (new access may reveal data), but do not
+            // replay every unrelated daily measurement.
+            if UserDefaults.standard.integer(forKey: "healthReadSchema") < 3 {
+                state.anchors = [:]
+            }
+            // Previously hidden workouts must be rediscovered after access changes.
+            state.anchors[HKObjectType.workoutType().identifier] = nil
             state.pending.formUnion(state.workouts.keys)
-            try save(state)
+            try await save(state)
             UserDefaults.standard.set(3, forKey: "healthReadSchema")
             enabled = true
             UserDefaults.standard.set(true, forKey: "healthReadRequested")
@@ -117,13 +124,15 @@ final class HealthConnection {
         defer { if !acknowledged { changesCaptured?() } }
         status = "Reading Apple Health workouts and changes…"
         do {
-            var state = try readState()
+            var state = try await readState()
             state.refreshSnapshots(forAdapterVersion: 1)
-            try save(state)
+            try await save(state)
+            var workoutIndex = HealthWorkoutIndex(state.workouts)
             for type in Self.observedTypes {
                 var count: Int
                 repeat {
                     try Task.checkCancellation()
+                    if pauseForHeat() { return }
                     let anchor = try state.anchors[type.identifier].map {
                         try NSKeyedUnarchiver.unarchivedObject(ofClass: HKQueryAnchor.self, from: $0)
                     } ?? nil
@@ -141,19 +150,21 @@ final class HealthConnection {
                         }
                     } else {
                         for sample in page.samples {
-                            for (id, span) in state.workouts where span.start <= sample.endDate && span.end >= sample.startDate {
-                                state.pending.insert(id)
-                            }
+                            let affected = workoutIndex.overlapping(start: sample.startDate, end: sample.endDate)
+                            state.pending.formUnion(affected)
                         }
-                        // Deleted samples expose only an ID, not their date or
-                        // workout. Re-snapshot known workouts on these rare events.
+                        // Deleted objects contain no dates or workout links.
+                        // Keep the conservative fallback rather than miss edits.
                         if !page.deleted.isEmpty { state.pending.formUnion(state.workouts.keys) }
                     }
                     if let anchor = page.anchor {
                         state.anchors[type.identifier] = try NSKeyedArchiver.archivedData(withRootObject: anchor, requiringSecureCoding: true)
                     }
-                    try save(state)
+                    try await save(state)
                 } while count >= 500
+                if type == HKObjectType.workoutType() {
+                    workoutIndex = HealthWorkoutIndex(state.workouts)
+                }
             }
             // Every anchor and its pending snapshot IDs are durable now.
             // Release HealthKit's delivery promptly, before costly derivation.
@@ -163,28 +174,36 @@ final class HealthConnection {
             let skipped = state.pending.filter { deleted.contains(SourceIdentity(source: .healthKit, externalID: $0.uuidString)) }
             state.pending.subtract(skipped)
             for id in skipped { state.workouts.removeValue(forKey: id) }
-            try save(state)
+            try await save(state)
             let pending = state.pending.sorted { $0.uuidString < $1.uuidString }
             var completed = 0
             var failures = 0
-            for id in pending {
+            // Bound memory and hold the library writer only while importing.
+            // Persist completion after each reconciled batch, never before it.
+            for offset in stride(from: 0, to: pending.count, by: 8) {
                 try Task.checkCancellation()
-                do {
-                    guard let workout = try await samples(HKObjectType.workoutType(), predicate: HKQuery.predicateForObject(with: id)).first as? HKWorkout else {
-                        // Absence is not proof of deletion or denied permission.
-                        failures += 1
-                        continue
-                    }
-                    let snapshot = try await snapshot(workout)
+                if pauseForHeat() { return }
+                let batch = pending[offset..<min(offset + 8, pending.count)]
+                var snapshots: [HealthSnapshot] = []
+                for id in batch {
                     try Task.checkCancellation()
-                    try await library.importHealthSnapshot(snapshot)
-                    state.pending.remove(id)
-                    try save(state)
-                    completed += 1
-                    backgroundWork?.update(completed: completed, total: pending.count)
-                    status = "Apple Health: processed \(completed) of \(pending.count) workouts."
-                } catch is CancellationError { throw CancellationError() }
-                catch { failures += 1 }
+                    if pauseForHeat() { return }
+                    do {
+                        guard let workout = try await samples(HKObjectType.workoutType(), predicate: HKQuery.predicateForObject(with: id)).first as? HKWorkout else {
+                            failures += 1
+                            continue
+                        }
+                        snapshots.append(try await snapshot(workout))
+                    } catch is CancellationError { throw CancellationError() }
+                    catch { failures += 1 }
+                }
+                let imported = try await library.importHealthSnapshots(snapshots)
+                failures += snapshots.count - imported.count
+                state.pending.subtract(imported)
+                try await save(state)
+                completed += imported.count
+                backgroundWork?.update(completed: completed, total: pending.count)
+                status = "Apple Health: processed \(completed) of \(pending.count) workouts."
             }
             if failures > 0 {
                 status = "Apple Health processed \(completed) workouts; \(failures) need another attempt. Review read access in Health → profile → Apps → SweatKit, then refresh. Your stored recordings are kept."
@@ -199,6 +218,13 @@ final class HealthConnection {
         } catch {
             status = "Couldn't finish Health refresh. Unlock your device, check available storage and Health read access, then retry. Saved progress is kept."
         }
+    }
+
+    private func pauseForHeat() -> Bool {
+        let thermal = ProcessInfo.processInfo.thermalState
+        guard thermal == .serious || thermal == .critical else { return false }
+        status = "Health refresh paused while your phone cools down. Refresh again to resume saved work."
+        return true
     }
 
     private func snapshot(_ workout: HKWorkout) async throws -> HealthSnapshot {
@@ -217,7 +243,16 @@ final class HealthConnection {
         var native: [NativeSample] = []
         for identifier in Self.quantities {
             try Task.checkCancellation()
-            guard let type = HKObjectType.quantityType(forIdentifier: identifier) else { continue }
+            // Skip quantities this adapter would discard for this sport anyway.
+            let relevant: Bool
+            switch identifier {
+            case .distanceWalkingRunning, .stepCount: relevant = sport.family == .onFoot
+            case .distanceCycling, .cyclingPower, .cyclingSpeed: relevant = sport == .cycling
+            case .runningPower, .runningSpeed: relevant = sport != .cycling
+            case .runningStrideLength, .runningGroundContactTime, .runningVerticalOscillation: relevant = sport == .running
+            default: relevant = true
+            }
+            guard relevant, let type = HKObjectType.quantityType(forIdentifier: identifier) else { continue }
             let unit: HKUnit
             switch identifier {
             case .distanceWalkingRunning, .distanceCycling, .runningStrideLength, .runningVerticalOscillation: unit = .meter()
@@ -268,10 +303,7 @@ final class HealthConnection {
         }
         // Query and route batch ordering is not guaranteed. A stable order
         // prevents unchanged workouts from producing spurious revisions.
-        native.sort { lhs, rhs in
-            if lhs.timestamp != rhs.timestamp { return lhs.timestamp < rhs.timestamp }
-            return Self.sampleOrder(lhs) < Self.sampleOrder(rhs)
-        }
+        native = await Self.sortedSamples(native)
         let events = (workout.workoutEvents ?? []).compactMap { event -> TimerEvent? in
             switch event.type {
             case .pause, .motionPaused: TimerEvent(kind: .stop, timestamp: event.dateInterval.start)
@@ -306,7 +338,15 @@ final class HealthConnection {
             sourceBundleIdentifier: workout.sourceRevision.source.bundleIdentifier)
     }
 
-    private static func sampleOrder(_ sample: NativeSample) -> String {
+    @concurrent
+    private static func sortedSamples(_ samples: [NativeSample]) async -> [NativeSample] {
+        samples.sorted { lhs, rhs in
+            if lhs.timestamp != rhs.timestamp { return lhs.timestamp < rhs.timestamp }
+            return sampleOrder(lhs) < sampleOrder(rhs)
+        }
+    }
+
+    nonisolated private static func sampleOrder(_ sample: NativeSample) -> String {
         // Stable tie breaker only; values remain native and are never merged.
         [sample.position?.latitude, sample.position?.longitude, sample.altitude,
          sample.distance, sample.speed, sample.heartRate, sample.power, sample.cadence,
@@ -368,8 +408,11 @@ final class HealthConnection {
         }
     }
 
-    private func readState() throws -> State { try State.load(from: stateURL) }
-    private func save(_ state: State) throws { try state.save(to: stateURL) }
+    private func readState() async throws -> State { try await Self.loadState(from: stateURL) }
+    private func save(_ state: State) async throws { try await Self.saveState(state, to: stateURL) }
+
+    @concurrent private static func loadState(from url: URL) async throws -> State { try State.load(from: url) }
+    @concurrent private static func saveState(_ state: State, to url: URL) async throws { try state.save(to: url) }
 }
 
 /// Owns one query and resumes its waiter exactly once. HealthKit does not
