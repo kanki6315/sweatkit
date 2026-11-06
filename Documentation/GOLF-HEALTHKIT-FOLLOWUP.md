@@ -1,6 +1,6 @@
 # Golf HealthKit follow-up
 
-Branch: `codex/golf-enhancement-discovery`. No release, upload or merge performed.
+Branch: `codex/golf-enhancement-discovery`. No release or upload performed.
 
 ## Release baseline recovered
 
@@ -43,3 +43,7 @@ When integrating with the acceptance worktree, do not reapply baseline commit `d
 ## Real-device acceptance still required
 
 Open an existing Golf round on the integrated build, compare source/time/distance with Health, and verify any actual route/HR samples. Check sparse or absent channels, back navigation, switching the primary recording, refresh/relaunch, Golf labels and absence of false adjacent-session duplicate prompts. Large real routes and MapKit tile/network behavior need phone checks; the synthetic harness does not certify those. No real golf dataset was supplied or inspected. No unresolved product choice blocks this narrow implementation; remaining evidence is a representative real round and device retest. iCloud remains deferred.
+
+## Merge follow-up
+
+The user authorized merging this branch into main. Current main `216c818` (Search, Playback and Metrics follow-ups) was integrated without conflicts in `fc1d4c8`. Inspection confirmed the activity-reset/cancellation path remains ahead of the Golf-only loader. The integrated unsigned iPhone build passed (`/tmp/sweatkit-golf-merge-build.log`), and all five focused Golf/adjacent-session tests passed (`/tmp/sweatkit-golf-merge-tests.log`). The simulator results above precede this integration; no new TestFlight acceptance is claimed.
