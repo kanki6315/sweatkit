@@ -49,6 +49,7 @@ struct ActivityDetailView: View {
 
     private var record: ActivityRecord { current ?? activity }
     @State private var summaryOnly = false
+    @State private var golfRecording: GolfHealthRecording?
     @State private var prepared: PreparedDetail?
     @State private var error: String?
     @State private var scrub = 0.0
@@ -67,17 +68,21 @@ struct ActivityDetailView: View {
         Group {
             if summaryOnly {
                 List {
-                    Section {
-                        SourceAttributionView(sources: record.members.map(\.source))
-                        LabeledContent("Elapsed time", value: Duration.seconds(record.elapsedTime).formatted(.time(pattern: .hourMinuteSecond)))
-                        if let timer = record.timerTime {
-                            LabeledContent("Timer time", value: Duration.seconds(timer).formatted(.time(pattern: .hourMinuteSecond)))
+                    if let golfRecording {
+                        GolfHealthSections(recording: golfRecording, units: units)
+                    } else {
+                        Section {
+                            SourceAttributionView(sources: record.members.map(\.source))
+                            LabeledContent("Elapsed time", value: Duration.seconds(record.elapsedTime).formatted(.time(pattern: .hourMinuteSecond)))
+                            if let timer = record.timerTime {
+                                LabeledContent("Timer time", value: Duration.seconds(timer).formatted(.time(pattern: .hourMinuteSecond)))
+                            }
+                            if let distance = record.distance {
+                                LabeledContent("Recorded distance", value: String(format: "%.2f %@", distance / (units == .metric ? 1000 : 1609.344), units == .metric ? "km" : "mi"))
+                            }
+                        } header: { Text("Recorded summary") } footer: {
+                            Text(record.sport.hasFullSupport ? "This recording has no visible per-second samples. Charts, zones and a route cannot be shown. If you expected samples from Apple Health, review read access in Health settings and refresh." : "This sport is shown as a summary. Full detail is available for cycling, walking, running and hiking.")
                         }
-                        if let distance = record.distance {
-                            LabeledContent("Recorded distance", value: String(format: "%.2f %@", distance / (units == .metric ? 1000 : 1609.344), units == .metric ? "km" : "mi"))
-                        }
-                    } header: { Text("Recorded summary") } footer: {
-                        Text(record.sport.hasFullSupport ? "This recording has no visible per-second samples. Charts, zones and a route cannot be shown. If you expected samples from Apple Health, review read access in Health settings and refresh." : "This sport is shown as a summary. Full detail is available for cycling, walking, running and hiking.")
                     }
                     if let library {
                         NavigationLink("Activity details") { ActivityManagementView(activity: record, library: library, deleteActivity: deleteActivity) }
@@ -546,6 +551,7 @@ struct ActivityDetailView: View {
         presentation = nil
         playing = false
         summaryOnly = false
+        golfRecording = nil
         do {
             guard let latest = try await library.activity(id), !latest.isHidden else {
                 current = nil
@@ -554,6 +560,15 @@ struct ActivityDetailView: View {
             }
             try Task.checkCancellation()
             current = latest
+            if latest.primary.source == .healthKit, latest.sourceSportName == "Golf",
+               let golf = try await library.golfHealthRecording(for: latest.primary) {
+                let athlete = try await library.profile()
+                try Task.checkCancellation()
+                units = athlete.units
+                golfRecording = golf
+                summaryOnly = true
+                return
+            }
             async let stream = library.analysisStream(for: id)
             async let recorded = library.recordedActivity(for: id)
             async let profile = library.profile()

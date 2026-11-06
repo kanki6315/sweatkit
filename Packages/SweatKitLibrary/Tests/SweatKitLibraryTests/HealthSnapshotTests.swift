@@ -14,6 +14,28 @@ import Testing
         HealthSnapshot(workoutID: id, activity: activity, sourceName: "Apple Watch", sourceBundleIdentifier: "test.health")
     }
 
+    @Test func golfContextSurvivesReopenAndAdjacentSessionsDoNotNeedReview() async throws {
+        let library = try temporary.open()
+        let start = Date(timeIntervalSince1970: 1_700_000_000)
+        let first = HealthSnapshot(workoutID: UUID(), activity: RecordedActivity(sport: .other,
+            stated: StatedSummary(start: start, end: start.addingTimeInterval(4565), timerTime: 4565)),
+            sourceName: "Arccos", sourceBundleIdentifier: "test.arccos", sourceSportName: "Golf")
+        let second = HealthSnapshot(workoutID: UUID(), activity: RecordedActivity(sport: .other,
+            stated: StatedSummary(start: start.addingTimeInterval(4560), end: start.addingTimeInterval(13108), timerTime: 8548)),
+            sourceName: "Arccos", sourceBundleIdentifier: "test.arccos", sourceSportName: "Golf")
+        try await library.importHealthSnapshot(first)
+        try await library.importHealthSnapshot(second)
+        let reopened = try temporary.open()
+        #expect(try await reopened.possibleDuplicates().isEmpty)
+        #expect(try await reopened.feed(limit: 10).activities.count == 2)
+        let context = try #require(try await reopened.recordingContext(for: first.identity))
+        #expect(context.sourceName == "Arccos")
+        #expect(context.sportName == "Golf")
+        #expect(try await reopened.feed(limit: 10).activities.allSatisfy { $0.sourceSportName == "Golf" && $0.sport == .other })
+        _ = try await reopened.recompute()
+        #expect(try await reopened.feed(limit: 10).activities.allSatisfy { $0.sourceSportName == "Golf" })
+    }
+
     @Test func workoutMergesWithGarminAndKeepsItsAlternative() async throws {
         let library = try temporary.open()
         let bytes = try Fixtures.FIT.outdoorRide.data()

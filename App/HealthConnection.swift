@@ -335,7 +335,8 @@ final class HealthConnection {
         }
         return HealthSnapshot(workoutID: workout.uuid, activity: activity, linkedIdentities: links,
             sourceName: workout.sourceRevision.source.name,
-            sourceBundleIdentifier: workout.sourceRevision.source.bundleIdentifier)
+            sourceBundleIdentifier: workout.sourceRevision.source.bundleIdentifier,
+            sourceSportName: workout.workoutActivityType == .golf ? "Golf" : nil)
     }
 
     @concurrent
