@@ -26,6 +26,8 @@ struct ActivityFeedView: View {
     @State private var showsDates = false
 
     var body: some View {
+        let sections = weekSections
+        let prefetchID = model.activities.dropLast(12).last?.id
         List {
             if filtersActive {
                 Section {
@@ -54,20 +56,23 @@ struct ActivityFeedView: View {
                     Button("Try again") { Task { await model.open(); await model.reload() } }
                 }
             }
-            ForEach(weekStarts, id: \.self) { week in
+            ForEach(sections, id: \.start) { section in
                 Section {
-                    ForEach(activities(in: week), id: \.id) { activity in
+                    ForEach(section.activities, id: \.id) { activity in
                         Button {
                             selectedActivity = activity
                         } label: {
                             ActivityFeedRow(activity: activity, units: model.units, library: model.library, revision: model.revisions[activity.primary], removedAtSource: activity.members.contains { model.removedSources.contains($0) }, stale: model.staleIDs.contains(activity.id ?? activity.primary), prominent: activity.id == model.activities.first?.id, records: model.recordBadges[activity.id ?? activity.primary] ?? [], route: model.routeCatalog.membership(of: activity.id ?? activity.primary))
                                 .id(thumbnailGeneration)
                         }
+                        .onAppear {
+                            if activity.id == prefetchID { Task { await model.loadMore() } }
+                        }
                         .buttonStyle(.plain)
                         .listRowSeparator(model.activities.first?.id == activity.id ? .hidden : .visible)
                         .accessibilityIdentifier(activity.isIndoor || activity.isVirtual ? "indoor-activity-row" : "outdoor-activity-row")
                     }
-                } header: { weekHeader(week) }
+                } header: { weekHeader(section.start) }
             }
             if model.hasMore {
                 Button("Load more activities") { Task { await model.loadMore() } }
@@ -279,11 +284,12 @@ struct ActivityFeedView: View {
         return FeedFilter(sports: filters.sport.map { [$0] }, dates: filters.limitsDates ? start..<max(start.addingTimeInterval(1), end) : nil,
                           setting: filters.setting, titleContains: filters.search)
     }
-    private var weekStarts: [Date] {
-        Set(model.activities.compactMap { Calendar.current.dateInterval(of: .weekOfYear, for: $0.start)?.start }).sorted(by: >)
-    }
-    private func activities(in week: Date) -> [ActivityRecord] {
-        model.activities.filter { Calendar.current.dateInterval(of: .weekOfYear, for: $0.start)?.start == week }
+    private var weekSections: [(start: Date, activities: [ActivityRecord])] {
+        let calendar = Calendar.current
+        let grouped = Dictionary(grouping: model.activities) {
+            calendar.dateInterval(of: .weekOfYear, for: $0.start)?.start ?? calendar.startOfDay(for: $0.start)
+        }
+        return grouped.keys.sorted(by: >).map { (start: $0, activities: grouped[$0] ?? []) }
     }
     @ViewBuilder private func weekHeader(_ week: Date) -> some View {
         VStack(alignment: .leading, spacing: 4) {

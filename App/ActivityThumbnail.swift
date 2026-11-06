@@ -15,6 +15,9 @@ struct ActivityThumbnail: View {
     @Environment(\.colorScheme) private var scheme
     @State private var preview: UIImage?
     @State private var finished = false
+    @State private var requestedKey: String?
+
+    private var thumbnailKey: String { "\(revision?.hex ?? activity.primary.description)-\(scheme)-\(compact)" }
 
     var body: some View {
         Group {
@@ -29,13 +32,17 @@ struct ActivityThumbnail: View {
         }
         .clipped()
         .accessibilityHidden(true)
-        .task(id: "\(revision?.hex ?? activity.primary.description)-\(scheme)-\(compact)") {
+        .task(id: thumbnailKey) {
+            if requestedKey != thumbnailKey {
+                preview = nil
+                requestedKey = thumbnailKey
+            }
             finished = false
-            preview = nil
             do {
                 let image = try await ThumbnailRenderer.shared.image(activity: activity, library: library, dark: scheme == .dark, compact: compact) { image in
                     guard !Task.isCancelled else { return }
-                    preview = image
+                    // Keep an existing enriched preview while the task resumes.
+                    if preview == nil { preview = image }
                 }
                 guard !Task.isCancelled else { return }
                 if let image { preview = image }
@@ -60,6 +67,23 @@ struct ActivityThumbnail: View {
         var overlay: RouteOverlay
     }
 
+    private final class PreparedDrawing {
+        let drawing: Drawing
+        let sampleCount: Int
+        init(_ drawing: Drawing, sampleCount: Int) {
+            self.drawing = drawing
+            self.sampleCount = sampleCount
+        }
+    }
+    // Cache only activity-derived geometry, never Apple map imagery. Revisiting
+    // rows should not decode and analyse hours of samples again.
+    private let drawings: NSCache<NSString, PreparedDrawing> = {
+        let cache = NSCache<NSString, PreparedDrawing>()
+        cache.countLimit = 100
+        cache.totalCostLimit = 16 * 1024 * 1024
+        return cache
+    }()
+
     func image(activity: ActivityRecord, library: ActivityLibrary, dark: Bool, compact: Bool,
                onPreview: (UIImage) -> Void) async throws -> UIImage? {
         try Task.checkCancellation()
@@ -70,28 +94,43 @@ struct ActivityThumbnail: View {
         let profileHash = ContentHash(of: try encoder.encode(profile))
         let key = ContentHash(of: Data("route-thumbnail-v4|\(profileHash.hex)|\(source.currentRevision.hex)|\(activity.sport.rawValue)|\(activity.isIndoor)|\(activity.isVirtual)|\(dark)|\(compact)".utf8))
         let destination = library.store.thumbnailURL(for: source.currentRevision, variant: key)
-        let cached = UIImage(contentsOfFile: destination.path)
-        if let cached { onPreview(cached) }
-        let stream = try await library.analysisStream(for: id)
-        let drawing = await Task.detached(priority: .utility) {
-            let route: [Coordinate]
-            let routeSeconds: [Int]
-            if activity.isIndoor || activity.isVirtual || !activity.sport.hasFullSupport { route = []; routeSeconds = [] }
-            else {
-                let line = TrackCleanup.simplify(TrackCleanup.clean(stream, sport: activity.sport))
-                route = line.coordinates
-                routeSeconds = line.sampleIndices
-            }
-            let hasPower = (0..<stream.count).contains { stream.power[$0] != nil }
-            let series = hasPower ? stream.power : stream.heartRate
-            let input = DetailInput(stream: stream, sport: activity.sport, profile: profile, activityDate: activity.start)
-            let candidates = route.isEmpty
-                ? (hasPower ? [RouteOverlay.power, .plain] : [.heartRate, .plain])
-                : RouteOverlay.defaultCandidates(sport: activity.sport, hasPowerMeter: (0..<stream.count).contains { stream.power[$0] != nil })
-            let bands = candidates.compactMap { ColourBanding.bands(for: $0, input: input).value }.first
-            return Drawing(coordinates: route,
-                sparkline: DetailChartSeries.points((0..<series.count).map { series[$0] }, budget: 180), routeSeconds: routeSeconds, bands: bands, overlay: bands?.overlay ?? .plain)
+        let cachedData = await Task.detached(priority: .utility) {
+            try? Data(contentsOf: destination)
         }.value
+        let cached = cachedData.flatMap { UIImage(data: $0) }
+        if let cached { onPreview(cached) }
+        // Indoor previews are complete on disk; they need no map enrichment.
+        if let cached, activity.isIndoor || activity.isVirtual || !activity.sport.hasFullSupport { return cached }
+        let prepared: PreparedDrawing
+        if let existing = drawings.object(forKey: key.hex as NSString) {
+            prepared = existing
+        } else {
+            let stream = try await library.analysisStream(for: id)
+            let drawing = await Task.detached(priority: .utility) {
+                let route: [Coordinate]
+                let routeSeconds: [Int]
+                if activity.isIndoor || activity.isVirtual || !activity.sport.hasFullSupport { route = []; routeSeconds = [] }
+                else {
+                    let line = TrackCleanup.simplify(TrackCleanup.clean(stream, sport: activity.sport))
+                    route = line.coordinates
+                    routeSeconds = line.sampleIndices
+                }
+                let hasPower = (0..<stream.count).contains { stream.power[$0] != nil }
+                let series = hasPower ? stream.power : stream.heartRate
+                let input = DetailInput(stream: stream, sport: activity.sport, profile: profile, activityDate: activity.start)
+                let candidates = route.isEmpty
+                    ? (hasPower ? [RouteOverlay.power, .plain] : [.heartRate, .plain])
+                    : RouteOverlay.defaultCandidates(sport: activity.sport, hasPowerMeter: hasPower)
+                let bands = candidates.lazy.compactMap { ColourBanding.bands(for: $0, input: input).value }.first
+                return Drawing(coordinates: route,
+                    sparkline: DetailChartSeries.points((0..<series.count).map { series[$0] }, budget: 180), routeSeconds: routeSeconds, bands: bands, overlay: bands?.overlay ?? .plain)
+            }.value
+            try Task.checkCancellation()
+            prepared = PreparedDrawing(drawing, sampleCount: stream.count)
+            drawings.setObject(prepared, forKey: key.hex as NSString,
+                               cost: drawing.coordinates.count * 32 + drawing.sparkline.count * 32 + stream.count * 16)
+        }
+        let drawing = prepared.drawing
         try Task.checkCancellation()
         let size = compact ? CGSize(width: 216, height: 216) : CGSize(width: 720, height: 360)
         let format = UIGraphicsImageRendererFormat()
@@ -179,7 +218,7 @@ struct ActivityThumbnail: View {
                 context.fill(CGRect(origin: .zero, size: size))
                 let low = drawing.sparkline.map(\.value).min() ?? 0
                 let high = drawing.sparkline.map(\.value).max() ?? 1
-                let last = Double(max(1, stream.count - 1))
+                let last = Double(max(1, prepared.sampleCount - 1))
                 var previous: CGPoint?
                 var segment: Int?
                 for point in drawing.sparkline {
