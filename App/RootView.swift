@@ -33,6 +33,7 @@ struct RootView: View {
                 NavigationStack {
                     ActivityFeedView(model: library, filters: feedFilters, showSettings: { showsSettings = true })
                         .searchable(text: $feedFilters.search, isPresented: $searchPresented, prompt: "Search activity titles")
+                        .scrollDismissesKeyboard(.immediately)
                 }
             }
         }
