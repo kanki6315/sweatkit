@@ -125,9 +125,29 @@ private final class IdleMapCache {
 final class LayoutReportingMapView: MKMapView {
     var onResize: (() -> Void)?
     private var lastSize: CGSize = .zero
+    let routeFallback = RouteFallbackView(frame: .zero)
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        addSubview(routeFallback)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { nil }
+
+    func showRouteFallback(_ visible: Bool) {
+        routeFallback.isHidden = !visible
+        isScrollEnabled = !visible
+        isZoomEnabled = !visible
+        isRotateEnabled = !visible
+        isPitchEnabled = !visible
+        accessibilityElements = visible ? [routeFallback] : nil
+    }
 
     override func layoutSubviews() {
         super.layoutSubviews()
+        routeFallback.frame = bounds
+        bringSubviewToFront(routeFallback)
         if bounds.size != lastSize {
             lastSize = bounds.size
             onResize?()
@@ -221,6 +241,31 @@ final class FlyoverMapCoordinator: NSObject, MKMapViewDelegate {
     private var cameraNeedsUpdate = false
     private var displayLink: CADisplayLink?
     private var lastFrameTimestamp: CFTimeInterval?
+    private var loadingTimeout: Task<Void, Never>?
+    private var isPresented = false
+
+    private func showRouteFallback(_ visible: Bool) {
+        guard let mapView else { return }
+        let changed = mapView.routeFallback.isHidden == visible
+        mapView.showRouteFallback(visible)
+        if visible {
+            stopDisplayLink()
+            if changed { fitOverview() }
+        } else if cameraMode == .follow {
+            cameraNeedsUpdate = true
+            startDisplayLink()
+        }
+    }
+
+    private func watchMapLoading() {
+        guard isPresented, loadingTimeout == nil else { return }
+        loadingTimeout = Task { @MainActor [weak self] in
+            do { try await Task.sleep(for: .seconds(8)) } catch { return }
+            guard let self, self.isPresented else { return }
+            self.loadingTimeout = nil
+            self.showRouteFallback(true)
+        }
+    }
 
     func update(
         route: FlyoverRoute,
@@ -232,15 +277,23 @@ final class FlyoverMapCoordinator: NSObject, MKMapViewDelegate {
         guard let mapView else { return }
         self.options = options
 
+        let mapRegionChanged = geometry?.route.vertices != route.vertices
         let routeChanged = geometry?.route != route
         if routeChanged {
             geometry = RouteGeometry(route: route)
         }
         guard let geometry else { return }
         position = geometry.position(atSample: scrubSample)
+        mapView.routeFallback.update(route: route, colors: bandColors, position: position, options: options)
+        if mapRegionChanged {
+            showRouteFallback(true)
+            watchMapLoading()
+        }
 
         let newMapSettings = MapSettings(style: options.mapStyle, realisticElevation: options.realisticElevation)
         if newMapSettings != mapSettings {
+            showRouteFallback(true)
+            watchMapLoading()
             mapSettings = newMapSettings
             mapView.preferredConfiguration = Self.configuration(for: newMapSettings)
             performanceLog.info("map_configuration style=\(options.mapStyle.rawValue, privacy: .public) realistic=\(options.realisticElevation)")
@@ -285,11 +338,15 @@ final class FlyoverMapCoordinator: NSObject, MKMapViewDelegate {
             smoother.maximumRate = options.headingSmoothing.maximumRate
             headingTarget = options.followHeading.target(on: geometry, at: position) ?? headingTarget
             cameraNeedsUpdate = true
-            startDisplayLink()
+            if mapView.routeFallback.isHidden { startDisplayLink() }
+            else if routeChanged { fitOverview() }
         }
     }
 
     func stop() {
+        isPresented = false
+        loadingTimeout?.cancel()
+        loadingTimeout = nil
         performanceLog.info("map_detached")
         stopDisplayLink()
     }
@@ -313,6 +370,7 @@ final class FlyoverMapCoordinator: NSObject, MKMapViewDelegate {
     private var regionSequence = 0
 
     func beginPresentation(reused: Bool) {
+        isPresented = true
         presentationStarted = CACurrentMediaTime()
         firstRenderReported = false
         firstCompleteRenderReported = false
@@ -344,6 +402,11 @@ final class FlyoverMapCoordinator: NSObject, MKMapViewDelegate {
     }
 
     func mapViewDidFinishRenderingMap(_ mapView: MKMapView, fullyRendered: Bool) {
+        if fullyRendered, isPresented {
+            loadingTimeout?.cancel()
+            loadingTimeout = nil
+            showRouteFallback(false)
+        }
         let now = CACurrentMediaTime()
         if !firstRenderReported {
             firstRenderReported = true
@@ -361,6 +424,7 @@ final class FlyoverMapCoordinator: NSObject, MKMapViewDelegate {
     }
 
     func mapViewWillStartLoadingMap(_ mapView: MKMapView) {
+        watchMapLoading()
         if loadingStarted == nil { loadingStarted = CACurrentMediaTime() }
     }
 
@@ -371,6 +435,11 @@ final class FlyoverMapCoordinator: NSObject, MKMapViewDelegate {
     }
 
     func mapViewDidFailLoadingMap(_ mapView: MKMapView, withError error: any Error) {
+        if isPresented {
+            loadingTimeout?.cancel()
+            loadingTimeout = nil
+            showRouteFallback(true)
+        }
         // Avoid logging location-bearing URLs or raw error descriptions.
         loadingStarted = nil
         let failure = error as NSError

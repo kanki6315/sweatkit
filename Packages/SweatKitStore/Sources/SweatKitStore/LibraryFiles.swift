@@ -61,6 +61,16 @@ struct LibraryFiles: Sendable {
         try manager.createDirectory(at: originalsDirectory, withIntermediateDirectories: true)
         try manager.createDirectory(at: streamsDirectory, withIntermediateDirectories: true)
         try manager.createDirectory(at: thumbnailsDirectory, withIntermediateDirectories: true)
+        // Earlier thumbnails embedded Apple imagery without an expiry. Discard
+        // those derived files once; new thumbnails contain only local activity data.
+        let routeOnlyMarker = thumbnailsDirectory.appendingPathComponent(".route-only-v4")
+        if !manager.fileExists(atPath: routeOnlyMarker.path) {
+            for file in try manager.contentsOfDirectory(at: thumbnailsDirectory, includingPropertiesForKeys: nil)
+                where file.pathExtension == "png" {
+                try manager.removeItem(at: file)
+            }
+            try Data().write(to: routeOnlyMarker, options: .atomic)
+        }
         var thumbnails = thumbnailsDirectory
         var thumbnailValues = URLResourceValues()
         thumbnailValues.isExcludedFromBackup = true
