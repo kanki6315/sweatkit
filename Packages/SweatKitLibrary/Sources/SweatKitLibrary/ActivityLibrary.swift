@@ -150,8 +150,36 @@ public actor ActivityLibrary {
     /// A changed route or sample set becomes a new revision of that source.
     @discardableResult
     public func importHealthSnapshot(_ snapshot: HealthSnapshot, at date: Date = Date()) async throws -> ImportResult {
+        try await importHealthSnapshot(snapshot, at: date, batched: false)
+    }
+
+    /// Bounded batches amortize full-library identity matching. The writer lock
+    /// covers the whole batch; a failure leaves durable inputs for retry.
+    /// Callers only checkpoint returned IDs after reconciliation succeeds.
+    public func importHealthSnapshots(_ snapshots: [HealthSnapshot], at date: Date = Date()) async throws -> Set<UUID> {
+        let token = SourceIdentity(source: .file, externalID: "health-batch")
+        await begin(token)
+        defer { end(token) }
+        if identityNeedsRecovery && FileManager.default.fileExists(atPath: identityURL.path) {
+            try await reconcileIdentity()
+        }
+        var completed: Set<UUID> = []
+        for snapshot in snapshots {
+            try Task.checkCancellation()
+            do {
+                _ = try await importHealthSnapshot(snapshot, at: date, batched: true)
+                completed.insert(snapshot.workoutID)
+            } catch is CancellationError { throw CancellationError() }
+            catch { /* Keep this workout pending, but allow the others to finish. */ }
+        }
+        if identityNeedsRecovery { try await reconcileIdentity() }
+        return completed
+    }
+
+    private func importHealthSnapshot(_ snapshot: HealthSnapshot, at date: Date, batched: Bool) async throws -> ImportResult {
         let result = try await importBytes(snapshot.encoded(), as: snapshot.identity,
-            fallbackUTCOffset: snapshot.activity.stated.utcOffset, at: date)
+            fallbackUTCOffset: snapshot.activity.stated.utcOffset, at: date,
+            alreadyLocked: batched, deferIdentity: batched)
         // Health data remains local even when device backups are enabled.
         let records = try await store.sourceRecord(snapshot.identity)
         if let revision = records?.currentRevision {
@@ -220,7 +248,8 @@ public actor ActivityLibrary {
         as identity: SourceIdentity?,
         fallbackUTCOffset: Int?,
         at date: Date,
-        alreadyLocked: Bool = false
+        alreadyLocked: Bool = false,
+        deferIdentity: Bool = false
     ) async throws -> ImportResult {
         let hash = ContentHash(of: bytes)
         let identity = identity ?? SourceIdentity(source: .file, externalID: hash.hex)
@@ -230,12 +259,13 @@ public actor ActivityLibrary {
         if !alreadyLocked { await begin(identity) }
         defer { if !alreadyLocked { end(identity) } }
 
-        if identityNeedsRecovery && FileManager.default.fileExists(atPath: identityURL.path) { try await reconcileIdentity() }
+        if !deferIdentity && identityNeedsRecovery && FileManager.default.fileExists(atPath: identityURL.path) { try await reconcileIdentity() }
 
         if try deletedIdentities().contains(identity) { throw LibraryError.permanentlyDeleted(identity) }
 
         // Already imported: nothing to decode, store or compute.
         if let activity = try await finishedActivity(of: identity, holding: hash) {
+            if deferIdentity { return ImportResult(change: .alreadyInLibrary, source: identity, activity: activity) }
             if !FileManager.default.fileExists(atPath: identityURL.path) { try await reconcileIdentity() }
             let resolved = try await activityContaining(identity)
             return ImportResult(change: .alreadyInLibrary, source: identity, activity: resolved ?? activity)
@@ -268,6 +298,9 @@ public actor ActivityLibrary {
             isIndoor: decoded.recorded.isIndoor || decoded.recorded.isVirtual,
             linkedIdentities: (try HealthSnapshot.decode(bytes))?.linkedIdentities ?? [])
         try writeIdentityJournal(journal)
+        if deferIdentity {
+            return ImportResult(change: record.activityID == nil ? .added : .updated, source: record.identity, activity: row)
+        }
         try await reconcileIdentity()
         let resolvedID = try await store.sourceRecord(record.identity)?.activityID
         let resolvedRow: ActivityRecord?
