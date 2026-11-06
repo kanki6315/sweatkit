@@ -22,7 +22,7 @@ import SweatKitModel
                     UserDefaults.standard.set(false, forKey: "routes.includeOlderHistory")
                     let library = try ActivityLibrary(root: root)
                     if !ProcessInfo.processInfo.arguments.contains("empty") {
-                        let count = ProcessInfo.processInfo.arguments.contains("review") ? 6 : 5
+                        let count = ProcessInfo.processInfo.arguments.contains("developing") ? 3 : ProcessInfo.processInfo.arguments.contains("review") ? 6 : 5
                         for index in 0..<count {
                             let start = Date().addingTimeInterval(-Double(index + 1) * 86400)
                             let offset = index == 5 ? -14.0 : 0

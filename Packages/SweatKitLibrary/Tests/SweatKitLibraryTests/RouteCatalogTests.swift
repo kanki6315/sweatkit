@@ -20,6 +20,16 @@ import SweatKitTestSupport
             TrackPoint(coordinate: $0.element, time: Double($0.offset))
         }, sportFamily: .cycling, pausePositionsAreReliable: reliable), metrics: nil)
     }
+    @Test func repeatedPairsAreVisibleAsDevelopingUntilFiveOutings() async throws {
+        let catalog = try await ActivityLibrary.assembleRoutes([input("a"), input("b"), input("c", reverse: true)], seeds: [], decisions: [])
+        #expect(catalog.routes.isEmpty)
+        #expect(catalog.developingRoutes?.count == 1)
+        #expect(catalog.developingRoutes?.first?.efforts.count == 2)
+        let frequent = try await ActivityLibrary.assembleRoutes([input("a"), input("b"), input("c"), input("d"), input("e")], seeds: [], decisions: [])
+        #expect(frequent.routes.count == 1)
+        #expect(frequent.developingRoutes?.isEmpty == true)
+    }
+
     @Test func groupsRanksAndRejectsReverse() async throws {
         let a = input("a"), b = input("b"), c = input("c", reverse: true)
         let catalog = try await ActivityLibrary.assembleRoutes([a,a,b,c], seeds: [], decisions: [], minimumOutings: 2)
@@ -208,6 +218,27 @@ import SweatKitTestSupport
         } catch is CancellationError { }
     }
 
+    actor CachedResults {
+        var values: [RouteCatalog] = []
+        func append(_ catalog: RouteCatalog) { values.append(catalog) }
+    }
+
+    @Test func cachePreviewDistinguishesMissFromValidEmptyAndInvalidatesUpgrade() async throws {
+        let previews = CachedResults()
+        let library = try temporary.open()
+        _ = try await library.routes(includeOlderHistory: true) { await previews.append($0) }
+        #expect(await previews.values.isEmpty)
+        let reopened = try temporary.open()
+        _ = try await reopened.routes(includeOlderHistory: true) { await previews.append($0) }
+        #expect(await previews.values.count == 1)
+        #expect(await previews.values.first?.routes.isEmpty == true)
+        var versions = PipelineVersions.current
+        versions.streamRules += 1
+        let upgraded = try temporary.open(versions: versions)
+        _ = try await upgraded.routes(includeOlderHistory: true) { await previews.append($0) }
+        #expect(await previews.values.count == 1)
+    }
+
     @Test func emptyCatalogPersistsAndAlgorithmUpgradeInvalidatesCache() async throws {
         let library = try temporary.open()
         #expect(try await library.routes(includeOlderHistory: true).routes.isEmpty)
@@ -245,6 +276,17 @@ import SweatKitTestSupport
         }
         let route = try #require(try await library.routes(includeOlderHistory: true).routes.first)
         #expect(route.efforts.count == 5)
+        let inspection = try await library.inspectRoute(activity: route.referenceID, against: route)
+        #expect(!inspection.coordinates.isEmpty)
+        #expect(inspection.shortlisted)
+        #expect(inspection.measures?.failedMeasures().isEmpty == true)
+        #expect(inspection.explicitMembership == nil)
+        var extendedReference = route
+        extendedReference.reference.signature.length *= 1.2
+        let separate = try await library.inspectRoute(activity: route.referenceID, against: extendedReference)
+        #expect(!separate.detection.distanceWithinTolerance)
+        #expect(!separate.shortlisted)
+        #expect(separate.measures == nil)
         #expect(route.efforts.allSatisfy { $0.elapsedTime != nil })
         let boundary = Calendar(identifier: .gregorian).date(byAdding: .year, value: 2, to: first.activity.start)!
         #expect(try await library.routes(now: boundary).routes.count == 1)
@@ -260,6 +302,22 @@ import SweatKitTestSupport
         let marker = Date(timeIntervalSince1970: 1_000_000)
         try FileManager.default.setAttributes([.modificationDate: marker], ofItemAtPath: cacheURL.path)
         #expect(try await library.routes(includeOlderHistory: true).routes.first?.best == route.best)
+        let previewLibrary = try temporary.open()
+        let previews = CachedResults()
+        let previewTask = Task {
+            try await previewLibrary.routes(includeOlderHistory: true) { catalog in
+                await previews.append(catalog)
+                // Stopping here proves the populated catalog is delivered before
+                // the remaining metric refresh, not just alongside final completion.
+                withUnsafeCurrentTask { $0?.cancel() }
+            }
+        }
+        do {
+            _ = try await previewTask.value
+            Issue.record("Preview cancellation should stop the refresh")
+        } catch is CancellationError { }
+        #expect(await previews.values.first?.routes.first?.efforts.count == 5)
+        #expect(await previews.values.first?.routes.first?.best == route.best)
         let cachedLibrary = try temporary.open()
         #expect(try await cachedLibrary.routes(includeOlderHistory: true).routes.first?.best == route.best)
         #expect(try FileManager.default.attributesOfItem(atPath: cacheURL.path)[.modificationDate] as? Date == marker)
@@ -287,7 +345,10 @@ import SweatKitTestSupport
         var noGPS = health
         for i in noGPS.activity.stream.samples.indices { noGPS.activity.stream.samples[i].position = nil }
         try await reopened.importHealthSnapshot(noGPS)
-        #expect(try await reopened.routes(includeOlderHistory: true).routes.isEmpty)
+        let invalidatedPreviews = CachedResults()
+        let revised = try await reopened.routes(includeOlderHistory: true) { await invalidatedPreviews.append($0) }
+        #expect(revised.routes.isEmpty)
+        #expect(await invalidatedPreviews.values.isEmpty)
         try await reopened.importHealthSnapshot(health)
         _ = try await reopened.recompute()
         #expect(try await reopened.routes(includeOlderHistory: true).routes.first?.name == "Fixture course")
