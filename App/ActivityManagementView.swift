@@ -133,7 +133,9 @@ struct LibraryReviewView: View {
                         .accessibilityAction(named: "Keep separate") { decide([pair], .keepSeparate) }
                 }
             } header: { Text("Possible duplicates") } footer: {
-                Text("Swipe right to merge, or left to keep separate. Tap Select to review several pairs at once.")
+                if !pairs.isEmpty {
+                    Text("Swipe right to merge; left to keep separate.")
+                }
             }
             Section("Hidden activities") {
                 if hidden.isEmpty { Text("No hidden activities.").foregroundStyle(.secondary) }

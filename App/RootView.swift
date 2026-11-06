@@ -8,6 +8,7 @@ struct RootView: View {
     @State private var showsSettings = false
     @State private var feedFilters = ActivityFeedFilters()
     @AppStorage(AppTheme.preferenceKey) private var accent = AppTheme.cyan.rawValue
+    @AppStorage(AppAppearance.preferenceKey) private var appearance = AppAppearance.system.rawValue
     let library: LibraryModel
     @Environment(\.scenePhase) private var scenePhase
 
@@ -50,6 +51,7 @@ struct RootView: View {
         .sheet(isPresented: $showsSettings) {
             SettingsView(model: library)
         }
+        .preferredColorScheme((AppAppearance(rawValue: appearance) ?? .system).colorScheme)
     }
 
     private var searchTabRole: TabRole {

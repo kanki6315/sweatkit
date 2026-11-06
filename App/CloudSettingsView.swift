@@ -8,7 +8,7 @@ struct CloudSettingsView: View {
                 Toggle("Keep a private iCloud copy", isOn: Binding(get: { cloud.enabled }, set: { cloud.setEnabled($0) }))
                     .disabled(cloud.running)
             } footer: {
-                Text("Garmin and imported originals, your profile and your decisions are copied to your private iCloud. Your library works offline.")
+                Text("Copies Garmin and imported files, your profile and library decisions. Excludes Apple Health data.")
             }
             Section("Copy status") {
                 Label(cloud.status, systemImage: cloud.detail == nil ? "icloud" : "exclamationmark.icloud")
@@ -22,9 +22,8 @@ struct CloudSettingsView: View {
                     .disabled(!cloud.enabled || cloud.running)
             }
             Section("Recovery") {
-                Text("On a new device, enable this copy with the same Apple account. SweatKit downloads originals and decisions, then rebuilds activities and analysis.")
-                Text("Apple Health workouts, samples, routes and summaries stay on this device. Connect Apple Health again to recover available workouts. Deleted Health-only workouts cannot be restored.")
-                Text("Hidden and permanently deleted activities stay hidden or deleted. Your Garmin key stays in this device’s Keychain.")
+                Text("Use the same Apple account on a new device. Reconnect Garmin and Apple Health.")
+                Text("Permanently deleted activities cannot be restored.")
             }.font(.body)
         }
         .navigationTitle("iCloud")

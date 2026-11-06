@@ -36,7 +36,7 @@ struct ThresholdSuggestionReview: View {
                         Text("This replaces the threshold already set for this date.").font(.footnote).foregroundStyle(.secondary)
                     }
                 } footer: {
-                    Text("The estimate is 95% of your best valid 20-minute power in the last 90 days. Review it against your own knowledge before applying. Activities from the effective date will be recalculated; earlier history is preserved.")
+                    Text("95% of your best 20-minute power in the last 90 days. Applying recalculates activities from the effective date.")
                 }
                 if let error { Section { Text(error).foregroundStyle(.red) } }
                 Section {
