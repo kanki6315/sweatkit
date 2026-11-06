@@ -349,8 +349,8 @@ The detail screen is a full-screen 3D map with a draggable timeline, and the tim
 
 - Overview mode fits the whole route with free pan, zoom and rotate.
 - Follow mode is a chase camera behind the marker. Its heading is the bearing to a point 150 to 300 m ahead on the route, smoothed so that switchbacks do not whip the view.
-- Pinch changes the follow distance and a drag orbits. A recentre button returns to the default view.
-- Play and pause sit beside the timeline. Default playback runs in recorded time (one activity second per second at 1x), with 0.5x, 2x and 4x options. Camera translation and the marker share the same position; only heading is smoothed.
+- Pan, pinch, rotate and tilt take manual control of the camera while playback continues. Resume follow returns to the automatic chase camera; scrubbing does not cancel manual camera control.
+- Play and pause sit beside the timeline. The default plays the full elapsed sample timeline in approximately 30 seconds, at overview speed 1×, with 0.5× (about 60 seconds), 0.25× (about 120 seconds) and recorded-time options for inspection. Pauses and sensor gaps remain in elapsed time; collapsing timeline stops does not change playback. Scrubbing pauses playback, replay at the end starts at zero, and leaving the screen or backgrounding pauses it. Camera translation and the marker share the same position during automatic following; only heading is smoothed.
 - With Reduce Motion on, follow mode is replaced by overview mode with a moving marker.
 
 **Route colouring**
@@ -408,7 +408,7 @@ A stated timer duration says how long the pauses were, not where they were. With
 | Status | Metrics |
 | --- | --- |
 | Still available | Elapsed time, the stated timer time, distance, ascent, time in zones, recorded work, and average power and heart rate over the seconds that have them |
-| Unavailable | Moving time, coverage, weighted power, intensity, variability, both kinds of load, the power curve, splits and best distances |
+| Unavailable | Moving time, coverage, average cadence, weighted power, intensity, variability, both kinds of load, the power curve, splits and best distances |
 | Route comparison | Any comparison that includes this effort uses elapsed time for both efforts, and the moving-time option is disabled. The effort is left out of moving-time rankings and statistics, and is listed with its elapsed time. |
 
 Sensor gaps are not pauses. A missing reading never shortens elapsed, timer or moving time.
@@ -471,6 +471,7 @@ A ride with sparse power, a ride under 5 minutes and a ride with no threshold po
 | Efficiency, cycling | Weighted power divided by average heart rate, when both are available |
 | Efficiency, on foot | Average speed divided by average heart rate, over the seconds that have both. Always speed, never pace, so a higher value always means more output per heartbeat. |
 | Splits | Pace, heart rate and ascent per km, for walking, running and hiking |
+| Average cadence | Mean of available measured and interpolated 1 Hz cadence values during timer time, including recorded zeroes. Missing, negative and nonfinite values are excluded, never treated as zero. Steps/min on foot, rpm on a bike. Show sample coverage when incomplete; unavailable without cadence or reliable pause timing. Prepared from the current stream for the activity summary, independently of the scrub cursor. |
 | Best distances | Fastest 1 km, 5 km and 10 km by timer time, for walking and running |
 
 The elevation thresholds are provisional. They were fitted to four recordings, where they bring ascent within 2 to 17% of the figure each file states, and within 11 m in every case. They are to be checked against a larger set of activities before they are relied on.

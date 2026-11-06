@@ -237,7 +237,8 @@ extension FeedRules {
             isVirtual: facts.isVirtual,
             title: title,
             headline: headline(sport: facts.sport, metrics: metrics),
-            isHidden: existing?.isHidden ?? false
+            isHidden: existing?.isHidden ?? false,
+            sourceSportName: existing?.sourceSportName
         )
     }
 }

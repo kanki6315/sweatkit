@@ -4,7 +4,7 @@ import SweatKitLibrary
 import SweatKitModel
 import SweatKitStore
 
-/// Shared by the Activities and native Search tabs so filters stay consistent.
+/// Keeps title search and Activities filters together across navigation.
 @MainActor @Observable final class ActivityFeedFilters {
     var search = ""
     var sport: Sport?
@@ -418,7 +418,8 @@ struct ActivityFeedRow: View {
     }
 
     private var metadata: String {
-        let sport = activity.isVirtual ? "Virtual ride" : activity.isIndoor ? "Indoor " + activity.sport.rawValue : activity.sport.rawValue.capitalized
+        let sportName = activity.sport == .other ? (activity.sourceSportName ?? "Other") : activity.sport.rawValue.capitalized
+        let sport = activity.isVirtual ? "Virtual ride" : activity.isIndoor ? "Indoor " + sportName : sportName
         return prominent ? sport : "\(sport) · \(activity.start.formatted(.dateTime.weekday(.abbreviated).day().month(.abbreviated)))"
     }
 

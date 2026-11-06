@@ -253,15 +253,30 @@ struct ActivityAnalysisView: View {
                 }
                 summaryValue(metrics.load.value?.source == .heartRate ? "Heart-rate load" : "Load", text: number(metrics.load.value?.value, suffix: ""), reason: metrics.load.reason)
                 summaryValue("Average heart rate", text: number(metrics.heartRate.average.value, suffix: " bpm"), reason: metrics.heartRate.average.reason)
+                if detail.input.sport.family != .other {
+                    summaryValue("Average cadence", text: number(presentation.cadence.average.value,
+                        suffix: detail.input.sport.family == .cycling ? " rpm" : " spm"),
+                        reason: presentation.cadence.average.reason,
+                        accessibleText: number(presentation.cadence.average.value,
+                            suffix: detail.input.sport.family == .cycling ? " revolutions per minute" : " steps per minute"))
+                }
+            }
+            if detail.input.sport.family != .other, presentation.cadence.average.value != nil {
+                Text("Average cadence excludes recorded pauses and missing samples.")
+                    .font(.footnote).foregroundStyle(.secondary)
+                if let coverage = presentation.cadence.coverage.value, coverage < 1 {
+                    Text("Cadence coverage: \(coverage * 100, specifier: "%.1f")% of timer time.")
+                        .font(.footnote).foregroundStyle(.secondary)
+                }
             }
             if metrics.power.averageShowsCoverage, let coverage = metrics.power.coverage.value {
                 Text("Power coverage: \(coverage * 100, specifier: "%.0f")% of timer time.").font(.footnote).foregroundStyle(.secondary)
             }
         }.padding(16).background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 18))
     }
-    private func summaryValue(_ label: String, text: String, reason: UnavailableReason?) -> some View {
+    private func summaryValue(_ label: String, text: String, reason: UnavailableReason?, accessibleText: String? = nil) -> some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(text).font(.title3.bold())
+            Text(text).font(.title3.bold()).accessibilityLabel(accessibleText ?? text)
             Text(label).font(.caption).foregroundStyle(.secondary)
             if let reason { Text(unavailable(reason)).font(.caption).foregroundStyle(.secondary) }
         }.accessibilityElement(children: .combine)
@@ -332,6 +347,7 @@ struct ActivityAnalysisView: View {
         case .noDistance: "No recorded distance samples."
         case .noPower: "No recorded power."
         case .noHeartRate: "No recorded heart rate."
+        case .noCadence: "No recorded cadence during timer time."
         case .noAltitude: "No recorded elevation."
         case .noGradient: "No gradient samples."
         default: "Unavailable for this recording."

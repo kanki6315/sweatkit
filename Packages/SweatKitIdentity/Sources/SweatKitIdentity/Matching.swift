@@ -102,8 +102,10 @@ public enum MatchOutcome: Hashable, Codable, Sendable {
     ///   `distanceFraction`,
     /// - the two records overlap in time.
     ///
-    /// Records that fail are `.possibleDuplicate` when they overlap in time
-    /// and `.unrelated` when they do not.
+    /// Records that fail are `.possibleDuplicate` when they overlap in time,
+    /// except negligible boundary overlaps between adjacent same-provider
+    /// sessions (at most 30 seconds and 1% of the shorter recording, with
+    /// starts more than the start tolerance apart). Those remain unrelated.
     ///
     /// Readings taken where the spec is ambiguous or silent:
     /// - "Within" includes the limit: a start difference of exactly 120 s
@@ -135,9 +137,21 @@ public enum MatchOutcome: Hashable, Codable, Sendable {
             return .sameActivity(.sourceIdentifier)
         }
         guard overlapInTime(first, second) else { return .unrelated }
-        return passesTolerances(first, second, tolerances: tolerances)
-            ? .sameActivity(.tolerances)
-            : .possibleDuplicate
+        if passesTolerances(first, second, tolerances: tolerances) {
+            return .sameActivity(.tolerances)
+        }
+        // Adjacent sessions from one provider can overlap by a few seconds
+        // at a recording boundary. Do not turn that sliver into a duplicate
+        // prompt. Contained partial recordings and cross-provider overlaps
+        // retain the existing review behavior.
+        let overlap = min(first.start.addingTimeInterval(first.elapsed), second.start.addingTimeInterval(second.elapsed))
+            .timeIntervalSince(max(first.start, second.start))
+        if first.identity.source == second.identity.source,
+           abs(first.start.timeIntervalSince(second.start)) > tolerances.startDifference,
+           overlap <= 30, overlap / min(first.elapsed, second.elapsed) <= 0.01 {
+            return .unrelated
+        }
+        return .possibleDuplicate
     }
 
     /// Whether the two records agree on sport family, start, duration and,

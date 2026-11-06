@@ -13,6 +13,7 @@ enum Pipeline {
     struct Decoded: Sendable {
         var recorded: RecordedActivity
         var stream: AnalysisStream
+        var sourceSportName: String? = nil
     }
 
     /// The activity a result is computed for.
@@ -53,7 +54,7 @@ enum Pipeline {
     static func decode(_ bytes: Data, versions: PipelineVersions, allowsSnapshot: Bool = false) async throws -> Decoded {
         let snapshot = allowsSnapshot ? try HealthSnapshot.decode(bytes) : nil
         let recorded = try snapshot?.activity ?? FITActivityDecoder.decode(bytes)
-        return Decoded(recorded: recorded, stream: try stream(of: recorded, versions: versions))
+        return Decoded(recorded: recorded, stream: try stream(of: recorded, versions: versions), sourceSportName: snapshot?.sourceSportName)
     }
 
     /// Builds the analysis stream of an activity that is already decoded.

@@ -4,6 +4,15 @@ import SweatKitModel
 import Testing
 
 @Suite struct AnalysisPresentationTests {
+    @Test func summaryCadenceUsesTheWholeActivityStream() {
+        var stream = makeStream(count: 3)
+        stream.cadence = Series([110, nil, 130])
+        let detail = DetailPreparation.prepare(DetailInput(stream: stream, sport: .running, activityDate: testStart))
+        let presentation = DetailAnalysisPresentation.prepare(detail)
+        #expect(presentation.cadence.average == .available(120))
+        #expect(presentation.cadence.coverage == .available(2.0 / 3))
+    }
+
     @Test func fiveHourAnalysisPresentationRemainsBounded() {
         let stream = makeStream(count: 18000, power: Array(repeating: 200, count: 18000))
         let start = ContinuousClock.now

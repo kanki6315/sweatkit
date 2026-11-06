@@ -29,7 +29,7 @@ struct ActivityDetailView: View {
     @State private var expandsAnalysisTimeline = false
     @State private var showsAnalysis = false
     @State private var playing = false
-    @State private var playbackSpeed = 1.0
+    @State private var playbackTiming = PlaybackTiming.overview
     @State private var timelineKind: TimelineOverlay.Kind?
     @State private var current: ActivityRecord?
     private func routeContext(_ route: LibraryRoute, effort: RouteEffort) -> String {
@@ -49,6 +49,7 @@ struct ActivityDetailView: View {
 
     private var record: ActivityRecord { current ?? activity }
     @State private var summaryOnly = false
+    @State private var golfRecording: GolfHealthRecording?
     @State private var prepared: PreparedDetail?
     @State private var error: String?
     @State private var scrub = 0.0
@@ -67,17 +68,21 @@ struct ActivityDetailView: View {
         Group {
             if summaryOnly {
                 List {
-                    Section {
-                        SourceAttributionView(sources: record.members.map(\.source))
-                        LabeledContent("Elapsed time", value: Duration.seconds(record.elapsedTime).formatted(.time(pattern: .hourMinuteSecond)))
-                        if let timer = record.timerTime {
-                            LabeledContent("Timer time", value: Duration.seconds(timer).formatted(.time(pattern: .hourMinuteSecond)))
+                    if let golfRecording {
+                        GolfHealthSections(recording: golfRecording, units: units)
+                    } else {
+                        Section {
+                            SourceAttributionView(sources: record.members.map(\.source))
+                            LabeledContent("Elapsed time", value: Duration.seconds(record.elapsedTime).formatted(.time(pattern: .hourMinuteSecond)))
+                            if let timer = record.timerTime {
+                                LabeledContent("Timer time", value: Duration.seconds(timer).formatted(.time(pattern: .hourMinuteSecond)))
+                            }
+                            if let distance = record.distance {
+                                LabeledContent("Recorded distance", value: String(format: "%.2f %@", distance / (units == .metric ? 1000 : 1609.344), units == .metric ? "km" : "mi"))
+                            }
+                        } header: { Text("Recorded summary") } footer: {
+                            Text(record.sport.hasFullSupport ? "This recording has no visible per-second samples. Charts, zones and a route cannot be shown. If you expected samples from Apple Health, review read access in Health settings and refresh." : "This sport is shown as a summary. Full detail is available for cycling, walking, running and hiking.")
                         }
-                        if let distance = record.distance {
-                            LabeledContent("Recorded distance", value: String(format: "%.2f %@", distance / (units == .metric ? 1000 : 1609.344), units == .metric ? "km" : "mi"))
-                        }
-                    } header: { Text("Recorded summary") } footer: {
-                        Text(record.sport.hasFullSupport ? "This recording has no visible per-second samples. Charts, zones and a route cannot be shown. If you expected samples from Apple Health, review read access in Health settings and refresh." : "This sport is shown as a summary. Full detail is available for cycling, walking, running and hiking.")
                     }
                     if let library {
                         NavigationLink("Activity details") { ActivityManagementView(activity: record, library: library, deleteActivity: deleteActivity) }
@@ -98,7 +103,7 @@ struct ActivityDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(prepared == nil ? .visible : .hidden, for: .navigationBar)
         .toolbar(.hidden, for: .tabBar)
-        .task { await load() }
+        .task(id: activity.id) { await load() }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.didReceiveMemoryWarningNotification)) { _ in
             Task { await DetailPreparationCache.shared.removeAll() }
         }
@@ -182,9 +187,7 @@ struct ActivityDetailView: View {
 
     private func compactPlayback(_ detail: PreparedDetail) -> some View {
         HStack(spacing: 12) {
-            Button(playing ? "Pause" : "Play", systemImage: playing ? "pause.fill" : "play.fill") { playing.toggle() }
-                .labelStyle(.iconOnly).buttonStyle(.borderedProminent).buttonBorderShape(.circle)
-                .frame(minWidth: 44, minHeight: 44)
+            playbackButton(detail)
             Button("Expand timeline", systemImage: "waveform.path") { expandsAnalysisTimeline = true }
                 .labelStyle(.iconOnly).frame(minWidth: 44, minHeight: 44)
             Slider(value: manualScrub, in: 0...Double(max(1, detail.input.stream.count - 1)))
@@ -208,7 +211,8 @@ struct ActivityDetailView: View {
     @ViewBuilder private func detailSurface(_ detail: PreparedDetail) -> some View {
         Group {
             if let route = detail.route(for: overlay).value {
-                FlyoverMap(route: route, bandColors: colors, scrubSample: manualScrub, options: options)
+                FlyoverMap(route: route, bandColors: colors, scrubSample: manualScrub, options: options,
+                           onCameraInteraction: { options.cameraMode = .manual })
                     .ignoresSafeArea()
             } else if let presentation {
                 ActivityAnalysisView(presentation: presentation, detail: detail, metrics: metrics, units: units, scrub: manualScrub, selection: $selection, chartsOnly: true)
@@ -433,21 +437,25 @@ struct ActivityDetailView: View {
                 .foregroundStyle(Color(uiColor: .systemBackground))
                 .background(.tint, in: Circle())
         }.buttonStyle(.plain).accessibilityLabel(playing ? "Pause" : "Play")
+            .disabled(detail.input.stream.count < 2)
     }
 
     private var playbackSpeedPicker: some View {
         Menu {
-            Picker("Playback speed", selection: $playbackSpeed) {
-                ForEach([0.5, 1.0, 2.0, 4.0], id: \.self) { speed in
-                    Text("\(speed, specifier: "%g")×").tag(speed)
+            Text("Overview · 1× plays the activity in about 30 seconds")
+            Picker("Playback speed", selection: $playbackTiming) {
+                ForEach(PlaybackTiming.allCases, id: \.self) { timing in
+                    Text(timing.label).tag(timing)
                 }
             }
         } label: {
-            Text("\(playbackSpeed, specifier: "%g")×")
+            Text(playbackTiming.label)
                 .font(.subheadline.weight(.semibold)).monospacedDigit()
                 .frame(minWidth: 48, minHeight: 44)
                 .background(Color(uiColor: .quaternarySystemFill), in: Capsule())
         }.buttonStyle(.plain).accessibilityLabel("Playback speed")
+            .accessibilityValue(playbackTiming.label)
+            .accessibilityHint("Overview at one times plays the activity in about 30 seconds. Includes recorded pauses and gaps. The clock shows activity elapsed time.")
     }
 
     private func playbackClock(_ detail: PreparedDetail) -> some View {
@@ -459,7 +467,7 @@ struct ActivityDetailView: View {
         .font(.subheadline.monospacedDigit())
         .fixedSize(horizontal: true, vertical: false)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Playback time")
+        .accessibilityLabel("Activity elapsed time")
         .accessibilityValue("\(clockTime(scrub)) of \(clockTime(total))")
     }
 
@@ -474,11 +482,13 @@ struct ActivityDetailView: View {
             Button {
                 options.cameraMode = options.cameraMode == .follow ? .overview : .follow
             } label: {
-                Image(systemName: options.cameraMode == .follow ? "location.fill" : "location")
+                Label(options.cameraMode == .manual ? "Resume follow" : options.cameraMode == .follow ? "Overview" : "Follow",
+                      systemImage: options.cameraMode == .follow ? "location.fill" : "location")
+                    .font(.subheadline)
                     .frame(minWidth: 48, minHeight: 44)
                     .background(Color(uiColor: .quaternarySystemFill), in: Capsule())
             }.buttonStyle(.plain)
-                .accessibilityLabel(options.cameraMode == .follow ? "Show whole route" : "Follow current position")
+                .accessibilityLabel(options.cameraMode == .manual ? "Resume automatic camera following" : options.cameraMode == .follow ? "Show whole route" : "Follow current position")
         }
     }
 
@@ -501,9 +511,8 @@ struct ActivityDetailView: View {
             let seconds = Double(elapsed.seconds) + Double(elapsed.attoseconds) / 1e18
             last = now
             let end = Double(prepared.input.stream.count - 1)
-            // The analysis stream is 1 Hz: 1× means recorded time, regardless
-            // of activity length. Do not jump ahead after a main-thread stall.
-            scrub = min(end, scrub + min(seconds, 0.1) * playbackSpeed)
+            guard playing, !Task.isCancelled else { return }
+            scrub = playbackTiming.advance(sample: scrub, sampleCount: prepared.input.stream.count, wallSeconds: seconds)
             if scrub >= end { playing = false }
         }
     }
@@ -523,17 +532,43 @@ struct ActivityDetailView: View {
         let started = ContinuousClock.now
         Self.performanceLog.info("detail_open started")
         error = nil
+        current = nil
+        scrub = 0
+        selection = nil
+        selectionStats = nil
+        metrics = nil
+        alternatives = []
+        matchedRoute = nil
+        timelineOverlay = nil
+        timelineKind = nil
+        overlay = .plain
+        axis = .distance
+        collapsesStops = false
+        options = FlyoverOptions()
+        playbackTiming = .overview
+        showsAnalysis = false
         prepared = nil
         presentation = nil
         playing = false
         summaryOnly = false
+        golfRecording = nil
         do {
             guard let latest = try await library.activity(id), !latest.isHidden else {
                 current = nil
                 dismiss()
                 return
             }
+            try Task.checkCancellation()
             current = latest
+            if latest.primary.source == .healthKit, latest.sourceSportName == "Golf",
+               let golf = try await library.golfHealthRecording(for: latest.primary) {
+                let athlete = try await library.profile()
+                try Task.checkCancellation()
+                units = athlete.units
+                golfRecording = golf
+                summaryOnly = true
+                return
+            }
             async let stream = library.analysisStream(for: id)
             async let recorded = library.recordedActivity(for: id)
             async let profile = library.profile()
@@ -541,11 +576,15 @@ struct ActivityDetailView: View {
             async let sourceOffers = library.alternativeSources(for: id)
             let native = try await recorded
             let athlete = try await profile
+            try Task.checkCancellation()
             units = athlete.units
             summaryOnly = native.stream.samples.isEmpty || !record.sport.hasFullSupport
             if summaryOnly {
-                metrics = try await storedMetrics
-                alternatives = try await sourceOffers
+                let loadedMetrics = try await storedMetrics
+                let loadedOffers = try await sourceOffers
+                try Task.checkCancellation()
+                metrics = loadedMetrics
+                alternatives = loadedOffers
                 return
             }
             let input = try await DetailInput(stream: stream, sport: record.sport,
@@ -578,8 +617,11 @@ struct ActivityDetailView: View {
             try Task.checkCancellation()
             presentation = analysis
             Self.performanceLog.info("detail_analysis_ready duration=\(String(describing: analysisStarted.duration(to: .now)), privacy: .public)")
-            metrics = try await storedMetrics
-            alternatives = try await sourceOffers
+            let loadedMetrics = try await storedMetrics
+            let loadedOffers = try await sourceOffers
+            try Task.checkCancellation()
+            metrics = loadedMetrics
+            alternatives = loadedOffers
         } catch is CancellationError {
             return
         } catch { self.error = error.localizedDescription }
