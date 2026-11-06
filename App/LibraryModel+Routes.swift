@@ -8,7 +8,6 @@ extension LibraryModel {
     func scheduleRouteMatching() {
         routeRefreshTask?.cancel()
         guard let library else { return }
-        routeCatalog = RouteCatalog(routes: [], reviews: [])
         routeRefreshTask = Task(priority: .utility) {
             do {
                 let result = try await library.routes()
@@ -20,7 +19,6 @@ extension LibraryModel {
     }
     func scheduleRecordBadges() {
         historyRefreshTask?.cancel()
-        recordBadges = [:]
         guard let library else { return }
         let ids = activities.compactMap(\.id)
         historyRefreshTask = Task(priority: .utility) {

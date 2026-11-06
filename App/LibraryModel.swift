@@ -25,6 +25,7 @@ final class LibraryModel {
     private(set) var outcomes: [ImportFileOutcome] = []
     var error: String?
     var filter = FeedFilter()
+    private var loadedFilter: FeedFilter?
     private var cursor: FeedCursor?
     let trendsPresentationCache = TrendsPresentationCache()
     private(set) var trendsRevision = 0
@@ -75,7 +76,11 @@ final class LibraryModel {
         guard let library else { return }
         isLoading = true
         do {
-            let page = try await library.feed(filter, limit: 50)
+            // Refresh the entire visible window so background updates and returning
+            // from detail do not discard pages beneath the scroll position.
+            let requestedFilter = filter
+            let limit = loadedFilter == requestedFilter ? max(50, activities.count) : 50
+            let page = try await library.feed(requestedFilter, limit: limit)
             let profile = try await library.profile()
             let duplicates = try await library.possibleDuplicates()
             let sources = try await library.store.sourceRecords()
@@ -83,6 +88,7 @@ final class LibraryModel {
             let stale = try await library.staleActivities()
             guard request == generation else { return }
             trendsRevision += 1
+            loadedFilter = requestedFilter
             activities = page.activities
             staleIDs = Set(stale.map(\.id))
             weekSummaries = Dictionary(uniqueKeysWithValues: weeks.map { ($0.start, $0) })
