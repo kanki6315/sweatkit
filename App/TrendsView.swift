@@ -22,6 +22,9 @@ struct TrendsView: View {
     @State private var presentation = TrendsPresentation()
     @State private var selection: TrendsSelection?
     @State private var retry = 0
+    @State private var selectedPowerDuration: Int?
+    @State private var selectedPeriodStart: Date?
+    @State private var preparedSelectionContext = ""
     private var configuration: String { "\(sport)|\(dateWindow)|\(setting)|\(measure)|\(period)|\(comparison)|\(recordWindow)" }
 
     var body: some View {
@@ -66,16 +69,34 @@ struct TrendsView: View {
         } }
         .sheet(isPresented: $showFilters) { filters }
         .navigationDestination(item: $selection) { selected in
-            List(selected.activities, id: \.primary) { row in
-                NavigationLink {
-                    ActivityDetailView(activity: row, library: model.library, deleteActivity: model.permanentlyDelete)
-                } label: {
-                    VStack(alignment: .leading) {
-                        Text(row.title)
-                        Text("\(row.start.formatted(.dateTime.day().month().year())) · \(sourceSummary([row]))").font(.caption).foregroundStyle(.secondary)
+            List {
+                Section {
+                    VStack(alignment: .leading, spacing: 8) {
+                        if let summary = selected.summary {
+                            Text(summary).font(.title2.bold()).monospacedDigit()
+                        }
+                        Text(selected.context).font(.subheadline).foregroundStyle(.secondary)
+                    }.padding(.vertical, 4)
+                }
+                Section("\(selected.activities.count) \(selected.activities.count == 1 ? "activity" : "activities")") {
+                    ForEach(selected.activities, id: \.primary) { row in
+                        NavigationLink {
+                            ActivityDetailView(activity: row, library: model.library, deleteActivity: model.permanentlyDelete)
+                        } label: {
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text(row.title).font(.headline)
+                                Text("\(row.start.formatted(.dateTime.day().month().year())) · \(sourceSummary([row]))")
+                                    .font(.caption).foregroundStyle(.secondary)
+                                if let detail = selected.details[row.primary.description] {
+                                    Text(detail).font(.title3.weight(.semibold)).monospacedDigit()
+                                }
+                                Text(activitySummary(row, omittingDistance: selected.omitDistance))
+                                    .font(.subheadline).foregroundStyle(.secondary).monospacedDigit()
+                            }.padding(.vertical, 4)
+                        }
                     }
                 }
-            }.navigationTitle(selected.title)
+            }.navigationTitle(selected.title).navigationBarTitleDisplayMode(.inline)
         }
         .task(id: "\(model.trendsRevision)|\(retry)") { await load() }
         .task(id: configuration) { await prepare() }
@@ -103,6 +124,12 @@ struct TrendsView: View {
         guard !Task.isCancelled, requestedConfiguration == configuration,
               requestedRevision == model.trendsRevision else { return }
         presentation = result
+        let context = "\(requestedRevision)|\(requestedConfiguration)"
+        if preparedSelectionContext != context {
+            selectedPowerDuration = nil
+            selectedPeriodStart = nil
+            preparedSelectionContext = context
+        }
     }
     private var filters: some View {
         NavigationStack {
@@ -137,7 +164,7 @@ struct TrendsView: View {
                 measurePicker.pickerStyle(.segmented)
             }
             panel {
-                if let latest = presentation.buckets.last {
+                if let latest = selectedPeriod ?? presentation.buckets.last {
                     if typeSize.isAccessibilitySize {
                         VStack(alignment: .leading, spacing: 12) { totals(latest) }
                     } else {
@@ -147,31 +174,89 @@ struct TrendsView: View {
                 Chart(presentation.buckets) { bucket in
                     if let value = bucket.total.complete {
                         BarMark(x: .value("Period", bucket.start), y: .value(measure.rawValue, scaled(value)))
-                            .foregroundStyle(bucket.id == presentation.buckets.last?.id ? Color.primary : Color.secondary.opacity(0.65))
+                            .foregroundStyle(bucket.start == (selectedPeriodStart ?? presentation.buckets.last?.start) ? Color.primary : Color.secondary.opacity(0.65))
                     }
                     if let value = bucket.lastYear.complete, bucket.lastYear.count > 0 {
                         RectangleMark(x: .value("Period", bucket.start), y: .value("Last year", scaled(value)), width: .fixed(18), height: .fixed(2))
                             .foregroundStyle(Color.primary)
                     }
-                }.chartYAxis { AxisMarks(position: .leading) }
-                    .chartXAxis { AxisMarks { AxisValueLabel() } }
+                }.chartYAxis { AxisMarks(position: .leading, values: .automatic(desiredCount: typeSize.isAccessibilitySize ? 3 : 5)) }
+                    .chartXAxis { AxisMarks(values: .automatic(desiredCount: typeSize.isAccessibilitySize ? 2 : 4)) { AxisValueLabel() } }
                     .chartScrollableAxes(.horizontal)
                     .chartXVisibleDomain(length: period == .week ? 12 * 7 * 86400 : period == .month ? 365 * 86400 : 5 * 365 * 86400)
                     .chartScrollPosition(initialX: presentation.buckets.suffix(12).first?.start ?? Date())
-                    .frame(height: 180).accessibilityLabel("\(measure.rawValue) by \(period.rawValue.lowercased()). Incomplete periods omitted.")
+                    .chartOverlay { proxy in
+                        GeometryReader { geometry in
+                            if let frame = proxy.plotFrame {
+                                Rectangle().fill(.clear).contentShape(Rectangle())
+                                    .gesture(SpatialTapGesture().onEnded { tap in
+                                        let plot = geometry[frame]
+                                        guard plot.contains(tap.location),
+                                              let date: Date = proxy.value(atX: tap.location.x - plot.minX) else { return }
+                                        selectedPeriodStart = presentation.buckets.min {
+                                            abs($0.start.timeIntervalSince(date)) < abs($1.start.timeIntervalSince(date))
+                                        }?.start
+                                    })
+                            }
+                        }
+                    }
+                    .accessibilityIdentifier("volume-chart")
+                    .frame(height: typeSize.isAccessibilitySize ? 280 : 180).accessibilityLabel("\(measure.rawValue) by \(period.rawValue.lowercased()). Incomplete periods omitted.")
                 chartLegend(first: period.rawValue, second: "Same period last year", firstIsBar: true)
                 if presentation.buckets.contains(where: { $0.total.missing > 0 }) {
                     note("\(presentation.buckets.filter { $0.total.missing > 0 }.count) incomplete periods omitted.")
                 }
-                Menu("Explore periods") {
-                    ForEach(presentation.buckets.reversed()) { bucket in
-                        Button(bucket.start.formatted(date: .abbreviated, time: .omitted)) {
-                            select("Activities", from: bucket.start, to: bucket.end)
-                        }
-                    }
-                }
+                periodInspection
             }
         }
+    }
+    private var selectedPeriod: TrendBucket? {
+        presentation.buckets.first { $0.start == selectedPeriodStart }
+    }
+    private var periodInspection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text(selectedPeriod.map { periodTitle($0.start) } ?? "Select a period")
+                    .font(.headline)
+                    .accessibilityIdentifier("period-readout")
+                Spacer()
+                if selectedPeriod != nil {
+                    Button { selectedPeriodStart = nil } label: {
+                        Image(systemName: "xmark").frame(width: 44, height: 44)
+                    }.accessibilityLabel("Clear period selection")
+                }
+            }
+            if let bucket = selectedPeriod {
+                Text("\(bucket.start.formatted(date: .abbreviated, time: .omitted)) – \(bucket.end.addingTimeInterval(-1).formatted(date: .abbreviated, time: .omitted))")
+                    .font(.caption).foregroundStyle(.secondary)
+                Text(bucket.total.count == 0 ? "No matching activities" : bucket.total.complete.map {
+                    "\(scaled($0).formatted(.number.precision(.fractionLength(0...1)))) \(unit) · \(bucket.total.count) \(bucket.total.count == 1 ? "activity" : "activities")"
+                } ?? "\(bucket.total.missing) activities unavailable · Incomplete total")
+                    .font(.subheadline).monospacedDigit()
+                Button {
+                    select(periodTitle(bucket.start), from: bucket.start, to: bucket.end)
+                } label: {
+                    HStack { Text("View activities"); Spacer(); Image(systemName: "chevron.right").font(.caption.weight(.semibold)) }
+                        .frame(minHeight: 44)
+                }.accessibilityIdentifier("view-period-activities")
+            } else {
+                note("Tap a bar to see its activities. Swipe the chart to browse history.")
+            }
+            // Explicit steps also expose empty/incomplete buckets and avoid requiring a chart gesture.
+            HStack {
+                Button { movePeriod(-1) } label: { Label("Previous", systemImage: "chevron.left").frame(minHeight: 44) }
+                    .disabled(presentation.buckets.isEmpty || selectedPeriodStart == presentation.buckets.first?.start)
+                Spacer()
+                Button { movePeriod(1) } label: { Label("Next", systemImage: "chevron.right").frame(minHeight: 44) }
+                    .disabled(presentation.buckets.isEmpty || selectedPeriodStart == presentation.buckets.last?.start)
+            }.font(.subheadline)
+        }
+    }
+    private func movePeriod(_ offset: Int) {
+        let buckets = presentation.buckets
+        guard !buckets.isEmpty else { return }
+        let index = buckets.firstIndex { $0.start == selectedPeriodStart } ?? (buckets.count - 1)
+        selectedPeriodStart = buckets[max(0, min(buckets.count - 1, index + (selectedPeriodStart == nil ? 0 : offset)))].start
     }
     private var periodPicker: some View {
         Picker("Period", selection: $period) {
@@ -194,7 +279,7 @@ struct TrendsView: View {
         }.pickerStyle(.menu)
     }
     @ViewBuilder private func totals(_ bucket: TrendBucket) -> some View {
-        totalLabel(bucket.total, "This period")
+        totalLabel(bucket.total, selectedPeriodStart == nil ? "This period" : "Selected period")
         totalLabel(bucket.previous, "Previous period")
         totalLabel(bucket.lastYear, "Same period last year")
     }
@@ -220,7 +305,7 @@ struct TrendsView: View {
             else { comparisonPicker.pickerStyle(.segmented) }
             panel {
                 chartLegend(first: "Last 6 weeks", second: comparison == "90 days" ? "Last 90 days" : comparison, dashed: true)
-                if presentation.curve.allSatisfy({ $0.power.value == nil }) { note("No valid power windows in this range.") }
+                if supportedPowerDurations.isEmpty { note("No valid power windows in this range.") }
                 else {
                     Chart {
                         ForEach(presentation.curve, id: \.duration) { point in
@@ -235,15 +320,25 @@ struct TrendsView: View {
                                     .foregroundStyle(Color.primary)
                             }
                         }
+                        if selectedPowerDuration != nil {
+                            RuleMark(x: .value("Duration", powerDuration)).foregroundStyle(Color.secondary)
+                        }
+                        ForEach(presentation.curve, id: \.duration) { point in
+                            if let value = point.power.value {
+                                PointMark(x: .value("Seconds", point.duration), y: .value("Watts", value))
+                                    .symbolSize(selectedPowerDuration != nil && point.duration == powerDuration ? 65 : 22)
+                                    .foregroundStyle(Color.primary)
+                            }
+                        }
                         if let estimate = presentation.estimate {
                             RuleMark(y: .value("Estimated threshold", estimate)).lineStyle(StrokeStyle(dash: [2, 4]))
                                 .foregroundStyle(Color.secondary).annotation(position: .bottom, alignment: .leading) {
-                                    Text("Estimate \(Int(estimate)) W").font(.caption)
+                                    if !typeSize.isAccessibilitySize { Text("Estimate \(Int(estimate)) W").font(.caption) }
                                 }
                         }
                     }.chartXScale(domain: 5...3600, type: .log)
                         .chartXAxis {
-                            AxisMarks(values: [5, 60, 300, 1200, 3600]) { tick in
+                            AxisMarks(values: typeSize.isAccessibilitySize ? [5, 3600] : [5, 60, 300, 1200, 3600]) { tick in
                                 AxisValueLabel {
                                     if let seconds = tick.as(Int.self) {
                                         Text(seconds < 60 ? "\(seconds)s" : seconds < 3600 ? "\(seconds / 60)m" : "1h")
@@ -251,13 +346,33 @@ struct TrendsView: View {
                                 }
                             }
                         }
-                        .chartYAxis { AxisMarks(position: .leading) }
+                        .chartYAxis { AxisMarks(position: .leading, values: .automatic(desiredCount: typeSize.isAccessibilitySize ? 3 : 5)) }
                         .chartYAxisLabel("Watts")
-                        .frame(height: 200)
+                        .chartXSelection(value: Binding(get: { selectedPowerDuration }, set: { value in
+                            // Charts clears its transient selection on lift; retain our inspection.
+                            if let value { selectedPowerDuration = value }
+                        }))
+                        .chartOverlay { proxy in
+                            GeometryReader { geometry in
+                                if let frame = proxy.plotFrame {
+                                    Rectangle().fill(.clear).contentShape(Rectangle())
+                                        .simultaneousGesture(SpatialTapGesture().onEnded { tap in
+                                            let plot = geometry[frame]
+                                            guard plot.contains(tap.location),
+                                                  let seconds: Double = proxy.value(atX: tap.location.x - plot.minX) else { return }
+                                            selectedPowerDuration = Int(seconds.rounded())
+                                        })
+                                }
+                            }
+                        }
+                        .accessibilityIdentifier("power-chart")
+                        .frame(height: typeSize.isAccessibilitySize ? 300 : 200)
+                    if typeSize.isAccessibilitySize, let estimate = presentation.estimate {
+                        note("Estimated threshold: \(Int(estimate)) W")
+                    }
+                    powerInspection
                 }
-                Button("Explore power activities") {
-                    selection = TrendsSelection(title: "Power activities", activities: presentation.rows.filter { $0.curve.contains { $0.power.value != nil } }.map(\.activity))
-                }.font(.footnote)
+
             }
         }
     }
@@ -445,13 +560,142 @@ struct TrendsView: View {
             Text(title)
         }.accessibilityElement(children: .combine)
     }
+    private func durationLabel(_ seconds: Int) -> String {
+        seconds < 60 ? "\(seconds) sec" : "\(seconds / 60) min"
+    }
+    private var powerDuration: Int {
+        let durations = supportedPowerDurations
+        let requested = selectedPowerDuration ?? 1200
+        return durations.min { abs(log(Double($0) / Double(max(1, requested)))) < abs(log(Double($1) / Double(max(1, requested)))) } ?? 1200
+    }
+    private func powerRows(at duration: Int) -> [(row: TrendActivity, watts: Double)] {
+        rankedPowerRows(presentation.powerActivities, at: duration)
+    }
+    private func rankedPowerRows(_ activities: [TrendActivity], at duration: Int) -> [(row: TrendActivity, watts: Double)] {
+        activities.compactMap { row in
+            guard !row.isStale, let watts = row.curve.first(where: { $0.duration == duration })?.power.value else { return nil }
+            return (row, watts)
+        }.sorted {
+            if $0.watts != $1.watts { return $0.watts > $1.watts }
+            if $0.row.activity.start != $1.row.activity.start { return $0.row.activity.start < $1.row.activity.start }
+            return $0.row.activity.primary.description < $1.row.activity.primary.description
+        }
+    }
+    private var powerInspection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text(selectedPowerDuration == nil ? "Select a duration" : durationLabel(powerDuration))
+                    .font(.headline).monospacedDigit()
+                    .accessibilityIdentifier("power-duration-readout")
+                    .accessibilityElement()
+                    .accessibilityLabel("Power duration")
+                    .accessibilityValue(selectedPowerDuration == nil ? "No selection" : durationLabel(powerDuration))
+                    .accessibilityAdjustableAction { direction in
+                        let durations = supportedPowerDurations
+                        guard !durations.isEmpty else { return }
+                        let current = durations.firstIndex(of: powerDuration) ?? 0
+                        selectedPowerDuration = durations[max(0, min(durations.count - 1, current + (direction == .increment ? 1 : -1)))]
+                    }
+                Spacer()
+                if selectedPowerDuration != nil {
+                    Button { selectedPowerDuration = nil } label: {
+                        Image(systemName: "xmark").frame(width: 44, height: 44)
+                    }.accessibilityLabel("Clear power selection")
+                        .accessibilityIdentifier("clear-power-selection")
+                }
+            }
+            if selectedPowerDuration != nil {
+                powerSource("Last 6 weeks", rows: presentation.recentPowerActivities)
+                Divider()
+                powerSource(comparison == "90 days" ? "Last 90 days" : comparison, rows: presentation.powerActivities)
+                Button { selectPowerActivities() } label: {
+                    HStack {
+                        Text("View power activities")
+                        Spacer()
+                        Image(systemName: "chevron.right").font(.caption.weight(.semibold))
+                    }.frame(minHeight: 44)
+                }.accessibilityIdentifier("view-power-activities")
+            } else {
+                note("Tap the curve to compare power and open its source activities.")
+            }
+        }
+    }
+    private var supportedPowerDurations: [Int] {
+        Set((presentation.curve + presentation.recentCurve).filter { $0.power.value != nil }.map(\.duration)).sorted()
+    }
+    @ViewBuilder private func powerSource(_ title: String, rows: [TrendActivity]) -> some View {
+        let best = rankedPowerRows(rows, at: powerDuration).first
+        VStack(alignment: .leading, spacing: 6) {
+            let layout = typeSize.isAccessibilitySize
+                ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4))
+                : AnyLayout(HStackLayout(alignment: .firstTextBaseline))
+            layout {
+                Text(title).font(.subheadline).foregroundStyle(.secondary)
+                if !typeSize.isAccessibilitySize { Spacer() }
+                Text(best.map { "\($0.watts.formatted(.number.precision(.fractionLength(0)))) W" } ?? "Unavailable")
+                    .font(.headline).monospacedDigit()
+            }
+            if let best {
+                NavigationLink {
+                    ActivityDetailView(activity: best.row.activity, library: model.library, deleteActivity: model.permanentlyDelete)
+                } label: {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(best.row.activity.title).font(.body)
+                            Text(best.row.activity.start.formatted(date: .abbreviated, time: .omitted))
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                        Spacer(minLength: 8)
+                        Image(systemName: "chevron.right").font(.caption.weight(.semibold))
+                    }.frame(minHeight: 44).contentShape(Rectangle())
+                }.buttonStyle(.plain)
+                    .accessibilityHint("Opens source activity for \(title)")
+                    .accessibilityIdentifier("power-source-\(title)")
+            }
+        }
+    }
+    private func selectPowerActivities() {
+        let rows = powerRows(at: powerDuration)
+        selection = TrendsSelection(title: "\(durationLabel(powerDuration)) power", activities: rows.map { $0.row.activity },
+            context: "\(sport) · \(setting) · \(comparison) · Highest power first",
+            details: Dictionary(uniqueKeysWithValues: rows.map {
+                ($0.row.activity.primary.description, "\(durationLabel(powerDuration)) · \($0.watts.formatted(.number.precision(.fractionLength(0)))) W")
+            }))
+    }
+    private func periodTitle(_ date: Date) -> String {
+        switch period {
+        case .week: "Week of \(date.formatted(.dateTime.month(.abbreviated).day().year()))"
+        case .month: date.formatted(.dateTime.month(.wide).year())
+        case .year: date.formatted(.dateTime.year())
+        }
+    }
+    private func activitySummary(_ row: ActivityRecord, omittingDistance: Bool = false) -> String {
+        let distance = row.distance.map { "\(($0 / (model.units == .metric ? 1000 : 1609.344)).formatted(.number.precision(.fractionLength(1)))) \(model.units == .metric ? "km" : "mi")" } ?? "No distance"
+        let time = row.movingTime.map { Duration.seconds($0).formatted(.time(pattern: .hourMinuteSecond)) + " moving" } ?? "Moving time unavailable"
+        return omittingDistance ? time : "\(distance) · \(time)"
+    }
     private func select(_ title: String, from start: Date, to end: Date) {
-        selection = TrendsSelection(title: title, activities: presentation.rows.filter { $0.activity.start >= start && $0.activity.start < end }.map(\.activity))
+        let rows = presentation.rows.filter { $0.activity.start >= start && $0.activity.start < end }
+        let total = TrendsAggregation.total(rows, measure: measure)
+        let value = scaled(total.known).formatted(.number.precision(.fractionLength(0...1)))
+        let summary = total.count == 0 ? "No activities" : total.missing == 0 ? "\(value) \(unit) total" : "\(value) \(unit) recorded · \(total.missing) unavailable"
+        let details = Dictionary(uniqueKeysWithValues: rows.map { row in
+            let contribution = TrendsAggregation.total([row], measure: measure)
+            return (row.activity.primary.description, contribution.complete.map {
+                "\(measure.rawValue): \(scaled($0).formatted(.number.precision(.fractionLength(0...1)))) \(unit)"
+            } ?? "\(measure.rawValue) unavailable")
+        })
+        selection = TrendsSelection(title: title, activities: rows.map(\.activity),
+            context: "\(sport) · \(setting) · \(measure == .time ? "Moving time" : measure.rawValue)", summary: summary, details: details, omitDistance: measure == .distance)
     }
 }
 
 private struct TrendsSelection: Identifiable, Hashable {
     var title: String
     var activities: [ActivityRecord]
+    var context: String = ""
+    var summary: String? = nil
+    var details: [String: String] = [:]
+    var omitDistance = false
     var id: String { title }
 }

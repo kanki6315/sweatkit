@@ -19,6 +19,8 @@ public struct TrendsPresentation: Codable, Sendable {
     public var days: [TrendBucket] = []
     public var curve: [PowerCurvePoint] = []
     public var recentCurve: [PowerCurvePoint] = []
+    public var recentPowerActivities: [TrendActivity] = []
+    public var powerActivities: [TrendActivity] = []
     public var thresholds: [TrendPoint] = []
     public var setThresholds: [TrendPoint] = []
     public var efficiency: [TrendPoint] = []
@@ -48,9 +50,11 @@ public struct TrendsPresentation: Codable, Sendable {
         result.staleCount = result.rows.filter(\.isStale).count
         result.buckets = TrendsAggregation.volume(all, range: start..<end, period: options.period, measure: options.measure, calendar: calendar)
         let comparisonStart = options.comparison == "All time" ? first : options.comparison == "This year" ? year : calendar.date(byAdding: .day, value: -90, to: now)!
-        result.curve = TrendsAggregation.curve(result.rows.filter { $0.activity.start >= comparisonStart })
+        result.powerActivities = all.filter { !$0.isStale && $0.activity.start >= comparisonStart && $0.activity.start < end }
+        result.curve = TrendsAggregation.curve(result.powerActivities)
         let sixWeeks = calendar.date(byAdding: .day, value: -42, to: now)!
-        result.recentCurve = TrendsAggregation.curve(result.rows.filter { $0.activity.start >= sixWeeks })
+        result.recentPowerActivities = all.filter { !$0.isStale && $0.activity.start >= sixWeeks && $0.activity.start < end }
+        result.recentCurve = TrendsAggregation.curve(result.recentPowerActivities)
         result.thresholds = TrendsAggregation.thresholds(all, range: start..<end, calendar: calendar)
         result.currentThreshold = history.profile.thresholdPower(on: now)
         result.estimate = TrendsAggregation.estimate(result.rows, on: now, calendar: calendar)
@@ -70,7 +74,7 @@ public struct TrendsPresentation: Codable, Sendable {
 public actor TrendsPresentationCache {
     public init() {}
     private struct Key: Hashable, Codable {
-        var schema = 1
+        var schema = 3
         var history: UUID
         var options: TrendsOptions
         var calendar: Calendar
