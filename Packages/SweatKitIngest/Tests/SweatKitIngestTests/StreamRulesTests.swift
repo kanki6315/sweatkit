@@ -18,8 +18,8 @@ import Testing
         #expect(StreamRules.gradientMinimumTravel == 5)
     }
 
-    @Test func runningFormChannelsRequireVersionTwo() {
-        #expect(StreamRules.version == 2)
+    @Test func fractionalEndExclusionRequiresVersionThree() {
+        #expect(StreamRules.version == 3)
     }
 
     /// "Position, altitude, distance and heart rate are filled linearly.
