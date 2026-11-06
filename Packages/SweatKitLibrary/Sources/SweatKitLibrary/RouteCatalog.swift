@@ -71,7 +71,12 @@ public struct RouteReview: Codable, Sendable, Identifiable {
 public struct RouteCatalog: Codable, Sendable {
     public var routes: [LibraryRoute]
     public var reviews: [RouteReview]
-    public init(routes: [LibraryRoute], reviews: [RouteReview]) { self.routes = routes; self.reviews = reviews }
+    /// Matched groups not yet at the five-outing publication threshold.
+    /// Optional for decoding caches written by earlier versions.
+    public var developingRoutes: [LibraryRoute]?
+    public init(routes: [LibraryRoute], reviews: [RouteReview], developingRoutes: [LibraryRoute] = []) {
+        self.routes = routes; self.reviews = reviews; self.developingRoutes = developingRoutes
+    }
     public func membership(of activity: SourceIdentity) -> LibraryRoute? {
         routes.first { $0.efforts.contains { $0.activity.members.contains(activity) } }
     }
@@ -189,7 +194,8 @@ extension ActivityLibrary {
 
     /// Complete library query, independent of feed pagination. Geometry is rebuilt from current
     /// primary revisions on cache misses, never exported. Hidden/deleted activities cannot participate.
-    public func routes(includeOlderHistory: Bool = false, now: Date = Date()) async throws -> RouteCatalog {
+    public func routes(includeOlderHistory: Bool = false, now: Date = Date(),
+        cachedResult: (@Sendable (RouteCatalog) async -> Void)? = nil) async throws -> RouteCatalog {
         let cutoff = Calendar(identifier: .gregorian).date(byAdding: .year, value: -2, to: now)!
         try Task.checkCancellation()
         let sourceSnapshot = try await store.sourceRecords()
@@ -213,7 +219,7 @@ extension ActivityLibrary {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
         let key = ContentHash(of: try encoder.encode(RouteCacheInputs(
-            format: 3, sources: sourceSnapshot.sorted { $0.identity < $1.identity },
+            format: 4, sources: sourceSnapshot.sorted { $0.identity < $1.identity },
             rows: rows.map { var row = $0; row.title = ""; return row }, decisions: decisions, decoder: versions.decoder,
             streamRules: versions.streamRules, algorithms: versions.combinedAlgorithmVersion,
             matching: SweatKitRouteMatching.algorithmVersion)))
@@ -225,6 +231,25 @@ extension ActivityLibrary {
         if let cached = routeCatalogCache, cached.key == key {
             // Metrics can change after a profile correction without changing geometry.
             var catalog = Self.refreshRouteLabels(cached, rows: rows, sources: sourcesByID, localities: localities, decisions: decisions)
+            if let cachedResult {
+                // Publish only a cache that still matches the current visible rows,
+                // source revisions, decisions, algorithms and selected history window.
+                // Metrics refresh can be expensive and need not hide valid geometry.
+                try Task.checkCancellation()
+                guard try await store.sourceRecords() == sourceSnapshot,
+                      try routeDecisions().decisions == decisions else {
+                    return try await routes(includeOlderHistory: includeOlderHistory, now: now, cachedResult: cachedResult)
+                }
+                for row in rows {
+                    guard try await activity(row.id!) == row else {
+                        return try await routes(includeOlderHistory: includeOlderHistory, now: now, cachedResult: cachedResult)
+                    }
+                }
+                await cachedResult(catalog)
+                try Task.checkCancellation()
+            }
+            let frequentCount = catalog.routes.count
+            catalog.routes += catalog.developingRoutes ?? []
             for r in catalog.routes.indices {
                 for e in catalog.routes[r].efforts.indices {
                     let effort = catalog.routes[r].efforts[e]
@@ -232,11 +257,13 @@ extension ActivityLibrary {
                         alignment: effort.alignment, metrics: try await metrics(for: effort.id))
                 }
             }
+            catalog.developingRoutes = Array(catalog.routes.dropFirst(frequentCount))
+            catalog.routes = Array(catalog.routes.prefix(frequentCount))
             try Task.checkCancellation()
             guard try await store.sourceRecords() == sourceSnapshot,
-                  try routeDecisions().decisions == decisions else { return try await routes(includeOlderHistory: includeOlderHistory, now: now) }
+                  try routeDecisions().decisions == decisions else { return try await routes(includeOlderHistory: includeOlderHistory, now: now, cachedResult: cachedResult) }
             for row in rows {
-                guard try await activity(row.id!) == row else { return try await routes(includeOlderHistory: includeOlderHistory, now: now) }
+                guard try await activity(row.id!) == row else { return try await routes(includeOlderHistory: includeOlderHistory, now: now, cachedResult: cachedResult) }
             }
             return catalog
         }
@@ -252,18 +279,18 @@ extension ActivityLibrary {
             ? try JSONDecoder().decode([RouteSeed].self, from: Data(contentsOf: routeSeedURL)) : []
         let result = try await Self.assembleRoutes(inputs, seeds: seeds, decisions: decisions)
         try Task.checkCancellation()
-        guard try await store.sourceRecords() == sourceSnapshot else { return try await routes(includeOlderHistory: includeOlderHistory, now: now) }
+        guard try await store.sourceRecords() == sourceSnapshot else { return try await routes(includeOlderHistory: includeOlderHistory, now: now, cachedResult: cachedResult) }
         for input in inputs {
-            guard try await activity(input.row.id!) == input.row else { return try await routes(includeOlderHistory: includeOlderHistory, now: now) }
+            guard try await activity(input.row.id!) == input.row else { return try await routes(includeOlderHistory: includeOlderHistory, now: now, cachedResult: cachedResult) }
         }
-        guard try routeDecisions().decisions == decisions else { return try await routes(includeOlderHistory: includeOlderHistory, now: now) }
+        guard try routeDecisions().decisions == decisions else { return try await routes(includeOlderHistory: includeOlderHistory, now: now, cachedResult: cachedResult) }
         // Membership hints preserve route IDs when the first effort is hidden. They carry no geometry.
         // Retain dormant groups too, so restoring an effort restores its route's name and decisions.
         var saved = Dictionary(uniqueKeysWithValues: seeds.map { ($0.id, $0) })
         for route in result.routes { saved[route.id] = RouteSeed(id: route.id, members: route.efforts.map(\.id)) }
         try JSONEncoder().encode(saved.values.sorted { $0.id < $1.id }).write(to: routeSeedURL, options: .atomic)
         var labels: [SourceIdentity: RouteGeometryLabel] = [:]
-        for route in result.routes {
+        for route in result.routes + (result.developingRoutes ?? []) {
             if var input = inputs.first(where: { $0.row.id == route.referenceID }) {
                 input.locality = nil
                 labels[route.id] = RouteGeometryLabel(shape: Self.routeShapeDescription(input), region: Self.routeRegion(input))
@@ -280,6 +307,8 @@ extension ActivityLibrary {
     nonisolated static func refreshRouteLabels(_ cached: RouteCatalogCache, rows: [ActivityRecord],
         sources: [SourceIdentity: SourceRecord], localities: [String: String], decisions: [RouteDecision]) -> RouteCatalog {
         var catalog = cached.catalog
+        let frequentCount = catalog.routes.count
+        catalog.routes += catalog.developingRoutes ?? []
         let byID = Dictionary(uniqueKeysWithValues: rows.compactMap { row in row.id.map { ($0, row) } })
         func locality(_ row: ActivityRecord) -> String? {
             sources[row.primary].flatMap { localities[$0.currentRevision.hex] }
@@ -300,6 +329,8 @@ extension ActivityLibrary {
             }
             catalog.routes[index] = route
         }
+        catalog.developingRoutes = Array(catalog.routes.dropFirst(frequentCount))
+        catalog.routes = Array(catalog.routes.prefix(frequentCount))
         let routes = Dictionary(uniqueKeysWithValues: catalog.routes.map { ($0.id, $0) })
         catalog.reviews = catalog.reviews.map { review in
             RouteReview(routeID: review.routeID, region: routes[review.routeID]?.region ?? review.region,
@@ -450,7 +481,8 @@ extension ActivityLibrary {
         }
         return RouteCatalog(routes: visible.sorted {
             ($0.efforts.map(\.activity.start).max() ?? .distantPast) > ($1.efforts.map(\.activity.start).max() ?? .distantPast)
-        }, reviews: reviews)
+        }, reviews: reviews, developingRoutes: groups.filter { $0.efforts.count >= 2 && $0.efforts.count < minimumOutings }
+            .sorted { ($0.efforts.map(\.activity.start).max() ?? .distantPast) > ($1.efforts.map(\.activity.start).max() ?? .distantPast) })
     }
 }
 

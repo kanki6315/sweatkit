@@ -10,6 +10,8 @@ import SweatKitPalette
     var catalog = RouteCatalog(routes: [], reviews: [])
     var units = UnitSystem.metric
     var loading = false
+    var hasLoadedCatalog = false
+    private var loadedHistory: Bool?
     var error: String?
     var library: ActivityLibrary?
     var didDecide: (@MainActor () async -> Void)?
@@ -20,17 +22,36 @@ import SweatKitPalette
         generation += 1
         let request = generation
         self.library = library
+        let history = includeOlderHistory
+        if loadedHistory != history {
+            catalog = RouteCatalog(routes: [], reviews: [])
+            hasLoadedCatalog = false
+        }
         loading = true
+        error = nil
         defer { if request == generation { loading = false } }
         do {
-            let result = try await library.routes(includeOlderHistory: includeOlderHistory)
             let resolvedUnits = try await library.profile().units
             guard request == generation else { return }
             units = resolvedUnits
+            let result = try await library.routes(includeOlderHistory: history) { [weak self] cached in
+                await self?.acceptCached(cached, request: request, history: history)
+            }
+            try Task.checkCancellation()
+            guard request == generation else { return }
+            units = resolvedUnits
             catalog = result; error = nil
+            hasLoadedCatalog = true
+            loadedHistory = history
         }
         catch is CancellationError { }
-        catch { self.error = error.localizedDescription }
+        catch { if request == generation { self.error = error.localizedDescription } }
+    }
+    private func acceptCached(_ cached: RouteCatalog, request: Int, history: Bool) {
+        guard request == generation, !Task.isCancelled else { return }
+        catalog = cached
+        hasLoadedCatalog = true
+        loadedHistory = history
     }
     func decide(_ id: SourceIdentity, _ value: RouteDecision.Value) async {
         guard let library else { return }
@@ -49,6 +70,11 @@ struct RoutesView: View {
         let filtered = model.catalog.routes.filter { search.isEmpty || ($0.name.localizedCaseInsensitiveContains(search) || $0.region.localizedCaseInsensitiveContains(search)) }
         return byName ? filtered.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending } : filtered
     }
+    private var developingRoutes: [LibraryRoute] {
+        (model.catalog.developingRoutes ?? []).filter {
+            search.isEmpty || $0.name.localizedCaseInsensitiveContains(search) || $0.region.localizedCaseInsensitiveContains(search)
+        }
+    }
     private var historyPicker: some View {
         Picker("History", selection: $includeOlderHistory) {
             Text("Past two years").tag(false)
@@ -60,12 +86,14 @@ struct RoutesView: View {
         List {
             Section {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("\(model.catalog.routes.count) \(model.catalog.routes.count == 1 ? "route" : "routes") · \(model.catalog.routes.reduce(0) { $0 + $1.efforts.count }) efforts · by \(byName ? "name" : "most recent")")
-                        .font(.subheadline).foregroundStyle(Color.secondary)
+                    if model.hasLoadedCatalog {
+                        Text("\(model.catalog.routes.count) \(model.catalog.routes.count == 1 ? "frequent route" : "frequent routes") · \(model.catalog.routes.reduce(0) { $0 + $1.efforts.count }) efforts · by \(byName ? "name" : "most recent")")
+                            .font(.subheadline).foregroundStyle(Color.secondary)
+                    }
                     Text(includeOlderHistory ? "All history" : "Past two years")
                         .font(.caption).foregroundStyle(.secondary)
-                    if model.loading && !model.catalog.routes.isEmpty { ProgressView("Updating routes…") }
-                    Text("Routes with five or more outings. Possible matches are optional to review.")
+                    if model.loading && model.hasLoadedCatalog { ProgressView("Updating routes…") }
+                    Text("Frequent routes have five or more confirmed outings.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 .padding(.vertical, 4)
@@ -76,13 +104,37 @@ struct RoutesView: View {
                     Button("Try again") { Task { await model.reload(libraryModel.library) } }
                 }
             }
-            if !model.loading && model.catalog.routes.isEmpty && model.error == nil {
+            if model.hasLoadedCatalog && model.catalog.routes.isEmpty && developingRoutes.isEmpty && search.isEmpty && model.error == nil {
                 ContentUnavailableView("No frequent routes yet", systemImage: "point.topleft.down.to.point.bottomright.curvepath", description: Text("Routes appear after five confirmed outings in the selected history. Try All history to include older activities."))
-            } else if !search.isEmpty && routes.isEmpty {
+            } else if model.hasLoadedCatalog && !search.isEmpty && routes.isEmpty && developingRoutes.isEmpty {
                 ContentUnavailableView.search(text: search)
             }
+            if !developingRoutes.isEmpty {
+                let developing = developingRoutes
+                Section {
+                    DisclosureGroup("Building history · \(developing.count) matched \(developing.count == 1 ? "route" : "routes")") {
+                        Text("These routes already have matching outings. They appear as frequent routes after five.")
+                            .font(.caption).foregroundStyle(.secondary)
+                        ForEach(developing) { route in
+                            NavigationLink {
+                                RouteHistoryPage(routeID: route.id, model: model)
+                            } label: {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(route.name).font(.headline)
+                                Text("\(route.efforts.count) of 5 outings · \(routeMetadata(route, units: model.units))")
+                                    .font(.caption).foregroundStyle(.secondary)
+                                Text(route.efforts.map(\.activity.start).sorted().map {
+                                    $0.formatted(.dateTime.month(.abbreviated).day().year())
+                                }.joined(separator: " · "))
+                                    .font(.caption)
+                            }
+                            }.accessibilityIdentifier("developing-route-row")
+                        }
+                    }
+                }
+            }
             ForEach(regions, id: \.self) { region in
-              Section(region) {
+              Section(region.hasPrefix("Area ") ? "Routes without a place name" : region) {
                 ForEach(routes.filter { $0.region == region }) { route in
                     NavigationLink {
                         RoutePageView(routeID: route.id, model: model)
@@ -91,10 +143,18 @@ struct RoutesView: View {
                             RouteGeographicThumbnail(line: route.reference.line).frame(width: 64, height: 64).clipShape(.rect(cornerRadius: 12)).allowsHitTesting(false).accessibilityHidden(true)
                             VStack(alignment: .leading, spacing: 4) {
                                 Text(route.name).font(.headline)
+                                if routes.filter({ $0.name == route.name }).count > 1,
+                                   let first = route.efforts.map(\.activity.start).min() {
+                                    Text("First recorded \(first.formatted(date: .abbreviated, time: .omitted))")
+                                        .font(.caption).foregroundStyle(.secondary)
+                                }
                                 Text(routeMetadata(route, units: model.units)).font(.caption).foregroundStyle(Color.secondary)
                                 Text("\(route.efforts.count) efforts · best \(routeTime(route.best))").font(.caption).monospacedDigit()
                                 SourceAttributionView(sources: route.efforts.map { $0.activity.primary.source })
-                                RouteDotChart(route: route, metric: .time, compact: true).frame(height: 20)
+                                if let latest = route.efforts.map(\.activity.start).max() {
+                                    Text("Latest outing: \(latest.formatted(date: .abbreviated, time: .omitted))")
+                                        .font(.caption).foregroundStyle(.secondary)
+                                }
                             }
                         }.padding(.vertical, 4)
                     }.accessibilityIdentifier("route-row")
@@ -104,19 +164,21 @@ struct RoutesView: View {
                 }
                 if !regionalReviews.isEmpty {
                     DisclosureGroup("Optional review · \(Set(regionalReviews.map { $0.activity.id }).count)") {
-                        ForEach(routes.filter { $0.region == region }) { route in
-                            let pending = regionalReviews.filter { $0.routeID == route.id }
-                            if !pending.isEmpty {
-                                DisclosureGroup("\(route.name) · \(pending.count) possible match\(pending.count == 1 ? "" : "es")") {
-                                    ForEach(pending) { review in
-                                        NavigationLink {
-                                            RouteReviewPage(review: review, route: route, model: model)
-                                        } label: {
-                                            VStack(alignment: .leading, spacing: 4) {
-                                                Text(review.activity.start, format: .dateTime.month().day().year().hour().minute())
-                                                Text(review.explanation).font(.caption).foregroundStyle(.secondary)
-                                            }
-                                        }
+                        Text("Each outing appears once. Review only if you want to include it; confirmed routes stay unchanged.")
+                            .font(.caption).foregroundStyle(.secondary)
+                        let activityIDs = Array(Set(regionalReviews.map { $0.activity.id! })).sorted()
+                        ForEach(activityIDs, id: \.self) { activityID in
+                            let choices = regionalReviews.filter { $0.activity.id == activityID }
+                            if let first = choices.first {
+                                NavigationLink {
+                                    RouteReviewChoicesPage(activityID: activityID, region: region, model: model)
+                                } label: {
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        Text(first.activity.title).font(.headline)
+                                        Text(first.activity.start, format: .dateTime.month().day().year().hour().minute())
+                                            .font(.caption)
+                                        Text("\(choices.count) possible route\(choices.count == 1 ? "" : "s")")
+                                            .font(.caption).foregroundStyle(.secondary)
                                     }
                                 }
                             }
@@ -130,7 +192,7 @@ struct RoutesView: View {
         .navigationTitle("Routes")
         .toolbarTitleDisplayMode(.inlineLarge)
         .overlay {
-            if model.loading && model.catalog.routes.isEmpty { ProgressView("Finding repeated routes…") }
+            if model.loading && !model.hasLoadedCatalog { ProgressView("Finding repeated routes…") }
         }
         .searchable(text: $search, placement: .toolbar, prompt: "Find a route")
         .toolbar { ToolbarItem(placement: .topBarTrailing) {
@@ -152,6 +214,41 @@ struct RoutesView: View {
             model.didDecide = { await libraryModel.reload() }
             await model.reload(libraryModel.library)
         }
+    }
+}
+
+private struct RouteReviewChoicesPage: View {
+    let activityID: SourceIdentity
+    let region: String
+    let model: RoutesModel
+    @Environment(\.dismiss) private var dismiss
+    private var choices: [RouteReview] {
+        model.catalog.reviews.filter { $0.activity.id == activityID && $0.region == region }
+    }
+    var body: some View {
+        List {
+            if choices.isEmpty {
+                ContentUnavailableView("Review complete", systemImage: "checkmark",
+                    description: Text("This outing has no remaining route matches to review here."))
+                Button("Back to Routes") { dismiss() }
+            } else {
+                ForEach(choices) { review in
+                    if let route = model.catalog.routes.first(where: { $0.id == review.routeID }) {
+                        NavigationLink {
+                            RouteReviewPage(review: review, route: route, model: model)
+                        } label: {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(route.name).font(.headline)
+                                Text(routeMetadata(route, units: model.units)).font(.caption)
+                                Text(review.explanation).font(.caption).foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        .navigationTitle("Compare possible routes")
+        .navigationBarTitleDisplayMode(.inline)
     }
 }
 
@@ -338,6 +435,9 @@ struct RoutePageView: View {
                             Text(route.name).font(.title.bold())
                             Text(routeMetadata(route, units: model.units)).font(.subheadline).foregroundStyle(Color.secondary)
                             SourceAttributionView(sources: route.efforts.flatMap { $0.activity.members.map(\.source) })
+                            NavigationLink("Inspect outings and matching") {
+                                RouteHistoryPage(routeID: route.id, model: model)
+                            }
                             if let first = route.efforts.min(by: { $0.activity.start < $1.activity.start }) {
                                 Text("\(first.activity.isVirtual ? "Virtual ride" : first.activity.sport.rawValue.capitalized) · first recorded \(first.activity.start.formatted(date: .abbreviated, time: .omitted))").font(.subheadline).foregroundStyle(Color.secondary)
                             }

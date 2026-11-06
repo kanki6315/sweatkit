@@ -1,5 +1,38 @@
 import XCTest
 final class RouteScreens: XCTestCase {
+    @MainActor func testDevelopingLight() { inspectDeveloping(arguments: []) }
+    @MainActor func testDevelopingDark() { inspectDeveloping(arguments: ["dark"]) }
+    @MainActor func testDevelopingLargeText() {
+        inspectDeveloping(arguments: ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityM"])
+    }
+    @MainActor private func inspectDeveloping(arguments: [String]) {
+        let app = XCUIApplication()
+        app.launchArguments = ["developing"] + arguments
+        app.launch()
+        let group = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Building history'")).firstMatch
+        XCTAssertTrue(group.waitForExistence(timeout: 120))
+        group.tap()
+        app.buttons["developing-route-row"].firstMatch.tap()
+        XCTAssertTrue(app.staticTexts["3 confirmed outings"].waitForExistence(timeout: 10))
+        capture("history-\(arguments.first ?? "light")")
+        let outing = app.buttons["route-history-outing"].firstMatch
+        for _ in 0..<6 {
+            if outing.isHittable { break }
+            app.coordinate(withNormalizedOffset: CGVector(dx: 0.98, dy: 0.85))
+                .press(forDuration: 0.1, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.98, dy: 0.25)))
+        }
+        outing.tap()
+        XCTAssertTrue(app.navigationBars["Inspect outing"].waitForExistence(timeout: 15))
+        capture("overlay-\(arguments.first ?? "light")")
+        for _ in 0..<5 {
+            if app.staticTexts["The pair passes the alignment checks."].isHittable { break }
+            let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.98, dy: 0.85))
+            let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.98, dy: 0.25))
+            start.press(forDuration: 0.1, thenDragTo: end)
+        }
+        XCTAssertTrue(app.staticTexts["The pair passes the alignment checks."].waitForExistence(timeout: 15))
+        capture("evidence-\(arguments.first ?? "light")")
+    }
     @MainActor func testLight() { flow(dark: false) }
     @MainActor func testDark() { flow(dark: true) }
     @MainActor func testLargeText() {
@@ -20,11 +53,14 @@ final class RouteScreens: XCTestCase {
         XCTAssertTrue(optional.waitForExistence(timeout: 60))
         capture("routes-review-collapsed")
         optional.tap()
-        app.buttons.matching(NSPredicate(format: "label CONTAINS 'possible match'")).firstMatch.tap()
+        app.buttons.matching(NSPredicate(format: "label CONTAINS 'possible route'")).firstMatch.tap()
         app.buttons.matching(NSPredicate(format: "label CONTAINS 'nearby parallel line'")).firstMatch.tap()
         XCTAssertTrue(app.buttons["Keep separate"].waitForExistence(timeout: 20))
         capture("routes-review-map")
         app.buttons["Keep separate"].tap()
+        XCTAssertTrue(app.staticTexts["Review complete"].waitForExistence(timeout: 30))
+        app.buttons["Back to Routes"].tap()
+        XCTAssertFalse(app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Optional review'")).firstMatch.exists)
         XCTAssertTrue(app.buttons["route-row"].firstMatch.waitForExistence(timeout: 30))
         capture("routes-review-separated")
     }

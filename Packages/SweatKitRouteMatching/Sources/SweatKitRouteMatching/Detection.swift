@@ -230,6 +230,28 @@ public enum RouteDetection {
         )
     }
 
+    /// Boundary-tolerant shortlist fallback. It never decides membership;
+    /// strict geometric alignment is still required after this cheap screen.
+    static func neighbouringCellFraction(candidate: TrackSignature, reference: TrackSignature) -> Double {
+        // Detection is a shortlist, not a match. A few metres of GPS noise can
+        // put an otherwise identical road in adjacent cells. Compare each
+        // cell with its immediate neighbours; the unchanged metre-based
+        // alignment gates still reject parallel roads and route extensions.
+        func covered(_ cells: Set<GridCell>, by other: Set<GridCell>) -> Double {
+            guard !cells.isEmpty else { return 0 }
+            let count = cells.count { cell in
+                (-1...1).contains { dx in
+                    (-1...1).contains { dy in
+                        other.contains(GridCell(column: cell.column + dx, row: cell.row + dy))
+                    }
+                }
+            }
+            return Double(count) / Double(cells.count)
+        }
+        return min(covered(candidate.cells, by: reference.cells),
+                                     covered(reference.cells, by: candidate.cells))
+    }
+
     /// The indices of the references the candidate is shortlisted against, in
     /// ascending order.
     public static func shortlist(
