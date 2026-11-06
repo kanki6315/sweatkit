@@ -22,6 +22,39 @@ import SweatKitTestSupport
         return TrendActivity(activity: record, metrics: metrics,
             curve: [PowerCurvePoint(duration: 1200, power: .available(power))])
     }
+    @Test func powerComparisonWindowIsIndependentOfVolumeWindow() {
+        var hidden = row(-10, power: 999, id: "hidden"); hidden.activity.isHidden = true
+        var stale = row(-10, power: 888, id: "stale"); stale.isStale = true
+        let history = TrendsHistory(activities: [row(-400, power: 400, id: "old"),
+            row(-10, power: 200, id: "recent"), row(1, power: 900, id: "future"), hidden, stale], profile: AthleteProfile())
+        var options = TrendsOptions(sport: "Rides", dateWindow: "Last 6 weeks", setting: "All settings",
+            measure: .distance, period: .week, comparison: "All time", recordWindow: "This year")
+        let allTime = TrendsPresentation.make(history, options: options, now: day, calendar: calendar)
+        #expect(!allTime.rows.contains { $0.activity.title == "old" })
+        #expect(allTime.curve.first { $0.duration == 1200 }?.power.value == 400)
+        #expect(allTime.recentCurve.first { $0.duration == 1200 }?.power.value == 200)
+        #expect(Set(allTime.powerActivities.map { $0.activity.title }) == ["old", "recent"])
+        options.comparison = "90 days"
+        let recent = TrendsPresentation.make(history, options: options, now: day, calendar: calendar)
+        #expect(recent.curve.first { $0.duration == 1200 }?.power.value == 200)
+        #expect(recent.powerActivities.map { $0.activity.title } == ["recent"])
+    }
+
+    @Test func recentPowerSourcesUseExactWindowAndExcludeStaleHiddenFuture() {
+        var stale = row(-1, power: 900, id: "stale"); stale.isStale = true
+        var hidden = row(-2, power: 800, id: "hidden"); hidden.activity.isHidden = true
+        let history = TrendsHistory(activities: [row(-42, power: 300, id: "boundary"),
+            row(-42.001, power: 600, id: "outside"), row(-1, power: 200, id: "recent"),
+            row(1, power: 1000, id: "future"), stale, hidden], profile: AthleteProfile())
+        let options = TrendsOptions(sport: "Rides", dateWindow: "This year", setting: "All settings",
+            measure: .distance, period: .week, comparison: "This year", recordWindow: "This year")
+        let result = TrendsPresentation.make(history, options: options, now: day, calendar: calendar)
+        #expect(Set(result.recentPowerActivities.map { $0.activity.title }) == ["boundary", "recent"])
+        #expect(result.recentCurve.first { $0.duration == 1200 }?.power.value == 300)
+        #expect(result.powerActivities.isEmpty)
+        #expect(result.curve.allSatisfy { $0.power.value == nil })
+    }
+
     @Test func rollingWindowAndFutureExclusion() {
         let rows = [row(-90, power: 300), row(-90.001, power: 900, id: "old"), row(1, power: 1000, id: "future")]
         #expect(TrendsAggregation.estimate(rows, on: day, calendar: calendar) == 285)
