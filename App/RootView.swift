@@ -1,10 +1,9 @@
 import SwiftUI
 
-/// Three browsing tabs and a native bottom search control.
+/// Three browsing tabs, with title search integrated into Activities.
 struct RootView: View {
-    private enum Destination { case activities, routes, trends, search }
+    private enum Destination { case activities, routes, trends }
     @State private var selectedTab = Destination.activities
-    @State private var searchPresented = false
     @State private var showsSettings = false
     @State private var feedFilters = ActivityFeedFilters()
     @AppStorage(AppTheme.preferenceKey) private var accent = AppTheme.cyan.rawValue
@@ -17,6 +16,8 @@ struct RootView: View {
             Tab("Activities", systemImage: "figure.outdoor.cycle", value: Destination.activities) {
                 NavigationStack {
                     ActivityFeedView(model: library, filters: feedFilters, showSettings: { showsSettings = true })
+                        .searchable(text: $feedFilters.search, placement: .toolbar, prompt: "Search activity titles")
+                        .scrollDismissesKeyboard(.immediately)
                 }
             }
             Tab("Routes", systemImage: "point.topleft.down.to.point.bottomright.curvepath", value: Destination.routes) {
@@ -29,15 +30,6 @@ struct RootView: View {
                     TrendsView(model: library)
                 }
             }
-            Tab("Search", systemImage: "magnifyingglass", value: Destination.search, role: searchTabRole) {
-                NavigationStack {
-                    ActivityFeedView(model: library, filters: feedFilters, showSettings: { showsSettings = true })
-                        .searchable(text: $feedFilters.search, isPresented: $searchPresented, prompt: "Search activity titles")
-                }
-            }
-        }
-        .onChange(of: selectedTab) { _, destination in
-            searchPresented = destination == .search
         }
         .tint((AppTheme(rawValue: accent) ?? .cyan).color)
         .task(id: scenePhase) {
@@ -52,11 +44,6 @@ struct RootView: View {
             SettingsView(model: library)
         }
         .preferredColorScheme((AppAppearance(rawValue: appearance) ?? .system).colorScheme)
-    }
-
-    private var searchTabRole: TabRole {
-        if #available(iOS 27.0, *) { return .prominent }
-        return .search
     }
 
     private func screen(@ViewBuilder content: () -> some View) -> some View {

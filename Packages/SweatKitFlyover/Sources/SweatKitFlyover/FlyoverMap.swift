@@ -16,6 +16,7 @@ public struct FlyoverMap: View {
     private let bandColors: [Color]
     @Binding private var scrubSample: Double
     private let options: FlyoverOptions
+    private let onCameraInteraction: () -> Void
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     /// - Parameters:
@@ -23,11 +24,12 @@ public struct FlyoverMap: View {
     ///     grey.
     ///   - scrubSample: The source sample under the marker. Fractional values
     ///     place the marker between samples.
-    public init(route: FlyoverRoute, bandColors: [Color], scrubSample: Binding<Double>, options: FlyoverOptions = FlyoverOptions()) {
+    public init(route: FlyoverRoute, bandColors: [Color], scrubSample: Binding<Double>, options: FlyoverOptions = FlyoverOptions(), onCameraInteraction: @escaping () -> Void = {}) {
         self.route = route
         self.bandColors = bandColors
         self._scrubSample = scrubSample
         self.options = options
+        self.onCameraInteraction = onCameraInteraction
     }
 
     public var body: some View {
@@ -36,7 +38,8 @@ public struct FlyoverMap: View {
             bandColors: bandColors,
             scrubSample: scrubSample,
             options: options,
-            cameraMode: options.effectiveCameraMode(reduceMotion: reduceMotion)
+            cameraMode: options.effectiveCameraMode(reduceMotion: reduceMotion),
+            onCameraInteraction: onCameraInteraction
         )
     }
 }
@@ -47,6 +50,7 @@ private struct FlyoverMapRepresentable: UIViewRepresentable {
     var scrubSample: Double
     var options: FlyoverOptions
     var cameraMode: FlyoverOptions.CameraMode
+    var onCameraInteraction: () -> Void
 
     func makeCoordinator() -> FlyoverMapCoordinator {
         let cached = IdleMapCache.shared.take()
@@ -65,10 +69,12 @@ private struct FlyoverMapRepresentable: UIViewRepresentable {
         let coordinator = context.coordinator
         mapView.onResize = { [weak coordinator] in coordinator?.mapViewDidResize() }
         coordinator.mapView = mapView
+        coordinator.installCameraGestures(on: mapView)
         return mapView
     }
 
     func updateUIView(_ mapView: LayoutReportingMapView, context: Context) {
+        context.coordinator.onCameraInteraction = onCameraInteraction
         context.coordinator.update(
             route: route,
             bandColors: bandColors,
@@ -201,7 +207,7 @@ final class MarkerView: MKAnnotationView {
 }
 
 @MainActor
-final class FlyoverMapCoordinator: NSObject, MKMapViewDelegate {
+final class FlyoverMapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDelegate {
     /// Everything that, when changed, means the lines are drawn again.
     private struct LineSettings: Equatable {
         var route: FlyoverRoute
@@ -220,6 +226,34 @@ final class FlyoverMapCoordinator: NSObject, MKMapViewDelegate {
     }
 
     var mapView: LayoutReportingMapView?
+    var onCameraInteraction: (() -> Void)?
+
+    func installCameraGestures(on mapView: MKMapView) {
+        // Observe native gestures simultaneously; never replace MapKit delegates.
+        let gestures: [UIGestureRecognizer] = [
+            UIPanGestureRecognizer(target: self, action: #selector(cameraGesture(_:))),
+            UIPinchGestureRecognizer(target: self, action: #selector(cameraGesture(_:))),
+            UIRotationGestureRecognizer(target: self, action: #selector(cameraGesture(_:)))
+        ]
+        for gesture in gestures {
+            gesture.delegate = self
+            gesture.cancelsTouchesInView = false
+            mapView.addGestureRecognizer(gesture)
+        }
+    }
+
+    @objc private func cameraGesture(_ gesture: UIGestureRecognizer) {
+        guard gesture.state == .began, cameraMode != .manual,
+              mapView?.routeFallback.isHidden == true else { return }
+        // Stop in this event, before another display tick can fight the gesture.
+        cameraMode = .manual
+        needsOverviewFit = false
+        stopDisplayLink()
+        onCameraInteraction?()
+    }
+
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
+                           shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool { true }
 
     private var geometry: RouteGeometry?
     private var options = FlyoverOptions()
@@ -314,7 +348,7 @@ final class FlyoverMapCoordinator: NSObject, MKMapViewDelegate {
             drawLines(geometry: geometry, settings: newLineSettings, in: mapView)
         }
 
-        if cameraMode == .overview || !markerAdded { updateMarker() }
+        if cameraMode != .follow || !markerAdded { updateMarker() }
         if !markerAdded {
             mapView.addAnnotation(marker)
             markerAdded = true
@@ -326,6 +360,9 @@ final class FlyoverMapCoordinator: NSObject, MKMapViewDelegate {
             case .overview:
                 stopDisplayLink()
                 fitOverview()
+            case .manual:
+                needsOverviewFit = false
+                stopDisplayLink()
             case .follow:
                 needsOverviewFit = false
                 smoother = options.headingSmoothing
@@ -345,6 +382,7 @@ final class FlyoverMapCoordinator: NSObject, MKMapViewDelegate {
 
     func stop() {
         isPresented = false
+        onCameraInteraction = nil
         loadingTimeout?.cancel()
         loadingTimeout = nil
         performanceLog.info("map_detached")
@@ -371,6 +409,7 @@ final class FlyoverMapCoordinator: NSObject, MKMapViewDelegate {
 
     func beginPresentation(reused: Bool) {
         isPresented = true
+        cameraMode = nil
         presentationStarted = CACurrentMediaTime()
         firstRenderReported = false
         firstCompleteRenderReported = false

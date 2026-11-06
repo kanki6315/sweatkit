@@ -7,7 +7,8 @@ import SweatKitModel
 public enum StreamRules {
     /// The version of the stream rules. Raise it whenever a rule or a value
     /// below changes, so stored streams are rebuilt.
-    public static let version = 2
+    /// Version 3 excludes native samples at/after the actual fractional end.
+    public static let version = 3
 
     /// The length of one grid step in seconds. The stream is a 1 Hz grid.
     public static let gridInterval: TimeInterval = 1

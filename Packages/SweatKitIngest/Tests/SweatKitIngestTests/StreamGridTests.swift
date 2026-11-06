@@ -39,6 +39,17 @@ import Testing
         #expect(try Synthetic.stream(activity).count == 101)
     }
 
+    @Test func fractionalEndExcludesSamplesAtAndAfterTheActualEnd() throws {
+        let activity = Synthetic.activity(elapsed: 2.5, samples: [
+            heartRate(2.25, 120), heartRate(2.5, 180), heartRate(2.75, 240)
+        ])
+        let stream = try Synthetic.stream(activity)
+        #expect(stream.count == 3)
+        // Only 2.25 is inside [start, end). Rounding grid length up must
+        // not admit the endpoint or a later observation into second 2.
+        #expect(stream.heartRate[2] == 120)
+    }
+
     @Test func elapsedTimeFallsBackToTheFirstAndLastSamples() throws {
         // Nothing stated. Samples at 0, 1, ... 10 s with heart rate 100, 101, ... 110.
         let activity = RecordedActivity(

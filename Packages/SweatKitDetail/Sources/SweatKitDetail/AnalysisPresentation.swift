@@ -61,6 +61,7 @@ public struct DetailAnalysisPresentation: Sendable {
     public let charts: [DetailChartSeries]
     public let laps: [DetailLap]
     public let powerCurve: [PowerCurvePoint]
+    public let cadence: CadenceSummary
 
     public static func prepare(_ detail: PreparedDetail) -> Self {
         let stream = detail.input.stream
@@ -113,7 +114,8 @@ public struct DetailAnalysisPresentation: Sendable {
                 isVirtual: detail.input.isVirtual, recording: .stream(stream),
                 profile: detail.input.profile, activityDate: detail.input.activityDate),
             durations: [5, 15, 30, 60, 300, 1200, 3600]) : []
-        return Self(charts: charts, laps: laps, powerCurve: curve)
+        return Self(charts: charts, laps: laps, powerCurve: curve,
+                    cadence: CadenceSummary.calculate(stream: stream))
     }
 }
 

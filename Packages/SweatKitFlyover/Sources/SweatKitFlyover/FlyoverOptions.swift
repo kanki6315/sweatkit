@@ -27,6 +27,8 @@ public struct FlyoverOptions: Hashable, Sendable {
         /// A chase camera behind the marker, facing along the route. With
         /// Reduce Motion on it is replaced by overview.
         case follow
+        /// Leaves the camera where the user placed it while the marker advances.
+        case manual
     }
 
     /// Where the route sits among the map's layers.
@@ -97,6 +99,6 @@ public struct FlyoverOptions: Hashable, Sendable {
     /// The camera mode actually used: follow becomes overview with a moving
     /// marker when Reduce Motion is on.
     public func effectiveCameraMode(reduceMotion: Bool) -> CameraMode {
-        reduceMotion ? .overview : cameraMode
+        reduceMotion && cameraMode == .follow ? .overview : cameraMode
     }
 }
