@@ -886,7 +886,18 @@ public actor ActivityLibrary {
         let scan = MatchScan.scan(Array(journal.candidates.values), at: Date(), device: journal.device)
         let resolved = ResolvedLibrary.resolve(records: Set(journal.candidates.values.map(\.identity)),
             links: journal.links, decisions: journal.decisions, tombstones: journal.tombstones)
-        return Array(Set(scan.awaitingReview(given: journal.links) + resolved.possibleDuplicates.map(\.pair))).sorted()
+        // Pairwise tolerances are not transitive: A can match B and B can
+        // match C while A/C fails. Once the links put all three in one
+        // activity, that last pair needs no further user decision. The same
+        // applies when a refreshed source no longer passes an existing link.
+        let activityOf = Dictionary(uniqueKeysWithValues: resolved.activities.flatMap { activity in
+            activity.members.map { ($0, activity.id) }
+        })
+        let pending = Set(scan.awaitingReview(given: journal.links) + resolved.possibleDuplicates.map(\.pair))
+        return pending.filter { pair in
+            guard let first = activityOf[pair.lower], let second = activityOf[pair.upper] else { return false }
+            return first != second
+        }.sorted()
     }
 
     public func identityChanges() throws -> IdentityChanges {

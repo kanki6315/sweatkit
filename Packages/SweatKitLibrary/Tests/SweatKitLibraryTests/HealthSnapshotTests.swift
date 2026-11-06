@@ -28,6 +28,36 @@ import Testing
         #expect(try await library.recordedActivity(for: imported.activity.id!) == health.activity)
     }
 
+    @Test func syncedCopiesAlreadyJoinedThroughAnotherSourceNeedNoReview() async throws {
+        let library = try temporary.open()
+        let garmin = SourceIdentity(source: .garmin, externalID: "synced-ride")
+        let imported = try await library.importFile(Fixtures.FIT.outdoorRide.data(), as: garmin)
+        let row = imported.activity
+        let distance = try #require(row.distance)
+        func copy(_ factor: Double, source: String) -> HealthSnapshot {
+            HealthSnapshot(workoutID: UUID(), activity: RecordedActivity(sport: row.sport,
+                stated: StatedSummary(start: row.start, end: row.start.addingTimeInterval(row.elapsedTime),
+                    distance: distance * factor)), sourceName: source, sourceBundleIdentifier: "test.\(source)")
+        }
+        // Each adjacent pair is within 5%, but the endpoints differ by >5%.
+        // All three already represent one activity through the middle copy.
+        let health = copy(1.04, source: "Garmin")
+        let strava = copy(1.08, source: "Strava")
+        try await library.importHealthSnapshot(health)
+        try await library.importHealthSnapshot(strava)
+        let feed = try await library.feed(limit: 10)
+        #expect(feed.activities.count == 1)
+        #expect(Set(feed.activities.first?.members ?? []) == [garmin, health.identity, strava.identity])
+        #expect(try await library.possibleDuplicates().isEmpty)
+
+        let restarted = try temporary.open()
+        #expect(try await restarted.possibleDuplicates().isEmpty)
+        // An explicit separation must still win, including indirect conflicts.
+        try await restarted.link(IdentityPair(garmin, strava.identity), kind: .keepSeparate)
+        #expect(try await restarted.feed(limit: 10).activities.count == 2)
+        #expect(try await restarted.possibleDuplicates().count == 1)
+    }
+
     @Test func partialHealthRecordingIsReviewedWithoutMergingAndSurvivesRestart() async throws {
         let library = try temporary.open()
         let bytes = try Fixtures.FIT.outdoorRide.data()
