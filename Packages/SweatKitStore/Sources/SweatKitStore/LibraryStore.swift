@@ -53,7 +53,7 @@ public actor LibraryStore: ModelActor {
     public init(root: URL) throws {
         let files = LibraryFiles(root: root)
         try files.createDirectories()
-        let schema = Schema(versionedSchema: StoreSchemaV1.self)
+        let schema = Schema(versionedSchema: StoreSchemaV2.self)
         // No CloudKit mirroring, even if the app gains the entitlement: iCloud
         // goes through CloudKit's sync engine, and mirroring forbids the
         // unique keys the identity rule needs.
@@ -215,6 +215,7 @@ public actor LibraryStore: ModelActor {
         }
         entity.primaryKey = activity.primary.description
         entity.sportRaw = activity.sport.rawValue
+        entity.sourceSportName = activity.sourceSportName
         entity.start = activity.start
         entity.utcOffset = activity.utcOffset
         entity.elapsedTime = activity.elapsedTime
@@ -724,7 +725,8 @@ public actor LibraryStore: ModelActor {
             isVirtual: entity.isVirtual,
             title: entity.title,
             headline: headline,
-            isHidden: entity.isHidden
+            isHidden: entity.isHidden,
+            sourceSportName: entity.sourceSportName
         )
     }
 

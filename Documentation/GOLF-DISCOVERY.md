@@ -49,3 +49,9 @@ Code inspection establishes import gates and the summary-only gate; official-sou
 Pending inputs: accepted Golf commit/branch; representative round date/time and source/device. Arccos access is no longer an input.
 
 On the accepted real-device build: compare the selected round with Health; record which properties, metadata and associated channels actually exist; verify Golf labels and absence of false duplicate suggestions after refresh/relaunch; ensure missing values stay unavailable and Health-derived additions remain excluded from backup. These checks are unperformed. Search, routes, trends, playback, metrics, MapKit performance and iCloud are outside this change. No release/upload or merge is included.
+
+## Recovered release baseline
+
+The accepted fixes were found in the uncommitted working tree at `/Users/arjunakankipati/.codex/worktrees/3bb8/sweatkit` (HEAD `3b7b61e`). Its `build/release/0.1.0-310.22.2` contains the archive and `export-retry.log`, ending in upload success on 6 November 2026. The first export failed; the retry succeeded. There is no clean release commit to cherry-pick. The current working copy is recovery evidence, not a byte-for-byte source manifest of the archived binary.
+
+Earlier searches incorrectly treated absence of a Golf enum as absence of the fix. The actual fix keeps `.other` for matching and adds `sourceSportName` to Health snapshots and Store V2. Focused copies of that implementation, migration tests and adjacent-session identity tests are recovered here. Only the Golf-label hunk is taken from each of HealthConnection and ActivityFeedView; unrelated sync, feed, route, trends and playback edits stay in their owning worktrees. The original worktree remains untouched. No further baseline input is needed.

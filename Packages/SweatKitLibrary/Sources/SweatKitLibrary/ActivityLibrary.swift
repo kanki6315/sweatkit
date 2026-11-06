@@ -348,7 +348,7 @@ public actor ActivityLibrary {
             return existing
         }
 
-        let derived = try await Pipeline.derive(
+        var derived = try await Pipeline.derive(
             facts: ActivityFacts(decoded.recorded, fallbackUTCOffset: fallbackUTCOffset ?? existing?.utcOffset),
             stream: decoded.stream,
             profile: profile,
@@ -363,6 +363,7 @@ public actor ActivityLibrary {
             summaryOnly: decoded.recorded.stream.samples.isEmpty ? decoded.recorded.stated : nil,
             sourceDistance: record.source == .healthKit ? decoded.recorded.stated.distance : nil
         )
+        derived.row.sourceSportName = decoded.sourceSportName
         // The row first and the metrics last: the metrics are the mark of a
         // finished write, and their absence is what a recompute looks for.
         try await store.saveActivity(derived.row)
@@ -892,6 +893,7 @@ public actor ActivityLibrary {
                     revision: primary.currentRevision, existing: nil), at: Date(),
                 summaryOnly: recorded.stream.samples.isEmpty ? recorded.stated : nil,
                 sourceDistance: primary.source == .healthKit ? recorded.stated.distance : nil)
+            derived.row.sourceSportName = try await recordingContext(for: primary.identity)?.sportName
             derived.row.title = group.title ?? FeedRules.generatedTitle(for: derived.row, locality: locality)
             derived.row.isHidden = group.isHidden
             replacements.append(derived.row)

@@ -114,6 +114,8 @@ public struct ActivityRecord: Hashable, Codable, Sendable {
     /// The member that supplies every stream.
     public var primary: SourceIdentity
     public var sport: Sport
+    /// Original source label for summary-only sports; does not change matching semantics.
+    public var sourceSportName: String?
     public var start: Date
     /// Seconds east of UTC at the start, when known.
     public var utcOffset: Int?
@@ -148,11 +150,13 @@ public struct ActivityRecord: Hashable, Codable, Sendable {
         isVirtual: Bool = false,
         title: String,
         headline: Headline? = nil,
-        isHidden: Bool = false
+        isHidden: Bool = false,
+        sourceSportName: String? = nil
     ) {
         self.members = members
         self.primary = primary
         self.sport = sport
+        self.sourceSportName = sourceSportName
         self.start = start
         self.utcOffset = utcOffset
         self.elapsedTime = elapsedTime
