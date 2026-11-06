@@ -2,13 +2,13 @@
 
 Discovery date: 6 November 2026. Acceptance reference: TestFlight 0.1.0 (310.22.2).
 
-## Decision and evidence boundary
+## Initial discovery (superseded by the implementation handoff)
 
 The user clarified: **“I only want to use healthkit data here.”** No Arccos account, export, API integration, new subscription or credential work is in scope.
 
 Recommend a modest Health-backed round summary first: recorded date/time, duration, source, and distance when supplied; add heart-rate detail and a route only after inspecting a representative round. Do not infer scores, hole boundaries, shots, clubs, course names, walking versus cart travel, or pace of play from workout duration/GPS. A workout path is not a ball-flight or shot map.
 
-This is a discovery deliverable, not a UI implementation or TestFlight acceptance result. No real golf workout, Health snapshot, metadata dictionary or associated sample set was supplied. The repository's four real fixtures are cycling and walking FIT files. Actual golf values and sample availability remain unknown.
+This section records the initial discovery pass. See `GOLF-HEALTHKIT-FOLLOWUP.md` for the implemented changes; TestFlight acceptance remains separate. No real golf workout, Health snapshot, metadata dictionary or associated sample set was supplied. The repository's four real fixtures are cycling and walking FIT files. Actual golf values and sample availability remain unknown.
 
 The starting checkout is `fd7bd09` and does **not** contain the reported accepted Golf behavior: `Sport` has no golf case and the Health adapter maps golf to `.other`. Searching local commit subjects for golf found no matching commit. Identify the accepted baseline before any runtime edits; do not recreate or overwrite the label/duplicate fixes from this older checkout.
 
@@ -34,7 +34,7 @@ Read alongside `CLAUDE.md`, `PRODUCT.md`, `DESIGN.md`, the MVP spec's Health imp
 - Apple's [workout metadata keys](https://developer.apple.com/documentation/healthkit/workout-metadata-keys) include workout brand, indoor status and other workout context. The reviewed documentation does not establish standard score, hole or shot fields. Custom metadata must be inspected and its semantics confirmed before adding a typed allowlist; do not dump arbitrary metadata into logs or UI.
 - Initial research, now outside the chosen scope: Arccos publishes an [On-Course Data API](https://api.arccosgolf.com/swagger) with rounds, round stats, courses and clubs, but explicitly restricts access to issued clients and OAuth authorization. Its [access form](https://payment.api.arccosgolf.com/) requires licensee information and agreement. This proves a supported restricted API exists, not that the user or SweatKit has access. No reliable official general-purpose personal export format or Arccos-to-Health scorecard contract was verified. Do not use unofficial authentication clients or scraping as a substitute.
 
-## Next implementation decision
+## Original implementation recommendation
 
 1. Identify the accepted Golf baseline and one representative round's date/time and recording source/device.
 2. With that round available locally, inspect only its workout properties, metadata keys/value types, route count, and workout-associated sample counts/time coverage. Compare visible source fields against the saved snapshot. Keep private records out of committed fixtures and logs unless separately authorized.
@@ -46,7 +46,7 @@ Read alongside `CLAUDE.md`, `PRODUCT.md`, `DESIGN.md`, the MVP spec's Health imp
 
 Code inspection establishes import gates and the summary-only gate; official-source research establishes available contracts. This documentation-only change requires a diff/whitespace check, not simulator or package execution. No Health permissions, source matching, app code, models or fixtures changed. No simulator/device was used; use Simlock before later device work.
 
-Pending inputs: accepted Golf commit/branch; representative round date/time and source/device. Arccos access is no longer an input.
+The release baseline has since been recovered below. A representative real round is still needed for device acceptance, not for implementing conditional presentation. Arccos access is no longer an input.
 
 On the accepted real-device build: compare the selected round with Health; record which properties, metadata and associated channels actually exist; verify Golf labels and absence of false duplicate suggestions after refresh/relaunch; ensure missing values stay unavailable and Health-derived additions remain excluded from backup. These checks are unperformed. Search, routes, trends, playback, metrics, MapKit performance and iCloud are outside this change. No release/upload or merge is included.
 
