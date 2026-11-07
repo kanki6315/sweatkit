@@ -11,6 +11,9 @@ settings:
     CURRENT_PROJECT_VERSION: "1"
     DEVELOPMENT_TEAM: TDBAHN96B3
 packages:
+  MapLibre:
+    url: https://github.com/maplibre/maplibre-gl-native-distribution.git
+    exactVersion: 7.0.0
   SweatKitCloud:
     path: Packages/SweatKitCloud
   SweatKitModel:
@@ -80,6 +83,7 @@ targets:
         Release:
           APS_ENVIRONMENT: production
     dependencies:
+      - package: MapLibre
       - package: SweatKitCloud
       - package: SweatKitModel
         product: SweatKitModel
