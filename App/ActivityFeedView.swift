@@ -180,11 +180,10 @@ struct ActivityFeedView: View {
             await model.health?.sync()
             await model.reload()
         }
-        .task { await model.open() }
-        .onAppear { Task { if model.library != nil { await model.reload() } } }
         .task(id: feedFilter) {
             model.filter = feedFilter
-            await model.reload()
+            if model.library == nil { await model.open() }
+            else { await model.reload() }
         }
     }
     // Show live work here; idle connection status remains available in Settings.
