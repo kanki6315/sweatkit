@@ -180,7 +180,7 @@ struct ActivityFeedView: View {
             await model.reload()
         }
     }
-    // Keep background work together so the activity feed remains the focus.
+    // Show live work here; idle connection status remains available in Settings.
     @ViewBuilder private var libraryStatus: some View {
         Section {
             if !model.staleIDs.isEmpty || model.isRecomputing {
@@ -204,7 +204,7 @@ struct ActivityFeedView: View {
                 .padding(.vertical, 4)
                 .listRowSeparator(.hidden)
             }
-            if let health = model.health, health.enabled {
+            if let health = model.health, health.enabled, health.running {
                 DisclosureGroup {
                     Button("Review Health access") { Task { await health.connect(); await model.reload() } }
                         .disabled(health.running)
@@ -226,7 +226,7 @@ struct ActivityFeedView: View {
                     }
                     .font(.subheadline)
                     .listRowSeparator(.hidden)
-                } else {
+                } else if garmin.keyRefused {
                     statusLabel(garmin.status, icon: "arrow.triangle.2.circlepath", busy: false)
                         .foregroundStyle(.secondary)
                         .listRowSeparator(.hidden)

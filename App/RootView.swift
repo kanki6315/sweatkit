@@ -16,7 +16,7 @@ struct RootView: View {
             Tab("Activities", systemImage: "figure.outdoor.cycle", value: Destination.activities) {
                 NavigationStack {
                     ActivityFeedView(model: library, filters: feedFilters, showSettings: { showsSettings = true })
-                        .searchable(text: $feedFilters.search, placement: .toolbar, prompt: "Search activity titles")
+                        .searchable(text: $feedFilters.search, placement: .navigationBarDrawer(displayMode: .automatic), prompt: "Search activity titles")
                         .scrollDismissesKeyboard(.immediately)
                 }
             }

@@ -9,8 +9,13 @@
 DerivedData/
 xcuserdata/
 
-# Tool caches
-.impeccable/
+# Local Impeccable settings and runtime artifacts. Shared design context is tracked.
+.impeccable/config.local.json
+.impeccable/questions/
+.impeccable/mocks/
+.impeccable/review/
+.impeccable/critique/*
+!.impeccable/critique/ignore.md
 
 # Local release credentials and generated archives/logs
 .release.env
