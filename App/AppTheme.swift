@@ -24,6 +24,20 @@ enum AppTheme: String, CaseIterable, Identifiable {
     }
 }
 
+enum AppAppearance: String, CaseIterable, Identifiable {
+    case system, light, dark
+    static let preferenceKey = "appearance.colorScheme"
+    var id: String { rawValue }
+    var name: String { rawValue.capitalized }
+    var colorScheme: ColorScheme? {
+        switch self {
+        case .system: nil
+        case .light: .light
+        case .dark: .dark
+        }
+    }
+}
+
 struct SettingsSummaryRow: View {
     @Environment(\.dynamicTypeSize) private var typeSize
     let title: String

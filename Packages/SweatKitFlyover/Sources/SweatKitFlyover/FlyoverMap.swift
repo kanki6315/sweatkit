@@ -1,5 +1,6 @@
 #if canImport(UIKit)
 import MapKit
+import OSLog
 import SweatKitModel
 import SwiftUI
 import UIKit
@@ -15,6 +16,7 @@ public struct FlyoverMap: View {
     private let bandColors: [Color]
     @Binding private var scrubSample: Double
     private let options: FlyoverOptions
+    private let onCameraInteraction: () -> Void
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     /// - Parameters:
@@ -22,11 +24,12 @@ public struct FlyoverMap: View {
     ///     grey.
     ///   - scrubSample: The source sample under the marker. Fractional values
     ///     place the marker between samples.
-    public init(route: FlyoverRoute, bandColors: [Color], scrubSample: Binding<Double>, options: FlyoverOptions = FlyoverOptions()) {
+    public init(route: FlyoverRoute, bandColors: [Color], scrubSample: Binding<Double>, options: FlyoverOptions = FlyoverOptions(), onCameraInteraction: @escaping () -> Void = {}) {
         self.route = route
         self.bandColors = bandColors
         self._scrubSample = scrubSample
         self.options = options
+        self.onCameraInteraction = onCameraInteraction
     }
 
     public var body: some View {
@@ -35,7 +38,8 @@ public struct FlyoverMap: View {
             bandColors: bandColors,
             scrubSample: scrubSample,
             options: options,
-            cameraMode: options.effectiveCameraMode(reduceMotion: reduceMotion)
+            cameraMode: options.effectiveCameraMode(reduceMotion: reduceMotion),
+            onCameraInteraction: onCameraInteraction
         )
     }
 }
@@ -46,8 +50,14 @@ private struct FlyoverMapRepresentable: UIViewRepresentable {
     var scrubSample: Double
     var options: FlyoverOptions
     var cameraMode: FlyoverOptions.CameraMode
+    var onCameraInteraction: () -> Void
 
-    func makeCoordinator() -> FlyoverMapCoordinator { IdleMapCache.shared.take() ?? FlyoverMapCoordinator() }
+    func makeCoordinator() -> FlyoverMapCoordinator {
+        let cached = IdleMapCache.shared.take()
+        let coordinator = cached ?? FlyoverMapCoordinator()
+        coordinator.beginPresentation(reused: cached != nil)
+        return coordinator
+    }
 
     func makeUIView(context: Context) -> FlyoverMapViewport {
         if let mapView = context.coordinator.mapView { return FlyoverMapViewport(mapView: mapView) }
@@ -59,12 +69,14 @@ private struct FlyoverMapRepresentable: UIViewRepresentable {
         let coordinator = context.coordinator
         mapView.onResize = { [weak coordinator] in coordinator?.mapViewDidResize() }
         coordinator.mapView = mapView
+        coordinator.installCameraGestures(on: mapView)
         return FlyoverMapViewport(mapView: mapView)
     }
 
     func updateUIView(_ viewport: FlyoverMapViewport, context: Context) {
         viewport.followsRoute = cameraMode == .follow
         viewport.layoutIfNeeded()
+        context.coordinator.onCameraInteraction = onCameraInteraction
         context.coordinator.update(
             route: route,
             bandColors: bandColors,
@@ -80,13 +92,22 @@ private struct FlyoverMapRepresentable: UIViewRepresentable {
     }
 }
 
-/// Keeps one idle map (including its geometry and renderers) warm briefly.
+/// Keeps one idle map (including its geometry and renderers) warm for up to five minutes.
 /// NSCache may discard it under memory pressure; MapKit owns its tile cache.
 @MainActor
 private final class IdleMapCache {
     static let shared = IdleMapCache()
     private let cache = NSCache<NSString, FlyoverMapCoordinator>()
     private var generation = UUID()
+    private var memoryWarningObserver: NSObjectProtocol?
+
+    private init() {
+        memoryWarningObserver = NotificationCenter.default.addObserver(
+            forName: UIApplication.didReceiveMemoryWarningNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.cache.removeAllObjects() }
+        }
+    }
 
     func take() -> FlyoverMapCoordinator? {
         let coordinator = cache.object(forKey: "idle")
@@ -100,7 +121,7 @@ private final class IdleMapCache {
         cache.setObject(coordinator, forKey: "idle")
         let token = UUID()
         generation = token
-        DispatchQueue.main.asyncAfter(deadline: .now() + 60) { [weak self] in
+        DispatchQueue.main.asyncAfter(deadline: .now() + 300) { [weak self] in
             guard let self, self.generation == token else { return }
             self.cache.removeAllObjects()
         }
@@ -149,9 +170,29 @@ final class LayoutReportingMapView: MKMapView {
     var renderScale = 1.0
     var onResize: (() -> Void)?
     private var lastSize: CGSize = .zero
+    let routeFallback = RouteFallbackView(frame: .zero)
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        addSubview(routeFallback)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { nil }
+
+    func showRouteFallback(_ visible: Bool) {
+        routeFallback.isHidden = !visible
+        isScrollEnabled = !visible
+        isZoomEnabled = !visible
+        isRotateEnabled = !visible
+        isPitchEnabled = !visible
+        accessibilityElements = visible ? [routeFallback] : nil
+    }
 
     override func layoutSubviews() {
         super.layoutSubviews()
+        routeFallback.frame = bounds
+        bringSubviewToFront(routeFallback)
         if bounds.size != lastSize {
             lastSize = bounds.size
             onResize?()
@@ -205,7 +246,7 @@ final class MarkerView: MKAnnotationView {
 }
 
 @MainActor
-final class FlyoverMapCoordinator: NSObject, MKMapViewDelegate {
+final class FlyoverMapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDelegate {
     /// Everything that, when changed, means the lines are drawn again.
     private struct LineSettings: Equatable {
         var route: FlyoverRoute
@@ -224,6 +265,34 @@ final class FlyoverMapCoordinator: NSObject, MKMapViewDelegate {
     }
 
     var mapView: LayoutReportingMapView?
+    var onCameraInteraction: (() -> Void)?
+
+    func installCameraGestures(on mapView: MKMapView) {
+        // Observe native gestures simultaneously; never replace MapKit delegates.
+        let gestures: [UIGestureRecognizer] = [
+            UIPanGestureRecognizer(target: self, action: #selector(cameraGesture(_:))),
+            UIPinchGestureRecognizer(target: self, action: #selector(cameraGesture(_:))),
+            UIRotationGestureRecognizer(target: self, action: #selector(cameraGesture(_:)))
+        ]
+        for gesture in gestures {
+            gesture.delegate = self
+            gesture.cancelsTouchesInView = false
+            mapView.addGestureRecognizer(gesture)
+        }
+    }
+
+    @objc private func cameraGesture(_ gesture: UIGestureRecognizer) {
+        guard gesture.state == .began, cameraMode != .manual,
+              mapView?.routeFallback.isHidden == true else { return }
+        // Stop in this event, before another display tick can fight the gesture.
+        cameraMode = .manual
+        needsOverviewFit = false
+        stopDisplayLink()
+        onCameraInteraction?()
+    }
+
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
+                           shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool { true }
 
     private var geometry: RouteGeometry?
     private var options = FlyoverOptions()
@@ -241,11 +310,35 @@ final class FlyoverMapCoordinator: NSObject, MKMapViewDelegate {
     private var needsOverviewFit = false
 
     private var smoother = HeadingSmoother()
-    private var pacing = CameraPacing()
     private var headingTarget: Double?
     private var cameraNeedsUpdate = false
     private var displayLink: CADisplayLink?
     private var lastFrameTimestamp: CFTimeInterval?
+    private var loadingTimeout: Task<Void, Never>?
+    private var isPresented = false
+
+    private func showRouteFallback(_ visible: Bool) {
+        guard let mapView else { return }
+        let changed = mapView.routeFallback.isHidden == visible
+        mapView.showRouteFallback(visible)
+        if visible {
+            stopDisplayLink()
+            if changed { fitOverview() }
+        } else if cameraMode == .follow {
+            cameraNeedsUpdate = true
+            startDisplayLink()
+        }
+    }
+
+    private func watchMapLoading() {
+        guard isPresented, loadingTimeout == nil else { return }
+        loadingTimeout = Task { @MainActor [weak self] in
+            do { try await Task.sleep(for: .seconds(8)) } catch { return }
+            guard let self, self.isPresented else { return }
+            self.loadingTimeout = nil
+            self.showRouteFallback(true)
+        }
+    }
 
     func update(
         route: FlyoverRoute,
@@ -257,17 +350,26 @@ final class FlyoverMapCoordinator: NSObject, MKMapViewDelegate {
         guard let mapView else { return }
         self.options = options
 
+        let mapRegionChanged = geometry?.route.vertices != route.vertices
         let routeChanged = geometry?.route != route
         if routeChanged {
             geometry = RouteGeometry(route: route)
         }
         guard let geometry else { return }
         position = geometry.position(atSample: scrubSample)
+        mapView.routeFallback.update(route: route, colors: bandColors, position: position, options: options)
+        if mapRegionChanged {
+            showRouteFallback(true)
+            watchMapLoading()
+        }
 
         let newMapSettings = MapSettings(style: options.mapStyle, realisticElevation: options.realisticElevation)
         if newMapSettings != mapSettings {
+            showRouteFallback(true)
+            watchMapLoading()
             mapSettings = newMapSettings
             mapView.preferredConfiguration = Self.configuration(for: newMapSettings)
+            performanceLog.info("map_configuration style=\(options.mapStyle.rawValue, privacy: .public) realistic=\(options.realisticElevation)")
         }
 
         let newLineSettings = LineSettings(
@@ -285,12 +387,11 @@ final class FlyoverMapCoordinator: NSObject, MKMapViewDelegate {
             drawLines(geometry: geometry, settings: newLineSettings, in: mapView)
         }
 
-        marker.coordinate = CLLocationCoordinate2D(geometry.coordinate(at: position))
+        if cameraMode != .follow || !markerAdded { updateMarker() }
         if !markerAdded {
             mapView.addAnnotation(marker)
             markerAdded = true
         }
-        updateStrokeEnds()
 
         if routeChanged || cameraMode != self.cameraMode {
             self.cameraMode = cameraMode
@@ -298,8 +399,11 @@ final class FlyoverMapCoordinator: NSObject, MKMapViewDelegate {
             case .overview:
                 stopDisplayLink()
                 fitOverview()
+            case .manual:
+                needsOverviewFit = false
+                stopDisplayLink()
             case .follow:
-                pacing.reset(to: geometry.distance(at: position))
+                needsOverviewFit = false
                 smoother = options.headingSmoothing
                 headingTarget = options.followHeading.target(on: geometry, at: position)
                 smoother.reset(to: headingTarget ?? mapView.camera.heading)
@@ -310,11 +414,17 @@ final class FlyoverMapCoordinator: NSObject, MKMapViewDelegate {
             smoother.maximumRate = options.headingSmoothing.maximumRate
             headingTarget = options.followHeading.target(on: geometry, at: position) ?? headingTarget
             cameraNeedsUpdate = true
-            startDisplayLink()
+            if mapView.routeFallback.isHidden { startDisplayLink() }
+            else if routeChanged { fitOverview() }
         }
     }
 
     func stop() {
+        isPresented = false
+        onCameraInteraction = nil
+        loadingTimeout?.cancel()
+        loadingTimeout = nil
+        performanceLog.info("map_detached")
         stopDisplayLink()
     }
 
@@ -325,6 +435,96 @@ final class FlyoverMapCoordinator: NSObject, MKMapViewDelegate {
             cameraNeedsUpdate = true
             startDisplayLink()
         }
+    }
+
+    // Timings describe visible rendering, not network requests: MapKit owns
+    // tile downloads and may complete several render passes per camera change.
+    private let performanceLog = Logger(subsystem: "com.arjunakankipati.sweatkit", category: "MapPerformance")
+    private var presentationStarted = CACurrentMediaTime()
+    private var firstRenderReported = false
+    private var firstCompleteRenderReported = false
+    private var loadingStarted: CFTimeInterval?
+    private var regionStarted: CFTimeInterval?
+    private var regionSettled: CFTimeInterval?
+    private var renderStarted: CFTimeInterval?
+    private var regionSequence = 0
+
+    func beginPresentation(reused: Bool) {
+        isPresented = true
+        cameraMode = nil
+        presentationStarted = CACurrentMediaTime()
+        firstRenderReported = false
+        firstCompleteRenderReported = false
+        loadingStarted = nil
+        regionStarted = nil
+        regionSettled = nil
+        renderStarted = nil
+        performanceLog.info("map_attached reused=\(reused)")
+    }
+
+    func mapView(_ mapView: MKMapView, regionWillChangeAnimated animated: Bool) {
+        // Follow moves every frame; logging each change would distort measurement.
+        guard cameraMode != .follow else { return }
+        regionSequence += 1
+        regionStarted = CACurrentMediaTime()
+        regionSettled = nil
+        performanceLog.info("region_start sequence=\(self.regionSequence)")
+    }
+
+    func mapView(_ mapView: MKMapView, regionDidChangeAnimated animated: Bool) {
+        guard cameraMode != .follow else { return }
+        regionSettled = CACurrentMediaTime()
+        let movement = regionSettled! - (regionStarted ?? regionSettled!)
+        performanceLog.info("region_settled sequence=\(self.regionSequence) movement_ms=\(movement * 1000) distance_m=\(mapView.camera.centerCoordinateDistance) pitch=\(mapView.camera.pitch) overlays=\(self.routeOverlays.count)")
+    }
+
+    func mapViewWillStartRenderingMap(_ mapView: MKMapView) {
+        if renderStarted == nil { renderStarted = CACurrentMediaTime() }
+    }
+
+    func mapViewDidFinishRenderingMap(_ mapView: MKMapView, fullyRendered: Bool) {
+        if fullyRendered, isPresented {
+            loadingTimeout?.cancel()
+            loadingTimeout = nil
+            showRouteFallback(false)
+        }
+        let now = CACurrentMediaTime()
+        if !firstRenderReported {
+            firstRenderReported = true
+            performanceLog.info("map_first_render elapsed_ms=\((now - self.presentationStarted) * 1000) fully_rendered=\(fullyRendered)")
+        }
+        if fullyRendered && !firstCompleteRenderReported {
+            firstCompleteRenderReported = true
+            performanceLog.info("map_first_complete_render elapsed_ms=\((now - self.presentationStarted) * 1000)")
+        }
+        guard cameraMode != .follow else { renderStarted = nil; return }
+        let renderMS = renderStarted.map { (now - $0) * 1000 } ?? -1
+        let settledMS = regionSettled.map { (now - $0) * 1000 } ?? -1
+        performanceLog.info("map_render sequence=\(self.regionSequence) fully_rendered=\(fullyRendered) render_ms=\(renderMS) since_settled_ms=\(settledMS) distance_m=\(mapView.camera.centerCoordinateDistance)")
+        renderStarted = nil
+    }
+
+    func mapViewWillStartLoadingMap(_ mapView: MKMapView) {
+        watchMapLoading()
+        if loadingStarted == nil { loadingStarted = CACurrentMediaTime() }
+    }
+
+    func mapViewDidFinishLoadingMap(_ mapView: MKMapView) {
+        let milliseconds = loadingStarted.map { (CACurrentMediaTime() - $0) * 1000 } ?? -1
+        loadingStarted = nil
+        performanceLog.info("map_loading_finished duration_ms=\(milliseconds)")
+    }
+
+    func mapViewDidFailLoadingMap(_ mapView: MKMapView, withError error: any Error) {
+        if isPresented {
+            loadingTimeout?.cancel()
+            loadingTimeout = nil
+            showRouteFallback(true)
+        }
+        // Avoid logging location-bearing URLs or raw error descriptions.
+        loadingStarted = nil
+        let failure = error as NSError
+        performanceLog.error("map_load_failed domain=\(failure.domain, privacy: .public) code=\(failure.code)")
     }
 
     // MARK: Map
@@ -391,6 +591,16 @@ final class FlyoverMapCoordinator: NSObject, MKMapViewDelegate {
     private func strokeEnd(for line: RoutePolyline) -> CGFloat {
         guard lineSettings?.dimsAhead == true, let geometry else { return 1 }
         return CGFloat(geometry.strokeFraction(at: position, vertices: line.vertices))
+    }
+
+    private func updateMarker() {
+        guard let geometry else { return }
+        // Commit the annotation and camera on the same display tick. Never animate
+        // the annotation independently of the camera following its coordinate.
+        UIView.performWithoutAnimation {
+            marker.coordinate = CLLocationCoordinate2D(geometry.coordinate(at: position))
+        }
+        updateStrokeEnds()
     }
 
     private func updateStrokeEnds() {
@@ -464,7 +674,7 @@ final class FlyoverMapCoordinator: NSObject, MKMapViewDelegate {
             return
         }
         let link = CADisplayLink(target: self, selector: #selector(stepCamera(_:)))
-        link.preferredFrameRateRange = CAFrameRateRange(minimum: 30, maximum: 30, preferred: 30)
+        link.preferredFrameRateRange = CAFrameRateRange(minimum: 30, maximum: 60, preferred: 60)
         link.add(to: .main, forMode: .common)
         displayLink = link
     }
@@ -476,27 +686,32 @@ final class FlyoverMapCoordinator: NSObject, MKMapViewDelegate {
     }
 
     @objc private func stepCamera(_ link: CADisplayLink) {
-        guard cameraMode == .follow, let mapView, let geometry else {
+        guard cameraMode == .follow else {
             stopDisplayLink()
             return
         }
-        let targetDistance = geometry.distance(at: position)
-        guard cameraNeedsUpdate || !pacing.hasSettled(on: targetDistance) || !smoother.hasSettled(on: headingTarget) else {
+        guard cameraNeedsUpdate || !smoother.hasSettled(on: headingTarget) else {
             link.isPaused = true
             lastFrameTimestamp = nil
             return
         }
-        // Long gaps, such as after a pause, count as one frame.
-        let seconds = lastFrameTimestamp.map { min(link.timestamp - $0, 1.0 / 30) } ?? link.duration
+        // Bound long gaps without slowing rotation when a frame is dropped.
+        let seconds = lastFrameTimestamp.map { min(link.timestamp - $0, 0.1) } ?? link.duration
         lastFrameTimestamp = link.timestamp
+        updateFollowCamera(seconds: seconds)
+    }
+
+    func updateFollowCamera(seconds: Double) {
+        guard cameraMode == .follow, let mapView, let geometry else { return }
         cameraNeedsUpdate = false
-        let cameraDistance = pacing.step(towards: targetDistance, seconds: seconds)
-        let cameraPosition = geometry.position(atDistance: cameraDistance)
-        headingTarget = options.followHeading.target(on: geometry, at: cameraPosition) ?? headingTarget
+        // Translation is locked to the cursor; only orientation is eased.
+        // A second, lagging route position lets the marker escape at speed.
+        updateMarker()
+        headingTarget = options.followHeading.target(on: geometry, at: position) ?? headingTarget
         guard let heading = smoother.step(towards: headingTarget, seconds: seconds) else { return }
         mapView.setCamera(
             MKMapCamera(
-                lookingAtCenter: CLLocationCoordinate2D(geometry.coordinate(at: cameraPosition)),
+                lookingAtCenter: CLLocationCoordinate2D(geometry.coordinate(at: position)),
                 // Compensate for the larger render surface so the cropped
                 // map retains the follow camera's scale at the marker.
                 fromDistance: options.followDistance * mapView.renderScale,

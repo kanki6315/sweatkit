@@ -11,6 +11,8 @@ settings:
     CURRENT_PROJECT_VERSION: "1"
     DEVELOPMENT_TEAM: TDBAHN96B3
 packages:
+  SweatKitCloud:
+    path: Packages/SweatKitCloud
   SweatKitModel:
     path: Packages/SweatKitModel
   SweatKitIngest:
@@ -54,8 +56,12 @@ targets:
         ITSAppUsesNonExemptEncryption: false
         BGTaskSchedulerPermittedIdentifiers:
           - com.arjunakankipati.sweatkit.refresh
+          - com.arjunakankipati.sweatkit.processing
+          - com.arjunakankipati.sweatkit.workout.*
         UIBackgroundModes:
           - fetch
+          - processing
+          - remote-notification
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.arjunakankipati.sweatkit
@@ -68,7 +74,13 @@ targets:
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
         INFOPLIST_KEY_UISupportedInterfaceOrientations: UIInterfaceOrientationPortrait
         TARGETED_DEVICE_FAMILY: "1"
+      configs:
+        Debug:
+          APS_ENVIRONMENT: development
+        Release:
+          APS_ENVIRONMENT: production
     dependencies:
+      - package: SweatKitCloud
       - package: SweatKitModel
         product: SweatKitModel
       - package: SweatKitIngest

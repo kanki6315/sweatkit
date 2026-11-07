@@ -37,6 +37,18 @@ public enum ActivityAnalysis {
         }
     }
 
+    /// Only the measurements used during range selection; skips splits, zones,
+    /// load, best distances and weighted power.
+    public static func rangeMeasurements(for input: ActivityInput) -> (ascent: Metric<Double>, averagePower: Metric<Double>, averageHeartRate: Metric<Double>) {
+        guard case .stream(let stream) = input.recording else {
+            return (.unavailable(.noStream), .unavailable(.noStream), .unavailable(.noStream))
+        }
+        let analysis = StreamAnalysis(input: input, stream: stream)
+        return (analysis.elevation().map(\.ascent),
+            input.sport == .cycling ? analysis.average(of: analysis.power, orElse: .noPower) : .unavailable(.notDefinedForSport),
+            analysis.average(of: analysis.heartRate, orElse: .noHeartRate))
+    }
+
     /// The best mean power for each duration, in the order given.
     ///
     /// The spec names no set of durations, so the caller chooses them. Each

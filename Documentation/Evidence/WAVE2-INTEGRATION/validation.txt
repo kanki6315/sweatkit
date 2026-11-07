@@ -1,0 +1,34 @@
+== SweatKitAnalysis
+✔ Test run with 289 tests in 31 suites passed after 0.035 seconds.
+== SweatKitCloud
+✔ Test run with 7 tests in 2 suites passed after 0.004 seconds.
+== SweatKitDetail
+✔ Test run with 74 tests in 10 suites passed after 16.295 seconds.
+== SweatKitFlyover
+✔ Test run with 27 tests in 6 suites passed after 0.001 seconds.
+== SweatKitGarmin
+✔ Test run with 35 tests in 3 suites passed after 0.004 seconds.
+== SweatKitIdentity
+✔ Test run with 269 tests in 28 suites passed after 0.087 seconds.
+== SweatKitIngest
+✔ Test run with 169 tests in 14 suites passed after 48.512 seconds.
+== SweatKitLibrary
+✔ Test run with 148 tests in 28 suites passed after 124.800 seconds.
+== SweatKitModel
+✔ Test run with 17 tests in 6 suites passed after 0.003 seconds.
+== SweatKitPalette
+✔ Test run with 5 tests in 1 suite passed after 0.001 seconds.
+== SweatKitRouteMatching
+✔ Test run with 284 tests in 21 suites passed after 0.013 seconds.
+== SweatKitStore
+✔ Test run with 51 tests in 9 suites passed after 50.538 seconds.
+== SweatKitSync
+✔ Test run with 41 tests in 9 suites passed after 0.028 seconds.
+== SweatKitTimeline
+✔ Test run with 116 tests in 25 suites passed after 0.009 seconds.
+== SweatKitTrackCleanup
+✔ Test run with 40 tests in 7 suites passed after 0.001 seconds.
+All packages passed.
+Release tooling: 6 tests passed.
+Unsigned physical-iPhone Release build: passed.
+Integrated UI: 3 tests passed across light, dark and large text.

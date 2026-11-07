@@ -47,6 +47,18 @@ struct MatchRuleTests {
         #expect(outcomes(candidate(ga1), candidate(hk1)) == matched)
     }
 
+    @Test func negligibleSameProviderBoundaryOverlapDoesNotNeedReview() {
+        let second = SourceIdentity(source: .healthKit, externalID: "golf-second")
+        #expect(outcomes(candidate(hk1, sport: .other, elapsed: 4565, distance: nil),
+                         candidate(second, sport: .other, start: 4560, elapsed: 8548, distance: nil)) == unrelated)
+        // A short recording wholly inside another remains reviewable.
+        #expect(outcomes(candidate(hk1, elapsed: 3600),
+                         candidate(second, start: 1000, elapsed: 20)) == flagged)
+        // Source overlap is still useful when recordings come from different providers.
+        #expect(outcomes(candidate(hk1, elapsed: 4565),
+                         candidate(ga1, start: 4560, elapsed: 8548)) == flagged)
+    }
+
     // MARK: Sport family
 
     @Test func differentSportFamiliesDoNotMatch() {

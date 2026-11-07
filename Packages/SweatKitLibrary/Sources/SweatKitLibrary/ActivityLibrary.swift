@@ -44,6 +44,10 @@ public actor ActivityLibrary {
     /// The versions this library treats as current.
     public nonisolated let versions: PipelineVersions
 
+    var cachedTrendsHistory: (revision: UInt64, history: TrendsHistory)?
+    var trendsHistoryTask: (revision: UInt64, token: UUID, task: Task<TrendsHistory, Error>)?
+    var routeCatalogCache: RouteCatalogCache?
+
     /// The kind of the derived result that holds an activity's
     /// `ActivityMetrics`.
     public static let metricsKind = "metrics"
@@ -92,6 +96,8 @@ public actor ActivityLibrary {
     /// rides that started in that range. Weight and units stale nothing.
     @discardableResult
     public func saveProfile(_ profile: AthleteProfile) async throws(LibraryError) -> [StaleActivity] {
+        let token = SourceIdentity(source: .file, externalID: "profile-writer")
+        await begin(token); defer { end(token) }
         do {
             try await store.saveProfile(profile)
             return try await scan(profile: profile, checkingStreamFiles: false)
@@ -144,8 +150,36 @@ public actor ActivityLibrary {
     /// A changed route or sample set becomes a new revision of that source.
     @discardableResult
     public func importHealthSnapshot(_ snapshot: HealthSnapshot, at date: Date = Date()) async throws -> ImportResult {
+        try await importHealthSnapshot(snapshot, at: date, batched: false)
+    }
+
+    /// Bounded batches amortize full-library identity matching. The writer lock
+    /// covers the whole batch; a failure leaves durable inputs for retry.
+    /// Callers only checkpoint returned IDs after reconciliation succeeds.
+    public func importHealthSnapshots(_ snapshots: [HealthSnapshot], at date: Date = Date()) async throws -> Set<UUID> {
+        let token = SourceIdentity(source: .file, externalID: "health-batch")
+        await begin(token)
+        defer { end(token) }
+        if identityNeedsRecovery && FileManager.default.fileExists(atPath: identityURL.path) {
+            try await reconcileIdentity()
+        }
+        var completed: Set<UUID> = []
+        for snapshot in snapshots {
+            try Task.checkCancellation()
+            do {
+                _ = try await importHealthSnapshot(snapshot, at: date, batched: true)
+                completed.insert(snapshot.workoutID)
+            } catch is CancellationError { throw CancellationError() }
+            catch { /* Keep this workout pending, but allow the others to finish. */ }
+        }
+        if identityNeedsRecovery { try await reconcileIdentity() }
+        return completed
+    }
+
+    private func importHealthSnapshot(_ snapshot: HealthSnapshot, at date: Date, batched: Bool) async throws -> ImportResult {
         let result = try await importBytes(snapshot.encoded(), as: snapshot.identity,
-            fallbackUTCOffset: snapshot.activity.stated.utcOffset, at: date)
+            fallbackUTCOffset: snapshot.activity.stated.utcOffset, at: date,
+            alreadyLocked: batched, deferIdentity: batched)
         // Health data remains local even when device backups are enabled.
         let records = try await store.sourceRecord(snapshot.identity)
         if let revision = records?.currentRevision {
@@ -209,26 +243,29 @@ public actor ActivityLibrary {
         return ImportFileOutcome(index: index, name: file.name, result: result)
     }
 
-    private func importBytes(
+    func importBytes(
         _ bytes: Data,
         as identity: SourceIdentity?,
         fallbackUTCOffset: Int?,
-        at date: Date
+        at date: Date,
+        alreadyLocked: Bool = false,
+        deferIdentity: Bool = false
     ) async throws -> ImportResult {
         let hash = ContentHash(of: bytes)
         let identity = identity ?? SourceIdentity(source: .file, externalID: hash.hex)
 
         // One import of an identity at a time, so the same file twice in one
         // batch is added once and found already there once.
-        await begin(identity)
-        defer { end(identity) }
+        if !alreadyLocked { await begin(identity) }
+        defer { if !alreadyLocked { end(identity) } }
 
-        if identityNeedsRecovery && FileManager.default.fileExists(atPath: identityURL.path) { try await reconcileIdentity() }
+        if !deferIdentity && identityNeedsRecovery && FileManager.default.fileExists(atPath: identityURL.path) { try await reconcileIdentity() }
 
         if try deletedIdentities().contains(identity) { throw LibraryError.permanentlyDeleted(identity) }
 
         // Already imported: nothing to decode, store or compute.
         if let activity = try await finishedActivity(of: identity, holding: hash) {
+            if deferIdentity { return ImportResult(change: .alreadyInLibrary, source: identity, activity: activity) }
             if !FileManager.default.fileExists(atPath: identityURL.path) { try await reconcileIdentity() }
             let resolved = try await activityContaining(identity)
             return ImportResult(change: .alreadyInLibrary, source: identity, activity: resolved ?? activity)
@@ -261,6 +298,9 @@ public actor ActivityLibrary {
             isIndoor: decoded.recorded.isIndoor || decoded.recorded.isVirtual,
             linkedIdentities: (try HealthSnapshot.decode(bytes))?.linkedIdentities ?? [])
         try writeIdentityJournal(journal)
+        if deferIdentity {
+            return ImportResult(change: record.activityID == nil ? .added : .updated, source: record.identity, activity: row)
+        }
         try await reconcileIdentity()
         let resolvedID = try await store.sourceRecord(record.identity)?.activityID
         let resolvedRow: ActivityRecord?
@@ -308,7 +348,7 @@ public actor ActivityLibrary {
             return existing
         }
 
-        let derived = try await Pipeline.derive(
+        var derived = try await Pipeline.derive(
             facts: ActivityFacts(decoded.recorded, fallbackUTCOffset: fallbackUTCOffset ?? existing?.utcOffset),
             stream: decoded.stream,
             profile: profile,
@@ -323,6 +363,7 @@ public actor ActivityLibrary {
             summaryOnly: decoded.recorded.stream.samples.isEmpty ? decoded.recorded.stated : nil,
             sourceDistance: record.source == .healthKit ? decoded.recorded.stated.distance : nil
         )
+        derived.row.sourceSportName = decoded.sourceSportName
         // The row first and the metrics last: the metrics are the mark of a
         // finished write, and their absence is what a recompute looks for.
         try await store.saveActivity(derived.row)
@@ -664,7 +705,7 @@ public actor ActivityLibrary {
     private var waiting: [SourceIdentity: [CheckedContinuation<Void, Never>]] = [:]
 
     /// Waits for the library mutation slot. Reads can continue during derivation.
-    private func begin(_ source: SourceIdentity) async {
+    func begin(_ source: SourceIdentity) async {
         let identity = SourceIdentity(source: .file, externalID: "library-writer")
         while busy.contains(identity) {
             await withCheckedContinuation { continuation in
@@ -674,7 +715,7 @@ public actor ActivityLibrary {
         busy.insert(identity)
     }
 
-    private func end(_ source: SourceIdentity) {
+    func end(_ source: SourceIdentity) {
         let identity = SourceIdentity(source: .file, externalID: "library-writer")
         busy.remove(identity)
         for continuation in waiting.removeValue(forKey: identity) ?? [] {
@@ -712,7 +753,7 @@ public actor ActivityLibrary {
 
     // MARK: Durable identity decisions and resolved feed
 
-    private struct IdentityJournal: Codable {
+    struct IdentityJournal: Codable {
         var version = 1
         var device = DeviceID(UUID().uuidString)
         var candidates: [String: MatchCandidate] = [:]
@@ -748,7 +789,7 @@ public actor ActivityLibrary {
 
     private var identityURL: URL { store.root.appendingPathComponent("identity.json") }
 
-    private func readIdentityJournal() throws -> IdentityJournal {
+    func readIdentityJournal() throws -> IdentityJournal {
         guard FileManager.default.fileExists(atPath: identityURL.path) else { return IdentityJournal() }
         var journal = try JSONDecoder().decode(IdentityJournal.self, from: Data(contentsOf: identityURL))
         guard journal.version == 1 else { throw LibraryError.storage("Unsupported identity journal version") }
@@ -760,7 +801,7 @@ public actor ActivityLibrary {
         return journal
     }
 
-    private func writeIdentityJournal(_ journal: IdentityJournal) throws {
+    func writeIdentityJournal(_ journal: IdentityJournal) throws {
         var safe = journal
         let local = journal.candidates.filter { $0.value.identity.source == .healthKit }
         safe.candidates = journal.candidates.filter { $0.value.identity.source != .healthKit }
@@ -777,12 +818,13 @@ public actor ActivityLibrary {
     /// Rebuilds the resolved feed from source facts and add-only decisions.
     /// The journal is the durable intent; a failed cache replacement is retried
     /// on the next feed read or import, including after relaunch.
-    private func reconcileIdentity() async throws {
+    func reconcileIdentity() async throws {
         var journal = try readIdentityJournal()
         let deleted = Set(journal.tombstones.filter { $0.kind == .deleted }.map(\.identity))
         if !deleted.isEmpty {
             // Intent is durable before any erasure. Recovery also repeats file
             // collection after a crash between the metadata save and unlink.
+            try await cloudPurgeDeletedAssets(deleted)
             try await store.eraseSources(deleted)
             journal.candidates = journal.candidates.filter { !deleted.contains($0.value.identity) }
         }
@@ -851,6 +893,7 @@ public actor ActivityLibrary {
                     revision: primary.currentRevision, existing: nil), at: Date(),
                 summaryOnly: recorded.stream.samples.isEmpty ? recorded.stated : nil,
                 sourceDistance: primary.source == .healthKit ? recorded.stated.distance : nil)
+            derived.row.sourceSportName = try await recordingContext(for: primary.identity)?.sportName
             derived.row.title = group.title ?? FeedRules.generatedTitle(for: derived.row, locality: locality)
             derived.row.isHidden = group.isHidden
             replacements.append(derived.row)
@@ -878,7 +921,18 @@ public actor ActivityLibrary {
         let scan = MatchScan.scan(Array(journal.candidates.values), at: Date(), device: journal.device)
         let resolved = ResolvedLibrary.resolve(records: Set(journal.candidates.values.map(\.identity)),
             links: journal.links, decisions: journal.decisions, tombstones: journal.tombstones)
-        return Array(Set(scan.awaitingReview(given: journal.links) + resolved.possibleDuplicates.map(\.pair))).sorted()
+        // Pairwise tolerances are not transitive: A can match B and B can
+        // match C while A/C fails. Once the links put all three in one
+        // activity, that last pair needs no further user decision. The same
+        // applies when a refreshed source no longer passes an existing link.
+        let activityOf = Dictionary(uniqueKeysWithValues: resolved.activities.flatMap { activity in
+            activity.members.map { ($0, activity.id) }
+        })
+        let pending = Set(scan.awaitingReview(given: journal.links) + resolved.possibleDuplicates.map(\.pair))
+        return pending.filter { pair in
+            guard let first = activityOf[pair.lower], let second = activityOf[pair.upper] else { return false }
+            return first != second
+        }.sorted()
     }
 
     public func identityChanges() throws -> IdentityChanges {

@@ -14,7 +14,7 @@ import SweatKitModel
 ///
 /// `current` is what the app uses. The parts are variables so that a test can
 /// stand in for a later build by changing one.
-public struct PipelineVersions: Hashable, Sendable {
+public struct PipelineVersions: Codable, Hashable, Sendable {
     /// The version of the FIT decoder. Stored decoded activities carry it,
     /// and one from another version is decoded again from its original.
     public var decoder: Int
@@ -48,7 +48,7 @@ public struct PipelineVersions: Hashable, Sendable {
     /// The version of the rules that turn metrics into a feed row: the title
     /// and the headline in `FeedRules`. Raising it rebuilds every row. The
     /// headline's switch to weighted power in M5 is such a change.
-    public static let feedRowVersion = 1
+    public static let feedRowVersion = 2
 
     /// The version of the form a metrics result is stored in.
     public static let metricsPayloadVersion = 1

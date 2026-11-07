@@ -147,14 +147,14 @@ enum StoreSchemaV1: VersionedSchema {
     }
 }
 
-typealias SourceRecordEntity = StoreSchemaV1.SourceRecordEntity
-typealias RevisionEntity = StoreSchemaV1.RevisionEntity
-typealias ActivityEntity = StoreSchemaV1.ActivityEntity
-typealias DerivedResultEntity = StoreSchemaV1.DerivedResultEntity
-typealias ProfileEntity = StoreSchemaV1.ProfileEntity
+typealias SourceRecordEntity = StoreSchemaV2.SourceRecordEntity
+typealias RevisionEntity = StoreSchemaV2.RevisionEntity
+typealias ActivityEntity = StoreSchemaV2.ActivityEntity
+typealias DerivedResultEntity = StoreSchemaV2.DerivedResultEntity
+typealias ProfileEntity = StoreSchemaV2.ProfileEntity
 
-/// Migrations between schema versions. There is one version so far.
+/// The optional display-only field migrates without rewriting existing values.
 enum StoreMigrationPlan: SchemaMigrationPlan {
-    static var schemas: [any VersionedSchema.Type] { [StoreSchemaV1.self] }
-    static var stages: [MigrationStage] { [] }
+    static var schemas: [any VersionedSchema.Type] { [StoreSchemaV1.self, StoreSchemaV2.self] }
+    static var stages: [MigrationStage] { [.lightweight(fromVersion: StoreSchemaV1.self, toVersion: StoreSchemaV2.self)] }
 }

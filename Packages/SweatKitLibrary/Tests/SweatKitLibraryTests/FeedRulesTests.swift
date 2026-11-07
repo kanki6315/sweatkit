@@ -11,7 +11,8 @@ private func metrics(
     moving: Metric<TimeInterval> = .available(80),
     distance: Metric<Double> = .available(200),
     ascent: Metric<Double> = .available(12),
-    averagePower: Metric<Double> = .unavailable(.noPower)
+    averagePower: Metric<Double> = .unavailable(.noPower),
+    weightedPower: Metric<Double> = .unavailable(.tooLittlePower)
 ) -> ActivityMetrics {
     let none = Metric<Double>.unavailable(.noStream)
     return ActivityMetrics(
@@ -20,7 +21,7 @@ private func metrics(
         ascent: ascent,
         descent: none,
         power: PowerMetrics(
-            coverage: none, average: averagePower, averageShowsCoverage: false, weighted: none,
+            coverage: none, average: averagePower, averageShowsCoverage: false, weighted: weightedPower,
             intensity: none, load: none, variability: none, work: .unavailable(.noPower)
         ),
         heartRate: HeartRateMetrics(coverage: none, average: none, load: none),
@@ -148,11 +149,16 @@ private func row(
     }
 
     @Test func aRideWithPowerHasItAsItsHeadline() {
-        let row = row(sport: .cycling, metrics: metrics(averagePower: .available(187.5)))
-        #expect(row.headline == .init(kind: "averagePower", value: .available(187.5)))
+        let row = row(sport: .cycling, metrics: metrics(averagePower: .available(187.5), weightedPower: .available(210)))
+        #expect(row.headline == .init(kind: "weightedPower", value: .available(210)))
         // A recorded average of 0 W is a measurement, not a missing value.
-        #expect(FeedRules.headline(sport: .cycling, metrics: metrics(averagePower: .available(0)))
-            == .init(kind: "averagePower", value: .available(0)))
+        #expect(FeedRules.headline(sport: .cycling, metrics: metrics(averagePower: .available(0), weightedPower: .available(0)))
+            == .init(kind: "weightedPower", value: .available(0)))
+    }
+
+    @Test func insufficientWeightedPowerIsNotReplacedByAveragePower() {
+        let result = FeedRules.headline(sport: .cycling, metrics: metrics(averagePower: .available(150)))
+        #expect(result == .init(kind: "weightedPower", value: .unavailable(.tooLittlePower)))
     }
 
     @Test func aRideWithoutPowerAndAnyOtherSportHaveNoHeadline() {
@@ -198,7 +204,7 @@ private func row(
         #expect(current["analysis.bestDistances"] == AlgorithmVersion.bestDistances)
         // Analysis's twelve and this package's two.
         #expect(current.count == 14)
-        #expect(PipelineVersions.current.streamRules == 2)
+        #expect(PipelineVersions.current.streamRules == 3)
     }
 
     @Test(arguments: PipelineVersions.current.algorithms.keys.sorted())

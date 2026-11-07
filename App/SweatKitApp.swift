@@ -11,9 +11,10 @@ struct SweatKitApp: App {
         }
         .backgroundTask(.appRefresh(BackgroundRefresh.identifier)) {
             await library.open()
-            async let garminRefresh: Void? = library.garmin?.sync(.quick)
-            async let healthRefresh: Void? = library.health?.sync()
+            async let garminRefresh: Void? = library.garmin?.sync(.quick, continued: false)
+            async let healthRefresh: Void? = library.health?.sync(continued: false)
             _ = await (garminRefresh, healthRefresh)
+            await library.cloud?.sync()
             await BackgroundRefresh.schedule()
         }
     }

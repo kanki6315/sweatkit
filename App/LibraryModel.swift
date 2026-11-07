@@ -7,6 +7,7 @@ import SweatKitStore
 /// Owns the persistent library and the visible page, shared by all app screens.
 @MainActor @Observable
 final class LibraryModel {
+    private(set) var cloud: CloudConnection?
     private(set) var health: HealthConnection?
     private(set) var garmin: GarminConnection?
     private(set) var library: ActivityLibrary?
@@ -24,11 +25,33 @@ final class LibraryModel {
     private(set) var outcomes: [ImportFileOutcome] = []
     var error: String?
     var filter = FeedFilter()
+    private var loadedFilter: FeedFilter?
     private var cursor: FeedCursor?
+    let trendsPresentationCache = TrendsPresentationCache()
+    private(set) var trendsRevision = 0
     private var generation = 0
+    var routeCatalog = RouteCatalog(routes: [], reviews: [])
+    var recordBadges: [SourceIdentity: [TrendRecord]] = [:]
+    var historyRefreshTask: Task<Void, Never>?
+    var routeRefreshTask: Task<Void, Never>?
+    private var activationTask: Task<Void, Never>?
     private var importTask: Task<Void, Never>?
     private let localityResolver = ActivityLocalityResolver()
     var hasMore: Bool { cursor != nil }
+
+    /// Scene phase changes cancel SwiftUI tasks. This owner survives those changes.
+    func refreshOnActivation() {
+        guard activationTask == nil else { return }
+        activationTask = Task {
+            defer { activationTask = nil }
+            await open()
+            async let garminRefresh: Void? = garmin?.sync(continued: false)
+            async let healthRefresh: Void? = health?.sync(continued: false)
+            _ = await (garminRefresh, healthRefresh)
+            if !Task.isCancelled { await cloud?.sync() }
+            await reload()
+        }
+    }
 
     func open() async {
         guard library == nil else { return }
@@ -40,24 +63,32 @@ final class LibraryModel {
             library = opened
             garmin = GarminConnection(library: opened, root: root)
             health = HealthConnection(library: opened, root: root)
+            cloud = CloudConnection(library: opened, root: root)
+            cloud?.didRecover = { [weak self] in await self?.reload(scheduleCloud: false) }
             await garmin?.recoverDeletionCleanup()
             await reload()
         } catch { self.error = error.localizedDescription }
     }
 
-    func reload() async {
+    func reload(scheduleCloud: Bool = true) async {
         generation += 1
         let request = generation
         guard let library else { return }
         isLoading = true
         do {
-            let page = try await library.feed(filter, limit: 50)
+            // Refresh the entire visible window so background updates and returning
+            // from detail do not discard pages beneath the scroll position.
+            let requestedFilter = filter
+            let limit = loadedFilter == requestedFilter ? max(50, activities.count) : 50
+            let page = try await library.feed(requestedFilter, limit: limit)
             let profile = try await library.profile()
             let duplicates = try await library.possibleDuplicates()
             let sources = try await library.store.sourceRecords()
             let weeks = try await library.weeklySummaries(filter)
             let stale = try await library.staleActivities()
             guard request == generation else { return }
+            trendsRevision += 1
+            loadedFilter = requestedFilter
             activities = page.activities
             staleIDs = Set(stale.map(\.id))
             weekSummaries = Dictionary(uniqueKeysWithValues: weeks.map { ($0.start, $0) })
@@ -68,6 +99,9 @@ final class LibraryModel {
             cursor = page.next
             error = nil
             resolveLocalities()
+            scheduleRouteMatching()
+            scheduleRecordBadges()
+            if scheduleCloud { cloud?.schedule() }
         } catch {
             guard request == generation else { return }
             self.error = error.localizedDescription
@@ -86,6 +120,7 @@ final class LibraryModel {
             let existing = Set(activities.compactMap(\.id))
             activities += page.activities.filter { !existing.contains($0.id ?? $0.primary) }
             self.cursor = page.next
+            scheduleRecordBadges()
             resolveLocalities()
         } catch { if request == generation { self.error = error.localizedDescription } }
     }
@@ -95,7 +130,11 @@ final class LibraryModel {
         isImporting = true
         outcomes = []
         importProgress = nil
-        importTask = Task {
+        importTask = Task { [self] in
+            let background = WorkoutBackgroundWork(title: "Importing workouts", continued: true) { [weak self] in
+                self?.importTask?.cancel()
+            }
+            defer { background.finish(success: !Task.isCancelled && outcomes.allSatisfy { $0.failure == nil }) }
             let scoped = urls.filter { $0.startAccessingSecurityScopedResource() }
             defer {
                 scoped.forEach { $0.stopAccessingSecurityScopedResource() }
@@ -103,7 +142,10 @@ final class LibraryModel {
                 importTask = nil
             }
             outcomes = await library.importFiles(urls.map(ImportFile.init(url:))) { [self] progress in
-                Task { @MainActor in self.importProgress = progress }
+                Task { @MainActor in
+                    self.importProgress = progress
+                    background.update(completed: progress.completed, total: progress.total)
+                }
             }
             await reload()
         }

@@ -9,23 +9,29 @@ let package = Package(
     ],
     dependencies: [
         .package(path: "../SweatKitModel"),
+        .package(path: "../SweatKitCloud"),
         .package(path: "../SweatKitStore"),
         .package(path: "../SweatKitIngest"),
         .package(path: "../SweatKitAnalysis"),
         .package(path: "../SweatKitSync"),
         .package(path: "../SweatKitGarmin"),
         .package(path: "../SweatKitIdentity"),
+        .package(path: "../SweatKitRouteMatching"),
+        .package(path: "../SweatKitTrackCleanup"),
     ],
     targets: [
         .target(
             name: "SweatKitLibrary",
             dependencies: [
                 .product(name: "SweatKitModel", package: "SweatKitModel"),
+                .product(name: "SweatKitCloud", package: "SweatKitCloud"),
                 .product(name: "SweatKitStore", package: "SweatKitStore"),
                 .product(name: "SweatKitIngest", package: "SweatKitIngest"),
                 .product(name: "SweatKitAnalysis", package: "SweatKitAnalysis"),
                 .product(name: "SweatKitSync", package: "SweatKitSync"),
                 .product(name: "SweatKitIdentity", package: "SweatKitIdentity"),
+                .product(name: "SweatKitRouteMatching", package: "SweatKitRouteMatching"),
+                .product(name: "SweatKitTrackCleanup", package: "SweatKitTrackCleanup"),
             ]
         ),
         .testTarget(
@@ -34,11 +40,14 @@ let package = Package(
                 "SweatKitLibrary",
                 .product(name: "SweatKitGarmin", package: "SweatKitGarmin"),
                 .product(name: "SweatKitModel", package: "SweatKitModel"),
+                .product(name: "SweatKitCloud", package: "SweatKitCloud"),
                 .product(name: "SweatKitStore", package: "SweatKitStore"),
                 .product(name: "SweatKitIngest", package: "SweatKitIngest"),
                 .product(name: "SweatKitAnalysis", package: "SweatKitAnalysis"),
                 .product(name: "SweatKitSync", package: "SweatKitSync"),
                 .product(name: "SweatKitIdentity", package: "SweatKitIdentity"),
+                .product(name: "SweatKitRouteMatching", package: "SweatKitRouteMatching"),
+                .product(name: "SweatKitTrackCleanup", package: "SweatKitTrackCleanup"),
                 .product(name: "SweatKitTestSupport", package: "SweatKitModel"),
             ]
         ),

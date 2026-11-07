@@ -12,8 +12,11 @@ public enum FeedRules {
     // MARK: Headline
 
     /// The headline kind of a ride that has power: its average power in
-    /// watts. The spec makes this weighted power from M5 on.
+    /// watts. Retained for decoding older feed rows.
     public static let averagePowerHeadline = "averagePower"
+
+    /// M5 headline. Unavailable weighted power is never replaced with average power.
+    public static let weightedPowerHeadline = "weightedPower"
 
     /// The headline kind of a walk, a run or a hike: its average pace in
     /// seconds per kilometre.
@@ -23,7 +26,7 @@ public enum FeedRules {
 
     /// The headline of an activity, or nil when its sport has none.
     ///
-    /// - Cycling with power: average power. Reading: the spec gives the
+    /// - Cycling with power: weighted power. Reading: the spec gives the
     ///   headline to "rides with a power meter", so a ride with no power has
     ///   no headline at all, not an unavailable one.
     /// - Walking, running and hiking: average pace, which can be
@@ -34,7 +37,7 @@ public enum FeedRules {
         switch sport.family {
         case .cycling:
             guard case .available = metrics.power.average else { return nil }
-            return ActivityRecord.Headline(kind: averagePowerHeadline, value: metrics.power.average)
+            return ActivityRecord.Headline(kind: weightedPowerHeadline, value: metrics.power.weighted)
         case .onFoot:
             return ActivityRecord.Headline(kind: averagePaceHeadline, value: averagePace(metrics))
         case .other:
@@ -234,7 +237,8 @@ extension FeedRules {
             isVirtual: facts.isVirtual,
             title: title,
             headline: headline(sport: facts.sport, metrics: metrics),
-            isHidden: existing?.isHidden ?? false
+            isHidden: existing?.isHidden ?? false,
+            sourceSportName: existing?.sourceSportName
         )
     }
 }

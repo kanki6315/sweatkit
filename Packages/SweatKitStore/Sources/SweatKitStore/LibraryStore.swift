@@ -42,6 +42,10 @@ public actor LibraryStore: ModelActor {
     public nonisolated let modelContainer: ModelContainer
     private nonisolated let files: LibraryFiles
 
+    /// Changes whenever inputs to historical analysis may have changed. Derived
+    /// trend curves are outputs, so populating their cache does not invalidate it.
+    public private(set) var trendsRevision: UInt64 = 0
+
     /// The single key of the stored athlete profile.
     private static let profileKey = "athlete"
 
@@ -49,7 +53,7 @@ public actor LibraryStore: ModelActor {
     public init(root: URL) throws {
         let files = LibraryFiles(root: root)
         try files.createDirectories()
-        let schema = Schema(versionedSchema: StoreSchemaV1.self)
+        let schema = Schema(versionedSchema: StoreSchemaV2.self)
         // No CloudKit mirroring, even if the app gains the entitlement: iCloud
         // goes through CloudKit's sync engine, and mirroring forbids the
         // unique keys the identity rule needs.
@@ -83,6 +87,7 @@ public actor LibraryStore: ModelActor {
     ///   bytes are already stored under any record, it is recognised as that
     ///   record and nothing is added.
     public func importOriginal(_ bytes: Data, as identity: SourceIdentity, at date: Date) throws -> ImportOutcome {
+        try invalidateTrendsCache()
         let hash = ContentHash(of: bytes)
         if identity.source == .file {
             guard identity == SourceIdentity(fileContents: bytes) else {
@@ -153,6 +158,7 @@ public actor LibraryStore: ModelActor {
     /// Records a source record's state. What the state means for the rest of
     /// the library is decided above the store.
     public func setState(_ state: SourceRecordState, for identity: SourceIdentity) throws {
+        try invalidateTrendsCache()
         guard let record = try fetchRecord(identity) else { throw StoreError.unknownSourceRecord(identity) }
         record.stateRaw = state.rawValue
         try MetadataBackup.save(modelContext, files: files)
@@ -172,7 +178,8 @@ public actor LibraryStore: ModelActor {
     /// source records. Returns the ID.
     @discardableResult
     public func saveActivity(_ activity: ActivityRecord) throws -> SourceIdentity {
-        try writeActivity(activity, save: true)
+        try invalidateTrendsCache()
+        return try writeActivity(activity, save: true)
     }
 
     private func writeActivity(_ activity: ActivityRecord, save: Bool) throws -> SourceIdentity {
@@ -208,6 +215,7 @@ public actor LibraryStore: ModelActor {
         }
         entity.primaryKey = activity.primary.description
         entity.sportRaw = activity.sport.rawValue
+        entity.sourceSportName = activity.sourceSportName
         entity.start = activity.start
         entity.utcOffset = activity.utcOffset
         entity.elapsedTime = activity.elapsedTime
@@ -234,6 +242,7 @@ public actor LibraryStore: ModelActor {
         removing: Set<SourceIdentity>, with activities: [ActivityRecord],
         results: [DerivedResult] = []
     ) throws {
+        try invalidateTrendsCache()
         var seen: Set<SourceIdentity> = []
         for activity in activities {
             guard let id = activity.id, activity.members.contains(activity.primary),
@@ -404,6 +413,7 @@ public actor LibraryStore: ModelActor {
 
     /// Saves a derived result, replacing the one with the same owner and kind.
     public func saveDerivedResult(_ result: DerivedResult) throws {
+        if !result.kind.hasPrefix("trends.powerCurve.") { try invalidateTrendsCache() }
         try writeDerivedResult(result, save: true)
     }
 
@@ -512,6 +522,7 @@ public actor LibraryStore: ModelActor {
     // MARK: Athlete profile
 
     public func saveProfile(_ profile: AthleteProfile) throws {
+        try invalidateTrendsCache()
         let encoded = try PropertyListEncoder().encode(profile)
         let key = Self.profileKey
         if let existing = try modelContext.fetch(FetchDescriptor<ProfileEntity>(predicate: #Predicate { $0.key == key })).first {
@@ -550,6 +561,7 @@ public actor LibraryStore: ModelActor {
     /// deletion intent. Safe to repeat after termination at any point. Shared
     /// originals remain while any surviving revision references their hash.
     public func eraseSources(_ identities: Set<SourceIdentity>) throws {
+        try invalidateTrendsCache()
         let keys = Set(identities.map(\.description))
         let records = try modelContext.fetch(FetchDescriptor<SourceRecordEntity>()).filter { keys.contains($0.key) }
         let affected = Set(records.compactMap { $0.activity?.id })
@@ -578,6 +590,7 @@ public actor LibraryStore: ModelActor {
     /// interrupted writes, and leftover temporary files. Reports revisions
     /// whose original is missing without changing them.
     public func collectGarbage() throws -> GarbageReport {
+        try invalidateTrendsCache()
         let revisions = try modelContext.fetch(FetchDescriptor<RevisionEntity>())
         let known = Set(revisions.map(\.contentHash))
         let manager = FileManager.default
@@ -712,7 +725,8 @@ public actor LibraryStore: ModelActor {
             isVirtual: entity.isVirtual,
             title: entity.title,
             headline: headline,
-            isHidden: entity.isHidden
+            isHidden: entity.isHidden,
+            sourceSportName: entity.sourceSportName
         )
     }
 
@@ -733,5 +747,55 @@ public actor LibraryStore: ModelActor {
             payload: entity.payload,
             computedAt: entity.computedAt
         )
+    }
+}
+
+
+public enum TrendsCacheKind: String, Sendable { case history, presentation }
+
+extension LibraryStore {
+    private var trendsCacheDirectory: URL { root.appendingPathComponent("LocalMetadata/TrendsCache", isDirectory: true) }
+
+    /// Invalidate before mutating metadata: a crash must never leave a valid old cache.
+    private func invalidateTrendsCache() throws {
+        trendsRevision &+= 1
+        let manager = FileManager.default
+        if manager.fileExists(atPath: trendsCacheDirectory.path) {
+            try manager.removeItem(at: trendsCacheDirectory)
+        }
+    }
+
+    /// Local-only generation, recreated after any input mutation. The containing
+    /// LocalMetadata directory is excluded from backups and cloud recovery.
+    public func trendsCacheGeneration() throws -> UUID {
+        let marker = trendsCacheDirectory.appendingPathComponent("generation")
+        if let data = try? Data(contentsOf: marker), let id = try? JSONDecoder().decode(UUID.self, from: data) { return id }
+        let manager = FileManager.default
+        // Corrupt markers also discard all old cache payloads.
+        if manager.fileExists(atPath: trendsCacheDirectory.path) { try manager.removeItem(at: trendsCacheDirectory) }
+        try manager.createDirectory(at: trendsCacheDirectory, withIntermediateDirectories: true)
+        let id = UUID()
+        try JSONEncoder().encode(id).write(to: marker, options: .atomic)
+        return id
+    }
+
+    public func readTrendsCache(key: ContentHash, generation: UUID, kind: TrendsCacheKind = .presentation) throws -> Data? {
+        guard try trendsCacheGeneration() == generation else { return nil }
+        return try? Data(contentsOf: trendsCacheDirectory.appendingPathComponent("\(kind.rawValue)-\(key.hex)"))
+    }
+
+    /// A late calculation cannot restore data invalidated by an edit or deletion.
+    public func saveTrendsCache(_ data: Data, key: ContentHash, generation: UUID, kind: TrendsCacheKind = .presentation) throws {
+        guard try trendsCacheGeneration() == generation else { return }
+        let url = trendsCacheDirectory.appendingPathComponent("\(kind.rawValue)-\(key.hex)")
+        try data.write(to: url, options: .atomic)
+        let entries = try FileManager.default.contentsOfDirectory(at: trendsCacheDirectory,
+            includingPropertiesForKeys: [.contentModificationDateKey]).filter { $0.lastPathComponent.hasPrefix("\(kind.rawValue)-") }
+        let oldestFirst = entries.sorted {
+            ((try? $0.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast)
+                < ((try? $1.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast)
+        }
+        // One history snapshot plus twelve presentations; old versions expire too.
+        for old in oldestFirst.prefix(max(0, entries.count - (kind == .history ? 1 : 12))) { try? FileManager.default.removeItem(at: old) }
     }
 }

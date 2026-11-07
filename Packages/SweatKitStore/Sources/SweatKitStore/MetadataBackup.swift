@@ -82,6 +82,8 @@ struct MetadataBackup: Codable, Equatable {
         if let backup = try read(files) {
             let committed = try? String(contentsOf: files.backupGenerationURL, encoding: .utf8)
             if committed != backup.generation.uuidString {
+                let cache = files.metadataDirectory.appendingPathComponent("TrendsCache", isDirectory: true)
+                if FileManager.default.fileExists(atPath: cache.path) { try FileManager.default.removeItem(at: cache) }
                 try backup.replay(in: context)
                 try context.save()
                 try Data(backup.generation.uuidString.utf8).write(to: files.backupGenerationURL, options: .atomic)

@@ -114,6 +114,7 @@ public struct PreparedDetail: Sendable {
     ///   threshold, the averages over the seconds that have values, and power
     ///   for cycling only.
     public func rangeStats(_ range: ClosedRange<Int>) -> RangeStats {
+        guard !Task.isCancelled else { return RangeStats() }
         let stream = input.stream
         let lower = max(range.lowerBound, 0)
         let upper = min(range.upperBound, stream.count - 1)
@@ -126,7 +127,8 @@ public struct PreparedDetail: Sendable {
             distance = end - start
         }
 
-        let metrics = ActivityAnalysis.metrics(for: ActivityInput(
+        guard !Task.isCancelled else { return RangeStats() }
+        let metrics = ActivityAnalysis.rangeMeasurements(for: ActivityInput(
             sport: input.sport,
             isIndoor: input.isIndoor,
             isVirtual: input.isVirtual,
@@ -138,8 +140,8 @@ public struct PreparedDetail: Sendable {
             time: TimeInterval(upper - lower + 1),
             distance: distance,
             ascent: metrics.ascent.value,
-            averagePower: metrics.power.average.value,
-            averageHeartRate: metrics.heartRate.average.value
+            averagePower: metrics.averagePower.value,
+            averageHeartRate: metrics.averageHeartRate.value
         )
     }
 

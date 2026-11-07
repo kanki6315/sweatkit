@@ -28,9 +28,9 @@ public enum StreamNormaliser {
     ///   samples gets a grid with every channel missing. Samples never extend
     ///   it and their absence never shortens it.
     /// - A sample belongs to grid second floor((timestamp - start) /
-    ///   gridInterval). A sample before the start, or at or after second
-    ///   `count`, is left off the grid. Reading: this follows from the sample
-    ///   at second t describing t to t + 1, and it means a sample stamped
+    ///   gridInterval). A sample before the start, or at or after the actual
+    ///   end, is left off the grid, including a fractional end. This follows
+    ///   from the sample at second t describing t to t + 1: a sample stamped
     ///   exactly on the end is not on the grid. With the sample fallback the
     ///   last sample is always in that position.
     /// - Several samples in one second are averaged, channel by channel, over
@@ -140,7 +140,7 @@ public enum StreamNormaliser {
         guard elapsed >= 0,
               let count = Int(exactly: (elapsed / StreamRules.gridInterval).rounded(.up))
         else { return nil }
-        let grid = Grid(start: start, count: count)
+        let grid = Grid(start: start, end: end, count: count)
 
         let pauses = pauseData(of: activity, on: grid, elapsed: elapsed)
         let boundaries = PauseBoundaries(pauses, count: count)
@@ -172,6 +172,7 @@ public enum StreamNormaliser {
     /// The 1 Hz grid of one activity.
     private struct Grid {
         var start: Date
+        var end: Date
         var count: Int
 
         /// How many whole grid seconds after the start `date` is. Negative
@@ -182,6 +183,7 @@ public enum StreamNormaliser {
 
         /// The grid second that contains `date`, or nil when it is off the grid.
         func second(of date: Date) -> Int? {
+            guard date >= start, date < end else { return nil }
             let offset = offset(of: date)
             guard offset >= 0, offset < Double(count) else { return nil }
             return Int(offset)

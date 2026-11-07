@@ -45,8 +45,9 @@ public struct RouteMatch: Hashable, Sendable {
 public enum RouteMatcher {
     /// Matches an activity's track against every known route.
     ///
-    /// Detection runs first. A route the track is not shortlisted against is
-    /// left out of the result: alignment is never run on it. Each shortlisted
+    /// Detection runs first, with a neighbouring-cell fallback for GPS noise
+    /// across grid boundaries. Sport, distance and endpoint gates still apply.
+    /// A route outside that shortlist is left out. Each shortlisted
     /// route gets one match, in ascending order of route index, with the
     /// outcome that `RouteAlignment.outcomes` gives across all of them, so an
     /// activity that aligns with two routes is sent to review on both.
@@ -58,11 +59,12 @@ public enum RouteMatcher {
         rules: MatchingRules = .standard
     ) -> [RouteMatch] {
         guard let signature = TrackSignature(track: track, rules: rules) else { return [] }
-        let shortlist = RouteDetection.shortlist(
-            candidate: signature,
-            references: routes.map(\.signature),
-            rules: rules
-        )
+        let shortlist = routes.indices.filter { index in
+            let reference = routes[index].signature
+            let gates = RouteDetection.gates(candidate: signature, reference: reference, rules: rules)
+            return gates.isShortlisted || (gates.isCandidate
+                && RouteDetection.neighbouringCellFraction(candidate: signature, reference: reference) >= rules.minimumSharedCells)
+        }
         let alignments = shortlist.map { RouteAlignment.align(track, to: routes[$0].line, rules: rules) }
         let measures = alignments.map { $0.measures(rules: rules) }
         let outcomes = RouteAlignment.outcomes(for: measures, rules: rules)
