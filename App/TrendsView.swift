@@ -11,6 +11,7 @@ struct TrendsView: View {
     @State private var history: TrendsHistory?
     @State private var error: String?
     @State private var loading = true
+    @State private var hasPresentation = false
     @State private var sport = "Rides"
     @State private var dateWindow = "Last 12 months"
     @State private var setting = "All settings"
@@ -34,8 +35,15 @@ struct TrendsView: View {
                     .compactMap { $0 }.joined(separator: " · "))
                     .font(.subheadline).foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                if loading { ProgressView("Preparing history…").frame(maxWidth: .infinity) }
-                else if let error {
+                if hasPresentation {
+                    if loading { ProgressView("Updating history…").frame(maxWidth: .infinity) }
+                    if let error {
+                        Text(error).font(.footnote).foregroundStyle(.secondary)
+                        Button("Try again") { retry += 1 }
+                    }
+                }
+                if loading && !hasPresentation { ProgressView("Preparing history…").frame(maxWidth: .infinity) }
+                else if let error, !hasPresentation {
                     ContentUnavailableView {
                         Label("History couldn’t load", systemImage: "exclamationmark.triangle")
                     } description: { Text(error) } actions: { Button("Try again") { retry += 1 } }
@@ -103,7 +111,7 @@ struct TrendsView: View {
     }
 
     private func load() async {
-        guard let library = model.library else { loading = false; return }
+        guard let library = model.library else { return }
         loading = true; error = nil
         do {
             let loaded = try await library.trendsHistory()
@@ -124,6 +132,7 @@ struct TrendsView: View {
         guard !Task.isCancelled, requestedConfiguration == configuration,
               requestedRevision == model.trendsRevision else { return }
         presentation = result
+        hasPresentation = true
         let context = "\(requestedRevision)|\(requestedConfiguration)"
         if preparedSelectionContext != context {
             selectedPowerDuration = nil

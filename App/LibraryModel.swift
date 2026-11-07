@@ -34,6 +34,8 @@ final class LibraryModel {
     var recordBadges: [SourceIdentity: [TrendRecord]] = [:]
     var historyRefreshTask: Task<Void, Never>?
     var routeRefreshTask: Task<Void, Never>?
+    private var openingTask: Task<Void, Never>?
+    private var loadedTrendsRevision: UInt64?
     private var activationTask: Task<Void, Never>?
     private var importTask: Task<Void, Never>?
     private let localityResolver = ActivityLocalityResolver()
@@ -54,20 +56,36 @@ final class LibraryModel {
     }
 
     func open() async {
+        if let openingTask { await openingTask.value; return }
         guard library == nil else { return }
+        let task = Task { await openLibrary() }
+        openingTask = task
+        await task.value
+        openingTask = nil
+    }
+
+    private func openLibrary() async {
+        isLoading = true
         do {
             let root = try FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask,
                                                    appropriateFor: nil, create: true)
                 .appendingPathComponent("SweatKit", isDirectory: true)
-            let opened = try ActivityLibrary(root: root)
+            // Construct SwiftData's context away from MainActor so its serial
+            // executor does not bind every database read to the UI queue.
+            let opened = try await Task.detached(priority: .userInitiated) {
+                try ActivityLibrary(root: root)
+            }.value
             library = opened
             garmin = GarminConnection(library: opened, root: root)
             health = HealthConnection(library: opened, root: root)
             cloud = CloudConnection(library: opened, root: root)
             cloud?.didRecover = { [weak self] in await self?.reload(scheduleCloud: false) }
-            await garmin?.recoverDeletionCleanup()
             await reload()
-        } catch { self.error = error.localizedDescription }
+            await garmin?.recoverDeletionCleanup()
+        } catch {
+            isLoading = false
+            self.error = error.localizedDescription
+        }
     }
 
     func reload(scheduleCloud: Bool = true) async {
@@ -75,6 +93,7 @@ final class LibraryModel {
         let request = generation
         guard let library else { return }
         isLoading = true
+        defer { if request == generation { isLoading = false } }
         do {
             // Refresh the entire visible window so background updates and returning
             // from detail do not discard pages beneath the scroll position.
@@ -82,21 +101,32 @@ final class LibraryModel {
             let limit = loadedFilter == requestedFilter ? max(50, activities.count) : 50
             let page = try await library.feed(requestedFilter, limit: limit)
             let profile = try await library.profile()
-            let duplicates = try await library.possibleDuplicates()
-            let sources = try await library.store.sourceRecords()
-            let weeks = try await library.weeklySummaries(filter)
-            let stale = try await library.staleActivities()
-            guard request == generation else { return }
-            trendsRevision += 1
+            guard request == generation, !Task.isCancelled else { return }
+            if loadedFilter != requestedFilter { weekSummaries = [:] }
             loadedFilter = requestedFilter
             activities = page.activities
+            cursor = page.next
+            units = profile.units
+            error = nil
+
+            // The first page is usable without scanning the rest of the library.
+            // Keep enrichment separate from publication of the visible rows.
+            let duplicates = try await library.possibleDuplicates()
+            let sources = try await library.store.sourceRecords()
+            let weeks = try await library.weeklySummaries(requestedFilter)
+            let stale = try await library.staleActivities()
+            let revision = await library.store.trendsRevision
+            guard request == generation, !Task.isCancelled else { return }
+            if loadedTrendsRevision != revision {
+                loadedTrendsRevision = revision
+                trendsRevision += 1
+            }
             staleIDs = Set(stale.map(\.id))
             weekSummaries = Dictionary(uniqueKeysWithValues: weeks.map { ($0.start, $0) })
             units = profile.units
             possibleDuplicateCount = duplicates.count
             revisions = Dictionary(uniqueKeysWithValues: sources.map { ($0.identity, $0.currentRevision) })
             removedSources = Set(sources.filter { $0.state == .removedAtSource }.map(\.identity))
-            cursor = page.next
             error = nil
             resolveLocalities()
             scheduleRouteMatching()
@@ -106,7 +136,6 @@ final class LibraryModel {
             guard request == generation else { return }
             self.error = error.localizedDescription
         }
-        if request == generation { isLoading = false }
     }
 
     func loadMore() async {
