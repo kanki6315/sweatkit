@@ -49,3 +49,26 @@ xcodebuild -project FlyoverSpike.xcodeproj -scheme FlyoverSpike \
 The top line shows drawn vertices, GPS points, records and band runs, then frame rates: now, worst over any quarter second while measuring, the longest single frame, and the count of frames over 25 ms.
 
 It comes from a `CADisplayLink` on the main thread asking for 120 Hz. MapKit renders the map on its own thread, so the readout catches main-thread stalls (overlay redraws, camera and marker updates) but can miss a slow map render. Turn on Settings › Developer › Graphics HUD as well, which shows the frame rate of the Metal layer the map draws into.
+
+## Follow-map render margin
+
+The follow map renders at 1.5 times the viewport's width and height, clipped to
+its center (25% extra on each edge). This gives MapKit surrounding terrain to
+load before it enters view; it is not a guaranteed tile-prefetch API. Camera
+distance scales with the render surface to preserve scale near the marker.
+Overview, including Reduce Motion, uses the normal viewport.
+
+When checking this on a phone, run both 60 s and 15 s sweeps on the ride, with
+satellite imagery and realistic elevation enabled. Compare cold-cache tile
+pop-in, frame times, memory and thermal behavior against the previous build.
+Also check reverse scrubbing, overview/follow transitions, reopening the detail,
+and rotation. The compass and Apple attribution must stay inside the crop.
+The extra render area is bounded at 2.25 times the visible area, but its device
+performance and network benefit still need measurement.
+
+Verification: the iOS simulator harness builds and the 27 host-side flyover
+logic tests pass. On an iPhone 17 Pro simulator (iOS 27.2), follow mode renders
+with the compass and Apple Maps/Legal attribution inside the crop. A 15 s ride
+sweep still showed unloaded terrain and frame hitches; this is not evidence of
+seamless playback or a measured performance improvement. Device A/B validation
+remains open.

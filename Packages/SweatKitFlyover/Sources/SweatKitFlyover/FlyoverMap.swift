@@ -49,8 +49,8 @@ private struct FlyoverMapRepresentable: UIViewRepresentable {
 
     func makeCoordinator() -> FlyoverMapCoordinator { IdleMapCache.shared.take() ?? FlyoverMapCoordinator() }
 
-    func makeUIView(context: Context) -> LayoutReportingMapView {
-        if let mapView = context.coordinator.mapView { return mapView }
+    func makeUIView(context: Context) -> FlyoverMapViewport {
+        if let mapView = context.coordinator.mapView { return FlyoverMapViewport(mapView: mapView) }
         let mapView = LayoutReportingMapView()
         mapView.delegate = context.coordinator
         mapView.showsCompass = true
@@ -59,10 +59,12 @@ private struct FlyoverMapRepresentable: UIViewRepresentable {
         let coordinator = context.coordinator
         mapView.onResize = { [weak coordinator] in coordinator?.mapViewDidResize() }
         coordinator.mapView = mapView
-        return mapView
+        return FlyoverMapViewport(mapView: mapView)
     }
 
-    func updateUIView(_ mapView: LayoutReportingMapView, context: Context) {
+    func updateUIView(_ viewport: FlyoverMapViewport, context: Context) {
+        viewport.followsRoute = cameraMode == .follow
+        viewport.layoutIfNeeded()
         context.coordinator.update(
             route: route,
             bandColors: bandColors,
@@ -72,7 +74,7 @@ private struct FlyoverMapRepresentable: UIViewRepresentable {
         )
     }
 
-    static func dismantleUIView(_ mapView: LayoutReportingMapView, coordinator: FlyoverMapCoordinator) {
+    static func dismantleUIView(_ viewport: FlyoverMapViewport, coordinator: FlyoverMapCoordinator) {
         coordinator.stop()
         IdleMapCache.shared.put(coordinator)
     }
@@ -105,9 +107,46 @@ private final class IdleMapCache {
     }
 }
 
+/// MapKit has no public base-map prefetch API. Give the renderer a bounded
+/// apron outside the visible follow viewport so approaching tiles can load
+/// before they enter the crop. Overview keeps its normal fitting/gesture area.
+final class FlyoverMapViewport: UIView {
+    let mapView: LayoutReportingMapView
+    var followsRoute = false {
+        didSet {
+            if followsRoute != oldValue { setNeedsLayout() }
+        }
+    }
+
+    init(mapView: LayoutReportingMapView) {
+        self.mapView = mapView
+        super.init(frame: .zero)
+        clipsToBounds = true
+        addSubview(mapView)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { nil }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        guard !bounds.isEmpty else { return }
+        // 25% on each edge: 2.25x the visible area, independent of playback
+        // speed. Avoid resizing the renderer on every scrub/playback tick.
+        let scale: CGFloat = followsRoute ? 1.5 : 1
+        let dx = bounds.width * (scale - 1) / 2
+        let dy = bounds.height * (scale - 1) / 2
+        mapView.renderScale = Double(scale)
+        // Keep MapKit's compass and attribution inside the visible crop.
+        mapView.layoutMargins = UIEdgeInsets(top: dy + 8, left: dx + 8, bottom: dy + 8, right: dx + 8)
+        mapView.frame = bounds.insetBy(dx: -dx, dy: -dy)
+    }
+}
+
 /// An `MKMapView` that says when its size changes, so the overview camera can
 /// fit the route once there is something to fit it into.
 final class LayoutReportingMapView: MKMapView {
+    var renderScale = 1.0
     var onResize: (() -> Void)?
     private var lastSize: CGSize = .zero
 
@@ -282,6 +321,9 @@ final class FlyoverMapCoordinator: NSObject, MKMapViewDelegate {
     func mapViewDidResize() {
         if needsOverviewFit || cameraMode == .overview {
             fitOverview()
+        } else if cameraMode == .follow {
+            cameraNeedsUpdate = true
+            startDisplayLink()
         }
     }
 
@@ -455,7 +497,9 @@ final class FlyoverMapCoordinator: NSObject, MKMapViewDelegate {
         mapView.setCamera(
             MKMapCamera(
                 lookingAtCenter: CLLocationCoordinate2D(geometry.coordinate(at: cameraPosition)),
-                fromDistance: options.followDistance,
+                // Compensate for the larger render surface so the cropped
+                // map retains the follow camera's scale at the marker.
+                fromDistance: options.followDistance * mapView.renderScale,
                 pitch: CGFloat(options.followPitch),
                 heading: heading
             ),
