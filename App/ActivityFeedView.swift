@@ -39,6 +39,13 @@ struct ActivityFeedView: View {
                     }
                 }
             }
+            if model.activities.contains(where: { !$0.isIndoor && !$0.isVirtual && $0.sport.hasFullSupport }) {
+                Section {
+                    Text("Maps: [© OpenMapTiles](https://openmaptiles.org/) · [© OpenStreetMap contributors](https://www.openstreetmap.org/copyright)")
+                        .font(.caption2).foregroundStyle(.secondary)
+                        .listRowSeparator(.hidden)
+                }
+            }
             libraryStatus
             if model.isImporting {
                 Section {

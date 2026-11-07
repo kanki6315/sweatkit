@@ -1,5 +1,6 @@
 import SwiftUI
 import MapKit
+@preconcurrency import MapLibre
 import SweatKitDetail
 import SweatKitLibrary
 import SweatKitModel
@@ -75,7 +76,7 @@ struct ActivityThumbnail: View {
             self.sampleCount = sampleCount
         }
     }
-    // Cache only activity-derived geometry, never Apple map imagery. Revisiting
+    // Cache activity-derived geometry separately from rendered previews. Revisiting
     // rows should not decode and analyse hours of samples again.
     private let drawings: NSCache<NSString, PreparedDrawing> = {
         let cache = NSCache<NSString, PreparedDrawing>()
@@ -92,7 +93,12 @@ struct ActivityThumbnail: View {
         let encoder = JSONEncoder()
         encoder.outputFormatting = .sortedKeys
         let profileHash = ContentHash(of: try encoder.encode(profile))
-        let key = ContentHash(of: Data("route-thumbnail-v4|\(profileHash.hex)|\(source.currentRevision.hex)|\(activity.sport.rawValue)|\(activity.isIndoor)|\(activity.isVirtual)|\(dark)|\(compact)".utf8))
+        let key = ContentHash(of: Data("route-thumbnail-v5|\(profileHash.hex)|\(source.currentRevision.hex)|\(activity.sport.rawValue)|\(activity.isIndoor)|\(activity.isVirtual)|\(dark)|\(compact)".utf8))
+        let completedKey = ContentHash(of: Data("\(ThumbnailMapCache.styleVersion)|\(key.hex)".utf8))
+        let completedURL = library.store.thumbnailURL(for: source.currentRevision, variant: completedKey)
+        if let data = await ThumbnailImageCache.shared.read(completedURL), let image = UIImage(data: data) {
+            return image
+        }
         let destination = library.store.thumbnailURL(for: source.currentRevision, variant: key)
         let cachedData = await Task.detached(priority: .utility) {
             try? Data(contentsOf: destination)
@@ -159,7 +165,7 @@ struct ActivityThumbnail: View {
             let width = max(padded.width, padded.height * size.width / size.height)
             let height = width * size.height / size.width
             let rect = MKMapRect(x: padded.midX - width / 2, y: padded.midY - height / 2, width: width, height: height)
-            func render(snapshot: MKMapSnapshotter.Snapshot?) -> UIImage {
+            func render(snapshot: MLNMapSnapshot?) -> UIImage {
                 func point(for coordinate: Coordinate) -> CGPoint {
                     let location = CLLocationCoordinate2D(latitude: coordinate.latitude, longitude: coordinate.longitude)
                     if let snapshot { return snapshot.point(for: location) }
@@ -209,7 +215,12 @@ struct ActivityThumbnail: View {
                 return local
             }
             try Task.checkCancellation()
-            return render(snapshot: snapshot)
+            let complete = render(snapshot: snapshot)
+            if let png = complete.pngData() {
+                try? await library.store.saveThumbnail(png, for: source.currentRevision, variant: completedKey)
+                try? await ThumbnailImageCache.shared.trim(directory: completedURL.deletingLastPathComponent())
+            }
+            return complete
         } else {
             if let cached { return cached }
             guard !drawing.sparkline.isEmpty else { return nil }

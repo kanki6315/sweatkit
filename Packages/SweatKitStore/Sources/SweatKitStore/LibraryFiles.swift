@@ -62,7 +62,8 @@ struct LibraryFiles: Sendable {
         try manager.createDirectory(at: streamsDirectory, withIntermediateDirectories: true)
         try manager.createDirectory(at: thumbnailsDirectory, withIntermediateDirectories: true)
         // Earlier thumbnails embedded Apple imagery without an expiry. Discard
-        // those derived files once; new thumbnails contain only local activity data.
+        // those derived files once. Current previews use activity data and
+        // offline-permitted OpenFreeMap imagery; never persist Apple imagery.
         let routeOnlyMarker = thumbnailsDirectory.appendingPathComponent(".route-only-v4")
         if !manager.fileExists(atPath: routeOnlyMarker.path) {
             for file in try manager.contentsOfDirectory(at: thumbnailsDirectory, includingPropertiesForKeys: nil)
